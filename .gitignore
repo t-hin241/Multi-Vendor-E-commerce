@@ -1,0 +1,28 @@
+# Environment
+.env
+.env.*.local
+!.env.example
+
+# Go
+backend/**/bin/
+*.exe
+*.test
+
+# Node / Next.js
+node_modules/
+.next/
+out/
+frontend/next-env.d.ts
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+
+# Docker
+docker-compose.override.yml

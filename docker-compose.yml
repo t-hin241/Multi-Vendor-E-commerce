@@ -1,0 +1,381 @@
+name: shopee
+
+x-service-defaults: &service-defaults
+  restart: unless-stopped
+  networks:
+    - shopee
+  depends_on:
+    postgres:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+    nats:
+      condition: service_healthy
+
+x-service-env-defaults: &service-env-defaults
+  ENV: development
+  LOG_LEVEL: info
+  REDIS_URL: redis://redis:6379/0
+  NATS_URL: nats://nats:4222
+  SHUTDOWN_TIMEOUT: "10"
+  HTTP_READ_TIMEOUT: "5"
+  HTTP_IDLE_TIMEOUT: "60"
+  JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env}
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    networks: [shopee]
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-shopee}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./deploy/postgres-init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-shopee}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    networks: [shopee]
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  nats:
+    image: nats:2-alpine
+    restart: unless-stopped
+    networks: [shopee]
+    command: ["-js", "-m", "8222"]
+    ports:
+      - "${NATS_CLIENT_PORT:-4222}:4222"
+      - "${NATS_MONITOR_PORT:-8222}:8222"
+    volumes:
+      - nats-data:/data
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8222/healthz"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  minio:
+    image: minio/minio:latest
+    restart: unless-stopped
+    networks: [shopee]
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?set MINIO_ROOT_USER in .env}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD in .env}
+    ports:
+      - "${MINIO_API_PORT:-9000}:9000"
+      - "${MINIO_CONSOLE_PORT:-9001}:9001"
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  identity:
+    <<: *service-defaults
+    build:
+      context: ./backend
+      dockerfile: services/identity/Dockerfile
+    environment:
+      <<: *service-env-defaults
+      PORT: "8081"
+      DATABASE_URL: postgres://${POSTGRES_USER:-shopee}:${POSTGRES_PASSWORD}@postgres:5432/identity_db?sslmode=disable
+    ports:
+      - "8081:8081"
+
+  vendor:
+    <<: *service-defaults
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      nats:
+        condition: service_healthy
+      notification:
+        condition: service_started
+    build:
+      context: ./backend
+      dockerfile: services/vendor/Dockerfile
+    environment:
+      <<: *service-env-defaults
+      PORT: "8082"
+      DATABASE_URL: postgres://${POSTGRES_USER:-shopee}:${POSTGRES_PASSWORD}@postgres:5432/vendor_db?sslmode=disable
+      NOTIFICATION_SERVICE_URL: http://notification:8090
+    ports:
+      - "8082:8082"
+
+  catalog:
+    <<: *service-defaults
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      nats:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      vendor:
+        condition: service_started
+    build:
+      context: ./backend
+      dockerfile: services/catalog/Dockerfile
+    environment:
+      <<: *service-env-defaults
+      PORT: "8083"
+      DATABASE_URL: postgres://${POSTGRES_USER:-shopee}:${POSTGRES_PASSWORD}@postgres:5432/catalog_db?sslmode=disable
+      VENDOR_SERVICE_URL: http://vendor:8082
+      ORDER_SERVICE_URL: http://order:8086
+      INVENTORY_SERVICE_URL: http://inventory:8084
+      OBJECT_STORAGE_ENDPOINT: minio:9000
+      OBJECT_STORAGE_ACCESS_KEY: ${MINIO_ROOT_USER:?set MINIO_ROOT_USER in .env}
+      OBJECT_STORAGE_SECRET_KEY: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD in .env}
+      OBJECT_STORAGE_USE_SSL: "false"
+      OBJECT_STORAGE_BUCKET: product-images
+      OBJECT_STORAGE_PUBLIC_BASE_URL: ${OBJECT_STORAGE_PUBLIC_BASE_URL:-http://localhost:9000}
+    ports:
+      - "8083:8083"
+
+  inventory:
+    <<: *service-defaults
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      nats:
+        condition: service_healthy
+      vendor:
+        condition: service_started
+      catalog:
+        condition: service_started
+    build:
+      context: ./backend
+      dockerfile: services/inventory/Dockerfile
+    environment:
+      <<: *service-env-defaults
+      PORT: "8084"
+      DATABASE_URL: postgres://${POSTGRES_USER:-shopee}:${POSTGRES_PASSWORD}@postgres:5432/inventory_db?sslmode=disable
+      VENDOR_SERVICE_URL: http://vendor:8082
+      CATALOG_SERVICE_URL: http://catalog:8083
+    ports:
+      - "8084:8084"
+
+  cart:
+    <<: *service-defaults
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      nats:
+        condition: service_healthy
+      catalog:
+        condition: service_started
+    build:
+      context: ./backend
+      dockerfile: services/cart/Dockerfile
+    environment:
+      <<: *service-env-defaults
+      PORT: "8085"
+      DATABASE_URL: postgres://${POSTGRES_USER:-shopee}:${POSTGRES_PASSWORD}@postgres:5432/cart_db?sslmode=disable
+      CATALOG_SERVICE_URL: http://catalog:8083
+    ports:
+      - "8085:8085"
+
+  order:
+    <<: *service-defaults
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      nats:
+        condition: service_healthy
+      cart:
+        condition: service_started
+      catalog:
+        condition: service_started
+      vendor:
+        condition: service_started
+      inventory:
+        condition: service_started
+      notification:
+        condition: service_started
+    build:
+      context: ./backend
+      dockerfile: services/order/Dockerfile
+    environment:
+      <<: *service-env-defaults
+      PORT: "8086"
+      DATABASE_URL: postgres://${POSTGRES_USER:-shopee}:${POSTGRES_PASSWORD}@postgres:5432/order_db?sslmode=disable
+      CART_SERVICE_URL: http://cart:8085
+      CATALOG_SERVICE_URL: http://catalog:8083
+      VENDOR_SERVICE_URL: http://vendor:8082
+      INVENTORY_SERVICE_URL: http://inventory:8084
+      SHIPMENT_SERVICE_URL: http://shipment:8088
+      NOTIFICATION_SERVICE_URL: http://notification:8090
+    ports:
+      - "8086:8086"
+
+  payment:
+    <<: *service-defaults
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      nats:
+        condition: service_healthy
+      order:
+        condition: service_started
+    build:
+      context: ./backend
+      dockerfile: services/payment/Dockerfile
+    environment:
+      <<: *service-env-defaults
+      PORT: "8087"
+      DATABASE_URL: postgres://${POSTGRES_USER:-shopee}:${POSTGRES_PASSWORD}@postgres:5432/payment_db?sslmode=disable
+      ORDER_SERVICE_URL: http://order:8086
+      PAYMENT_PROVIDER: ${PAYMENT_PROVIDER:-mock}
+      PAYMENT_MOCK_WEBHOOK_SECRET: ${PAYMENT_MOCK_WEBHOOK_SECRET:?set PAYMENT_MOCK_WEBHOOK_SECRET in .env}
+    ports:
+      - "8087:8087"
+
+  shipment:
+    <<: *service-defaults
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      nats:
+        condition: service_healthy
+      vendor:
+        condition: service_started
+      order:
+        condition: service_started
+    build:
+      context: ./backend
+      dockerfile: services/shipment/Dockerfile
+    environment:
+      <<: *service-env-defaults
+      PORT: "8088"
+      DATABASE_URL: postgres://${POSTGRES_USER:-shopee}:${POSTGRES_PASSWORD}@postgres:5432/shipment_db?sslmode=disable
+      VENDOR_SERVICE_URL: http://vendor:8082
+      ORDER_SERVICE_URL: http://order:8086
+      SHIPMENT_CARRIER_PROVIDER: ${SHIPMENT_CARRIER_PROVIDER:-mock}
+      SHIPMENT_CARRIER_MOCK_WEBHOOK_SECRET: ${SHIPMENT_CARRIER_MOCK_WEBHOOK_SECRET:?set SHIPMENT_CARRIER_MOCK_WEBHOOK_SECRET in .env}
+    ports:
+      - "8088:8088"
+
+  admin:
+    <<: *service-defaults
+    build:
+      context: ./backend
+      dockerfile: services/admin/Dockerfile
+    environment:
+      <<: *service-env-defaults
+      PORT: "8089"
+      DATABASE_URL: postgres://${POSTGRES_USER:-shopee}:${POSTGRES_PASSWORD}@postgres:5432/admin_db?sslmode=disable
+    ports:
+      - "8089:8089"
+
+  notification:
+    <<: *service-defaults
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      nats:
+        condition: service_healthy
+      identity:
+        condition: service_started
+    build:
+      context: ./backend
+      dockerfile: services/notification/Dockerfile
+    environment:
+      <<: *service-env-defaults
+      PORT: "8090"
+      DATABASE_URL: postgres://${POSTGRES_USER:-shopee}:${POSTGRES_PASSWORD}@postgres:5432/notification_db?sslmode=disable
+      IDENTITY_SERVICE_URL: http://identity:8081
+    ports:
+      - "8090:8090"
+
+  gateway:
+    restart: unless-stopped
+    networks: [shopee]
+    build:
+      context: ./backend
+      dockerfile: gateway/Dockerfile
+    environment:
+      ENV: development
+      LOG_LEVEL: info
+      PORT: "8080"
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:3000}
+      IDENTITY_SERVICE_URL: http://identity:8081
+      VENDOR_SERVICE_URL: http://vendor:8082
+      CATALOG_SERVICE_URL: http://catalog:8083
+      INVENTORY_SERVICE_URL: http://inventory:8084
+      CART_SERVICE_URL: http://cart:8085
+      ORDER_SERVICE_URL: http://order:8086
+      PAYMENT_SERVICE_URL: http://payment:8087
+      SHIPMENT_SERVICE_URL: http://shipment:8088
+      ADMIN_SERVICE_URL: http://admin:8089
+      NOTIFICATION_SERVICE_URL: http://notification:8090
+    depends_on:
+      - identity
+      - vendor
+      - catalog
+      - inventory
+      - cart
+      - order
+      - payment
+      - shipment
+      - admin
+      - notification
+    ports:
+      - "${GATEWAY_PORT:-8080}:8080"
+
+  frontend:
+    restart: unless-stopped
+    networks: [shopee]
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    environment:
+      NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-http://localhost:8080}
+    depends_on:
+      - gateway
+    ports:
+      - "${FRONTEND_PORT:-3000}:3000"
+
+networks:
+  shopee:
+
+volumes:
+  postgres-data:
+  redis-data:
+  nats-data:
+  minio-data:
