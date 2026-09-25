@@ -58,13 +58,15 @@ func main() {
 
 	itemRepo := repository.NewInventoryItemRepository(dbPool)
 	reservationRepo := repository.NewReservationRepository(dbPool)
+	restockRequestRepo := repository.NewRestockRequestRepository(dbPool)
 
-	inventoryUseCase := usecase.NewInventoryUseCase(itemRepo, reservationRepo, vendorClient, catalogClient)
+	inventoryUseCase := usecase.NewInventoryUseCase(itemRepo, reservationRepo, restockRequestRepo, vendorClient, catalogClient)
 
 	itemHandler := transport.NewItemHandler(inventoryUseCase, log)
 	internalHandler := transport.NewInternalHandler(inventoryUseCase, log)
+	adminHandler := transport.NewAdminHandler(inventoryUseCase, log)
 
-	router := transport.NewRouter(cfg.Base.Env, log, jwtManager, itemHandler, internalHandler,
+	router := transport.NewRouter(cfg.Base.Env, log, jwtManager, itemHandler, internalHandler, adminHandler,
 		health.Checker{Name: "postgres", Ping: func(ctx context.Context) error { return dbPool.Ping(ctx) }},
 		health.Checker{Name: "redis", Ping: func(ctx context.Context) error { return redisClient.Ping(ctx).Err() }},
 		health.Checker{Name: "nats", Ping: func(ctx context.Context) error {

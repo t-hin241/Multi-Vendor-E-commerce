@@ -15,6 +15,8 @@ import (
 // data itself.
 type InventoryGateway interface {
 	GetVariantStock(ctx context.Context, variantIDs []string) (map[string]int64, error)
+	CheckStockReadiness(ctx context.Context, productID string, variantIDs []string) (bool, error)
+	GetProductStock(ctx context.Context, productID string) (quantity int64, ok bool, err error)
 }
 
 type HTTPInventoryClient struct {
@@ -71,4 +73,74 @@ func (c *HTTPInventoryClient) GetVariantStock(ctx context.Context, variantIDs []
 		out[item.VariantID] = item.AvailableQuantity
 	}
 	return out, nil
+}
+
+type stockReadinessResponse struct {
+	Data struct {
+		Ready bool `json:"ready"`
+	} `json:"data"`
+}
+
+// CheckStockReadiness backs SubmitForReview's completeness gate: a draft
+// product can't move to pending_review until its initial stock is set up.
+func (c *HTTPInventoryClient) CheckStockReadiness(ctx context.Context, productID string, variantIDs []string) (bool, error) {
+	endpoint := fmt.Sprintf("%s/internal/inventory/products/%s/readiness", c.baseURL, url.PathEscape(productID))
+	if len(variantIDs) > 0 {
+		endpoint += "?variant_ids=" + url.QueryEscape(strings.Join(variantIDs, ","))
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return false, err
+	}
+
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return false, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return false, fmt.Errorf("inventory service returned status %d", resp.StatusCode)
+	}
+
+	var body stockReadinessResponse
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		return false, err
+	}
+	return body.Data.Ready, nil
+}
+
+type productStockResponse struct {
+	Data struct {
+		AvailableQuantity int64 `json:"available_quantity"`
+		Exists            bool  `json:"exists"`
+	} `json:"data"`
+}
+
+// GetProductStock resolves current stock for a non-variant product, for the
+// admin moderation detail view.
+func (c *HTTPInventoryClient) GetProductStock(ctx context.Context, productID string) (int64, bool, error) {
+	endpoint := fmt.Sprintf("%s/internal/inventory/products/%s/stock", c.baseURL, url.PathEscape(productID))
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return 0, false, err
+	}
+
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return 0, false, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return 0, false, fmt.Errorf("inventory service returned status %d", resp.StatusCode)
+	}
+
+	var body productStockResponse
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		return 0, false, err
+	}
+	return body.Data.AvailableQuantity, body.Data.Exists, nil
 }

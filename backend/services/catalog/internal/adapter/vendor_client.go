@@ -15,10 +15,12 @@ import (
 	"shopee/backend/pkg/apperror"
 )
 
-// VendorGateway lets the use case check whether a user is an approved
-// vendor without Catalog owning any vendor data itself.
+// VendorGateway lets the use case check whether a user owns a specific,
+// approved vendor (shop) without Catalog owning any vendor data itself. A
+// user may own several shops (1:N), so the caller always names which one
+// it's acting as; this only confirms that name is legitimate.
 type VendorGateway interface {
-	GetApprovedVendorID(ctx context.Context, userID string) (vendorID string, err error)
+	GetApprovedVendorID(ctx context.Context, userID, vendorID string) (string, error)
 }
 
 // VendorNameGateway lets the storefront listing resolve shop names for a
@@ -44,13 +46,12 @@ type vendorStatusResponse struct {
 	} `json:"data"`
 }
 
-// GetApprovedVendorID returns the vendor id for userID if, and only if,
-// that vendor's application has been approved. It returns a Forbidden
-// apperror for a pending/rejected vendor and NotFound if no application
-// exists at all, so callers can surface a clear message without knowing
-// about Vendor's internal status model.
-func (c *HTTPVendorClient) GetApprovedVendorID(ctx context.Context, userID string) (string, error) {
-	endpoint := fmt.Sprintf("%s/internal/vendors/by-user/%s", c.baseURL, url.PathEscape(userID))
+// GetApprovedVendorID confirms vendorID both belongs to userID and is
+// approved, echoing it back on success. It returns Forbidden if the shop
+// isn't userID's or isn't approved yet, so callers can surface a clear
+// message without knowing about Vendor's internal status model.
+func (c *HTTPVendorClient) GetApprovedVendorID(ctx context.Context, userID, vendorID string) (string, error) {
+	endpoint := fmt.Sprintf("%s/internal/vendors/%s/owned-by/%s", c.baseURL, url.PathEscape(vendorID), url.PathEscape(userID))
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {

@@ -181,7 +181,7 @@ func TestListVendorMine_IncludesItems(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	vendorOrders, items, err := f.uc.ListVendorMine(t.Context(), "user-a", 20, 0)
+	vendorOrders, items, err := f.uc.ListVendorMine(t.Context(), "user-a", "vendor-a", 20, 0)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -191,6 +191,21 @@ func TestListVendorMine_IncludesItems(t *testing.T) {
 	voItems := items[vendorOrders[0].ID]
 	if len(voItems) != 1 || voItems[0].ProductName != "Shoe" {
 		t.Fatalf("expected the vendor order's own item to be included, got %+v", voItems)
+	}
+}
+
+// TestListVendorMine_RejectsAVendorIDTheCallerDoesNotOwn guards the 1:N
+// vendor<->user relationship: an approved vendor user still can't list
+// another shop's orders just by naming that shop's vendor id.
+func TestListVendorMine_RejectsAVendorIDTheCallerDoesNotOwn(t *testing.T) {
+	f := newCheckoutFixture()
+	f.vendors.approvedVendors["user-a"] = "vendor-a"
+	f.vendors.approvedVendors["user-b"] = "vendor-b"
+
+	_, _, err := f.uc.ListVendorMine(t.Context(), "user-a", "vendor-b", 20, 0)
+	appErr := mustAppError(t, err)
+	if appErr.Code != apperror.CodeForbidden {
+		t.Errorf("expected forbidden when naming a vendor id the caller does not own, got %v", appErr.Code)
 	}
 }
 

@@ -11,7 +11,7 @@ import (
 	"shopee/backend/pkg/middleware"
 )
 
-func NewRouter(env string, log zerolog.Logger, jwtManager *authjwt.Manager, authHandler *AuthHandler, internalHandler *InternalHandler, checkers ...health.Checker) *gin.Engine {
+func NewRouter(env string, log zerolog.Logger, jwtManager *authjwt.Manager, authHandler *AuthHandler, adminHandler *AdminHandler, internalHandler *InternalHandler, checkers ...health.Checker) *gin.Engine {
 	if env == "production" {
 		gin.SetMode(gin.ReleaseMode)
 	}
@@ -23,6 +23,8 @@ func NewRouter(env string, log zerolog.Logger, jwtManager *authjwt.Manager, auth
 
 	health.RegisterRoutes(r, checkers...)
 
+	requireAuth := middleware.RequireAuth(jwtManager)
+
 	auth := r.Group("/api/auth")
 	{
 		auth.POST("/register", authHandler.Register)
@@ -31,7 +33,13 @@ func NewRouter(env string, log zerolog.Logger, jwtManager *authjwt.Manager, auth
 		auth.POST("/logout", authHandler.Logout)
 		auth.POST("/password-reset/request", authHandler.RequestPasswordReset)
 		auth.POST("/password-reset/confirm", authHandler.ConfirmPasswordReset)
-		auth.GET("/me", middleware.RequireAuth(jwtManager), authHandler.Me)
+		auth.GET("/me", requireAuth, authHandler.Me)
+	}
+
+	adminGroup := r.Group("/api/auth/admin", requireAuth, middleware.RequireRole("admin"))
+	{
+		adminGroup.GET("/users", adminHandler.ListUsers)
+		adminGroup.PATCH("/users/:id/active", adminHandler.SetActive)
 	}
 
 	internalGroup := r.Group("/internal/users")

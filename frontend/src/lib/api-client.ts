@@ -122,13 +122,45 @@ export function logout(refreshToken: string): Promise<{ logged_out: boolean }> {
   return request("/api/auth/logout", { method: "POST", json: { refresh_token: refreshToken } });
 }
 
+// ---------- Admin: users ----------
+
+export type AdminUser = {
+  id: string;
+  email: string;
+  full_name: string;
+  role: Role;
+  is_active: boolean;
+  created_at: string;
+};
+
+export function listUsers(
+  token: string,
+  params: { role?: string; q?: string; limit?: number; offset?: number } = {},
+): Promise<AdminUser[]> {
+  return request<AdminUser[]>("/api/auth/admin/users", { token, query: params });
+}
+
+export function setUserActive(
+  token: string,
+  userId: string,
+  isActive: boolean,
+): Promise<AdminUser> {
+  return request<AdminUser>(`/api/auth/admin/users/${userId}/active`, {
+    method: "PATCH",
+    token,
+    json: { is_active: isActive },
+  });
+}
+
 // ---------- Catalog ----------
 
 export type Category = {
   id: string;
   name: string;
   slug: string;
-  parent_id: string | null;
+  // Root categories omit this field entirely (Go's `omitempty` on a nil
+  // pointer), rather than sending `parent_id: null` — check with `== null`.
+  parent_id?: string | null;
   level: number;
   created_at: string;
 };
@@ -145,7 +177,7 @@ export type ProductMediaItem = {
   position: number;
 };
 
-export type ProductStatus = "pending_review" | "approved" | "rejected";
+export type ProductStatus = "draft" | "pending_review" | "approved" | "rejected";
 
 // AttributeValue is one captured attribute value on a product, as raw
 // ids/values — cross-referenced against an AttributeTemplate (fetched by
@@ -174,6 +206,12 @@ export type Product = {
   media?: ProductMediaItem[];
   attributes?: AttributeValue[];
   variants?: ProductVariant[];
+  // Populated by getProductForModeration, and by getProductBySlug when the
+  // caller is recognized as an admin or the product's own vendor — never
+  // for an anonymous buyer or an unrelated vendor. Only meaningful for a
+  // non-variant product (a variant product's stock is on each of
+  // `variants` instead).
+  stock_quantity?: number;
   stock_info_degraded?: boolean;
   vendor_name?: string;
   quantity_sold?: number;
@@ -246,7 +284,13 @@ export function createAttribute(
   return request<Attribute>("/api/catalog/attributes", {
     method: "POST",
     token,
-    json: { code, name, data_type: dataType, unit: unit ?? null, is_variant_defining: isVariantDefining ?? false },
+    json: {
+      code,
+      name,
+      data_type: dataType,
+      unit: unit ?? null,
+      is_variant_defining: isVariantDefining ?? false,
+    },
   });
 }
 
@@ -303,9 +347,13 @@ export type InventoryItem = {
 
 export function listMyInventory(
   token: string,
+  vendorId: string,
   params: { limit?: number; offset?: number } = {},
 ): Promise<InventoryItem[]> {
-  return request<InventoryItem[]>("/api/inventory/items/mine", { token, query: params });
+  return request<InventoryItem[]>("/api/inventory/items/mine", {
+    token,
+    query: { vendor_id: vendorId, ...params },
+  });
 }
 
 export function createInventoryItemForProduct(
@@ -332,19 +380,87 @@ export function createInventoryItemForVariant(
   });
 }
 
-export function restockProduct(token: string, productId: string, quantity: number): Promise<InventoryItem> {
-  return request<InventoryItem>(`/api/inventory/items/${productId}/restock`, {
+// RestockRequest is a vendor's ask to add more stock to a product that's
+// already approved and live — it never changes available_quantity by
+// itself; an admin must approve it first (see approveRestockRequest).
+export type RestockStatus = "pending" | "approved" | "rejected";
+
+export type RestockRequest = {
+  id: string;
+  product_id: string;
+  variant_id?: string;
+  vendor_id: string;
+  requested_quantity: number;
+  status: RestockStatus;
+  rejection_reason?: string;
+  created_at: string;
+  decided_at?: string;
+};
+
+export function requestRestock(
+  token: string,
+  productId: string,
+  quantity: number,
+): Promise<RestockRequest> {
+  return request<RestockRequest>(`/api/inventory/items/${productId}/restock`, {
     method: "PATCH",
     token,
     json: { quantity },
   });
 }
 
-export function restockVariant(token: string, variantId: string, quantity: number): Promise<InventoryItem> {
-  return request<InventoryItem>(`/api/inventory/items/variant/${variantId}/restock`, {
+export function requestRestockVariant(
+  token: string,
+  variantId: string,
+  quantity: number,
+): Promise<RestockRequest> {
+  return request<RestockRequest>(`/api/inventory/items/variant/${variantId}/restock`, {
     method: "PATCH",
     token,
     json: { quantity },
+  });
+}
+
+// listMyRestockRequests lets a vendor see the status of their own
+// stock-increase requests — requesting one no longer has any other visible
+// effect until an admin decides it.
+export function listMyRestockRequests(
+  token: string,
+  vendorId: string,
+  params: { limit?: number; offset?: number } = {},
+): Promise<RestockRequest[]> {
+  return request<RestockRequest[]>("/api/inventory/restock-requests/mine", {
+    token,
+    query: { vendor_id: vendorId, ...params },
+  });
+}
+
+export function listRestockRequestsForAdmin(
+  token: string,
+  params: { status?: string; limit?: number; offset?: number } = {},
+): Promise<RestockRequest[]> {
+  return request<RestockRequest[]>("/api/inventory/admin/restock-requests", {
+    token,
+    query: params,
+  });
+}
+
+export function approveRestockRequest(token: string, requestId: string): Promise<RestockRequest> {
+  return request<RestockRequest>(`/api/inventory/admin/restock-requests/${requestId}/approve`, {
+    method: "PATCH",
+    token,
+  });
+}
+
+export function rejectRestockRequest(
+  token: string,
+  requestId: string,
+  reason: string,
+): Promise<RestockRequest> {
+  return request<RestockRequest>(`/api/inventory/admin/restock-requests/${requestId}/reject`, {
+    method: "PATCH",
+    token,
+    json: { reason },
   });
 }
 
@@ -381,6 +497,7 @@ export function setCategoryAttributeRule(
 // or Order was briefly unreachable server-side.
 export type StorefrontListing = {
   products: Product[];
+  total: number;
   vendor_info_degraded: boolean;
   sales_info_degraded: boolean;
 };
@@ -398,11 +515,12 @@ export function createCategory(token: string, name: string, parentId?: string): 
 }
 
 export function listStorefrontProducts(
-  params: { categoryId?: string; q?: string; limit?: number; offset?: number } = {},
+  params: { categoryId?: string; vendorId?: string; q?: string; limit?: number; offset?: number } = {},
 ): Promise<StorefrontListing> {
   return request<StorefrontListing>("/api/catalog/products", {
     query: {
       category_id: params.categoryId,
+      vendor_id: params.vendorId,
       q: params.q,
       limit: params.limit,
       offset: params.offset,
@@ -410,13 +528,18 @@ export function listStorefrontProducts(
   });
 }
 
-export function getProductBySlug(slug: string): Promise<Product> {
-  return request<Product>(`/api/catalog/products/${encodeURIComponent(slug)}`);
+// token is optional: passing the current viewer's access token (when
+// logged in) lets the backend recognize an admin or the product's own
+// vendor and include exact stock_quantity in the response — omitted it
+// stays the same fully anonymous call as before.
+export function getProductBySlug(slug: string, token?: string): Promise<Product> {
+  return request<Product>(`/api/catalog/products/${encodeURIComponent(slug)}`, { token });
 }
 
 export function createProduct(
   token: string,
   input: {
+    vendorId: string;
     categoryId: string;
     name: string;
     description: string;
@@ -428,6 +551,7 @@ export function createProduct(
     method: "POST",
     token,
     json: {
+      vendor_id: input.vendorId,
       category_id: input.categoryId,
       name: input.name,
       description: input.description,
@@ -443,9 +567,23 @@ export function createProduct(
 
 export function listMyProducts(
   token: string,
+  vendorId: string,
   params: { limit?: number; offset?: number } = {},
 ): Promise<Product[]> {
-  return request<Product[]>("/api/catalog/products/mine", { token, query: params });
+  return request<Product[]>("/api/catalog/products/mine", {
+    token,
+    query: { vendor_id: vendorId, ...params },
+  });
+}
+
+// submitProductForReview moves a draft product to pending_review — the
+// backend rejects this until the product has at least one image and its
+// initial stock has been set up (every variant, if it has any).
+export function submitProductForReview(token: string, productId: string): Promise<Product> {
+  return request<Product>(`/api/catalog/products/${productId}/submit`, {
+    method: "PATCH",
+    token,
+  });
 }
 
 export function setProductActive(
@@ -480,6 +618,15 @@ export function listProductImages(token: string, productId: string): Promise<Pro
   return request<ProductImage[]>(`/api/catalog/products/${productId}/images`, { token });
 }
 
+// deleteProductImage removes a product's main image entirely (no
+// replacement) — the corner "×" control on an already-uploaded image.
+export function deleteProductImage(
+  token: string,
+  productId: string,
+): Promise<{ deleted: boolean }> {
+  return request(`/api/catalog/products/${productId}/images`, { method: "DELETE", token });
+}
+
 // listProductMedia/uploadProductMedia manage a product's extended-
 // description media gallery (images or short videos) — a separate feature
 // from the plain photo gallery above.
@@ -508,6 +655,13 @@ export function listProductsForModeration(
   return request<Product[]>("/api/catalog/products/admin", { token, query: params });
 }
 
+// getProductForModeration returns the full submission behind a product row
+// — images, media, variants and stock — so admin's approve/reject decision
+// is informed by what the vendor was actually required to supply.
+export function getProductForModeration(token: string, productId: string): Promise<Product> {
+  return request<Product>(`/api/catalog/products/admin/${productId}`, { token });
+}
+
 export function approveProduct(token: string, productId: string): Promise<Product> {
   return request<Product>(`/api/catalog/products/admin/${productId}/approve`, {
     method: "PATCH",
@@ -523,6 +677,19 @@ export function rejectProduct(token: string, productId: string, reason: string):
   });
 }
 
+// AuditLogEntry is the shared shape of a recorded moderation decision —
+// same fields whether it came from vendor_audit_logs or product_audit_logs.
+export type AuditLogEntry = {
+  actor_user_id: string;
+  action: string;
+  reason?: string;
+  created_at: string;
+};
+
+export function getProductAuditLog(token: string, productId: string): Promise<AuditLogEntry[]> {
+  return request<AuditLogEntry[]>(`/api/catalog/products/admin/${productId}/audit-log`, { token });
+}
+
 // ---------- Vendor ----------
 
 export type VendorStatus = "pending" | "approved" | "rejected";
@@ -535,9 +702,27 @@ export type Vendor = {
   status: VendorStatus;
   rejection_reason?: string;
   approved_at?: string;
+  logo_url?: string;
+  banner_url?: string;
+  policy_text: string;
   created_at: string;
   updated_at: string;
 };
+
+// PublicVendor is the public shop page's read model — no user_id/
+// rejection_reason, an anonymous visitor has no business seeing those.
+export type PublicVendor = {
+  id: string;
+  shop_name: string;
+  description: string;
+  logo_url?: string;
+  banner_url?: string;
+  policy_text?: string;
+};
+
+export function getPublicVendorProfile(vendorId: string): Promise<PublicVendor> {
+  return request<PublicVendor>(`/api/vendor/public/${vendorId}`);
+}
 
 export function applyAsVendor(
   token: string,
@@ -551,20 +736,41 @@ export function applyAsVendor(
   });
 }
 
-export function getMyVendor(token: string): Promise<Vendor> {
-  return request<Vendor>("/api/vendor/me", { token });
+// listMyVendors lists every shop (any status) the caller owns — a user may
+// own several (1:N), so this backs both the shop switcher and the "My
+// Shops" management page.
+export function listMyVendors(token: string): Promise<Vendor[]> {
+  return request<Vendor[]>("/api/vendor/mine", { token });
 }
 
-export function updateVendorProfile(
+export function getVendor(token: string, vendorId: string): Promise<Vendor> {
+  return request<Vendor>(`/api/vendor/${vendorId}`, { token });
+}
+
+export function updateVendor(
   token: string,
+  vendorId: string,
   shopName: string,
   description: string,
+  policyText: string,
 ): Promise<Vendor> {
-  return request<Vendor>("/api/vendor/me", {
+  return request<Vendor>(`/api/vendor/${vendorId}`, {
     method: "PATCH",
     token,
-    json: { shop_name: shopName, description },
+    json: { shop_name: shopName, description, policy_text: policyText },
   });
+}
+
+export function uploadVendorLogo(token: string, vendorId: string, file: File): Promise<Vendor> {
+  const form = new FormData();
+  form.set("image", file);
+  return request<Vendor>(`/api/vendor/${vendorId}/logo`, { method: "POST", token, form });
+}
+
+export function uploadVendorBanner(token: string, vendorId: string, file: File): Promise<Vendor> {
+  const form = new FormData();
+  form.set("image", file);
+  return request<Vendor>(`/api/vendor/${vendorId}/banner`, { method: "POST", token, form });
 }
 
 export function listVendorApplications(
@@ -587,6 +793,10 @@ export function rejectVendor(token: string, vendorId: string, reason: string): P
     token,
     json: { reason },
   });
+}
+
+export function getVendorAuditLog(token: string, vendorId: string): Promise<AuditLogEntry[]> {
+  return request<AuditLogEntry[]>(`/api/vendor/admin/applications/${vendorId}/audit-log`, { token });
 }
 
 // ---------- Cart ----------
@@ -642,7 +852,11 @@ export function removeCartItem(
   productId: string,
   variantId?: string,
 ): Promise<{ removed: boolean }> {
-  return request(`/api/cart/items/${productId}`, { method: "DELETE", token, query: { variant_id: variantId } });
+  return request(`/api/cart/items/${productId}`, {
+    method: "DELETE",
+    token,
+    query: { variant_id: variantId },
+  });
 }
 
 export function clearCart(token: string): Promise<{ cleared: boolean }> {
@@ -747,11 +961,17 @@ export function updateBuyerAddress(
   });
 }
 
-export function deleteBuyerAddress(token: string, addressId: string): Promise<{ deleted: boolean }> {
+export function deleteBuyerAddress(
+  token: string,
+  addressId: string,
+): Promise<{ deleted: boolean }> {
   return request(`/api/orders/addresses/${addressId}`, { method: "DELETE", token });
 }
 
-export function setDefaultBuyerAddress(token: string, addressId: string): Promise<{ updated: boolean }> {
+export function setDefaultBuyerAddress(
+  token: string,
+  addressId: string,
+): Promise<{ updated: boolean }> {
   return request(`/api/orders/addresses/${addressId}/default`, { method: "PATCH", token });
 }
 
@@ -772,9 +992,13 @@ export function cancelOrder(token: string, orderId: string): Promise<Order> {
 
 export function listVendorOrders(
   token: string,
+  vendorId: string,
   params: { limit?: number; offset?: number } = {},
 ): Promise<VendorOrder[]> {
-  return request<VendorOrder[]>("/api/orders/vendor/mine", { token, query: params });
+  return request<VendorOrder[]>("/api/orders/vendor/mine", {
+    token,
+    query: { vendor_id: vendorId, ...params },
+  });
 }
 
 export function listAdminOrders(
@@ -826,18 +1050,24 @@ export type VendorSummary = {
   top_products: TopProduct[];
 };
 
-export function getVendorSummary(token: string): Promise<VendorSummary> {
-  return request<VendorSummary>("/api/orders/vendor/summary", { token });
+export function getVendorSummary(token: string, vendorId: string): Promise<VendorSummary> {
+  return request<VendorSummary>("/api/orders/vendor/summary", {
+    token,
+    query: { vendor_id: vendorId },
+  });
 }
 
 // exportVendorOrdersCSV fetches the raw CSV body directly (not through
 // request(), which expects the {data: ...} JSON envelope every other
 // endpoint uses) so the caller can hand it to the browser as a file download.
-export async function exportVendorOrdersCSV(token: string): Promise<string> {
-  const res = await fetch(`${API_BASE_URL}/api/orders/vendor/export.csv`, {
-    headers: { Authorization: `Bearer ${token}` },
-    cache: "no-store",
-  });
+export async function exportVendorOrdersCSV(token: string, vendorId: string): Promise<string> {
+  const res = await fetch(
+    `${API_BASE_URL}/api/orders/vendor/export.csv?vendor_id=${encodeURIComponent(vendorId)}`,
+    {
+      headers: { Authorization: `Bearer ${token}` },
+      cache: "no-store",
+    },
+  );
   if (!res.ok) {
     throw new ApiError(res.status, "export_failed", "Could not export orders");
   }
@@ -912,12 +1142,7 @@ export function simulatePaymentOutcome(
 // ---------- Shipments ----------
 
 export type ShipmentStatus =
-  | "pending"
-  | "ready_to_ship"
-  | "shipped"
-  | "delivered"
-  | "cancelled"
-  | "interception_requested";
+  "pending" | "ready_to_ship" | "shipped" | "delivered" | "cancelled" | "interception_requested";
 
 export type Shipment = {
   id: string;
@@ -974,11 +1199,17 @@ export function advanceShipment(
   });
 }
 
+// listMyShipments is shared by both roles (see ShipmentHandler.ListMine):
+// a buyer sees their own shipments across every vendor, so vendorId is
+// only relevant — and only sent — for the vendor-side call.
 export function listMyShipments(
   token: string,
-  params: { limit?: number; offset?: number } = {},
+  params: { vendorId?: string; limit?: number; offset?: number } = {},
 ): Promise<Shipment[]> {
-  return request<Shipment[]>("/api/shipments/mine", { token, query: params });
+  return request<Shipment[]>("/api/shipments/mine", {
+    token,
+    query: { vendor_id: params.vendorId, limit: params.limit, offset: params.offset },
+  });
 }
 
 export type TrackingEvent = {
@@ -1018,19 +1249,32 @@ export type VendorShippingMethod = {
   is_active: boolean;
 };
 
-export function enableShippingMethod(token: string, carrierId: string): Promise<VendorShippingMethod> {
+export function enableShippingMethod(
+  token: string,
+  vendorId: string,
+  carrierId: string,
+): Promise<VendorShippingMethod> {
   return request<VendorShippingMethod>("/api/shipments/vendor/methods", {
     method: "POST",
     token,
-    json: { carrier_id: carrierId },
+    json: { vendor_id: vendorId, carrier_id: carrierId },
   });
 }
 
-export function listMyShippingMethods(token: string): Promise<VendorShippingMethod[]> {
-  return request<VendorShippingMethod[]>("/api/shipments/vendor/methods", { token });
+export function listMyShippingMethods(
+  token: string,
+  vendorId: string,
+): Promise<VendorShippingMethod[]> {
+  return request<VendorShippingMethod[]>("/api/shipments/vendor/methods", {
+    token,
+    query: { vendor_id: vendorId },
+  });
 }
 
-export function setDefaultShippingMethod(token: string, methodId: string): Promise<{ updated: boolean }> {
+export function setDefaultShippingMethod(
+  token: string,
+  methodId: string,
+): Promise<{ updated: boolean }> {
   return request(`/api/shipments/vendor/methods/${methodId}/default`, { method: "PATCH", token });
 }
 
@@ -1050,32 +1294,52 @@ export function setShippingMethodActive(
 
 export type VendorAddress = BuyerAddress;
 
-export function addVendorAddress(token: string, input: AddressInput): Promise<VendorAddress> {
-  return request<VendorAddress>("/api/vendor/addresses", { method: "POST", token, json: input });
+export function addVendorAddress(
+  token: string,
+  vendorId: string,
+  input: AddressInput,
+): Promise<VendorAddress> {
+  return request<VendorAddress>(`/api/vendor/${vendorId}/addresses`, {
+    method: "POST",
+    token,
+    json: input,
+  });
 }
 
-export function listVendorAddresses(token: string): Promise<VendorAddress[]> {
-  return request<VendorAddress[]>("/api/vendor/addresses", { token });
+export function listVendorAddresses(token: string, vendorId: string): Promise<VendorAddress[]> {
+  return request<VendorAddress[]>(`/api/vendor/${vendorId}/addresses`, { token });
 }
 
 export function updateVendorAddress(
   token: string,
+  vendorId: string,
   addressId: string,
   input: AddressInput,
 ): Promise<VendorAddress> {
-  return request<VendorAddress>(`/api/vendor/addresses/${addressId}`, {
+  return request<VendorAddress>(`/api/vendor/${vendorId}/addresses/${addressId}`, {
     method: "PATCH",
     token,
     json: input,
   });
 }
 
-export function deleteVendorAddress(token: string, addressId: string): Promise<{ deleted: boolean }> {
-  return request(`/api/vendor/addresses/${addressId}`, { method: "DELETE", token });
+export function deleteVendorAddress(
+  token: string,
+  vendorId: string,
+  addressId: string,
+): Promise<{ deleted: boolean }> {
+  return request(`/api/vendor/${vendorId}/addresses/${addressId}`, { method: "DELETE", token });
 }
 
-export function setDefaultVendorAddress(token: string, addressId: string): Promise<{ updated: boolean }> {
-  return request(`/api/vendor/addresses/${addressId}/default`, { method: "PATCH", token });
+export function setDefaultVendorAddress(
+  token: string,
+  vendorId: string,
+  addressId: string,
+): Promise<{ updated: boolean }> {
+  return request(`/api/vendor/${vendorId}/addresses/${addressId}/default`, {
+    method: "PATCH",
+    token,
+  });
 }
 
 // ---------- Admin: carriers, zones, fee rules ----------
@@ -1101,7 +1365,11 @@ export function listActiveCarriers(): Promise<Carrier[]> {
   return request<Carrier[]>("/api/shipments/carriers");
 }
 
-export function setCarrierActive(token: string, carrierId: string, isActive: boolean): Promise<{ updated: boolean }> {
+export function setCarrierActive(
+  token: string,
+  carrierId: string,
+  isActive: boolean,
+): Promise<{ updated: boolean }> {
   return request(`/api/shipments/admin/carriers/${carrierId}/active`, {
     method: "PATCH",
     token,

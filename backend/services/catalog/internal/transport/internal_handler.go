@@ -28,19 +28,21 @@ type internalProductResponse struct {
 	Name               string `json:"name"`
 	PriceAmount        int64  `json:"price_amount"`
 	Currency           string `json:"currency"`
+	Status             string `json:"status"`
 	IsVisible          bool   `json:"is_visible"`
 	HasVariants        bool   `json:"has_variants"`
 	PackageWeightGrams *int64 `json:"package_weight_grams,omitempty"`
 }
 
 // GetByID serves Inventory (verifying a vendor owns a product before it
-// touches stock) and Cart/Order (validating a product is sellable, reading
-// its current price for a checkout snapshot, checking has_variants to
-// require a variant selection, and reading package_weight_grams to quote a
-// shipment's fee), regardless of the product's moderation status — callers
-// decide what to do with is_visible. PackageWeightGrams is a pointer: a
-// category that doesn't require packaging info must stay distinguishable
-// from a genuine 0.
+// touches stock, and reading Status to gate a restock request on the
+// product being approved) and Cart/Order (validating a product is sellable,
+// reading its current price for a checkout snapshot, checking has_variants
+// to require a variant selection, and reading package_weight_grams to quote
+// a shipment's fee), regardless of the product's moderation status —
+// callers decide what to do with is_visible/status. PackageWeightGrams is a
+// pointer: a category that doesn't require packaging info must stay
+// distinguishable from a genuine 0.
 func (h *InternalHandler) GetByID(c *gin.Context) {
 	p, hasVariants, packageWeightGrams, err := h.products.GetByIDForOwnerLookup(c.Request.Context(), c.Param("id"))
 	if err != nil {
@@ -54,6 +56,7 @@ func (h *InternalHandler) GetByID(c *gin.Context) {
 		Name:               p.Name,
 		PriceAmount:        p.PriceAmount,
 		Currency:           p.Currency,
+		Status:             string(p.Status),
 		IsVisible:          p.IsPubliclyVisible(),
 		HasVariants:        hasVariants,
 		PackageWeightGrams: packageWeightGrams,

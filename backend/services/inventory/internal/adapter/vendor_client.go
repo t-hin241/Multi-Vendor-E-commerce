@@ -30,8 +30,11 @@ type vendorStatusResponse struct {
 	} `json:"data"`
 }
 
-func (c *HTTPVendorClient) GetApprovedVendorID(ctx context.Context, userID string) (string, error) {
-	endpoint := fmt.Sprintf("%s/internal/vendors/by-user/%s", c.baseURL, url.PathEscape(userID))
+// GetApprovedVendorID confirms vendorID both belongs to userID and is
+// approved, echoing it back on success. A user may own several shops
+// (1:N), so the caller always names which one it's acting as.
+func (c *HTTPVendorClient) GetApprovedVendorID(ctx context.Context, userID, vendorID string) (string, error) {
+	endpoint := fmt.Sprintf("%s/internal/vendors/%s/owned-by/%s", c.baseURL, url.PathEscape(vendorID), url.PathEscape(userID))
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {

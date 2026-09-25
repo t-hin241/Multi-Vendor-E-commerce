@@ -24,6 +24,7 @@ type internalProductResponse struct {
 	Data struct {
 		ID       string `json:"id"`
 		VendorID string `json:"vendor_id"`
+		Status   string `json:"status"`
 	} `json:"data"`
 }
 
@@ -56,6 +57,38 @@ func (c *HTTPCatalogClient) GetProductOwnerVendorID(ctx context.Context, product
 	}
 
 	return body.Data.VendorID, nil
+}
+
+// GetProductStatus resolves a product's current moderation status, so
+// RequestRestock can gate "add stock" on the product already being
+// approved, without Inventory owning any product data itself.
+func (c *HTTPCatalogClient) GetProductStatus(ctx context.Context, productID string) (string, error) {
+	endpoint := fmt.Sprintf("%s/internal/products/%s", c.baseURL, url.PathEscape(productID))
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return "", apperror.Internal(err)
+	}
+
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return "", apperror.Internal(err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusNotFound {
+		return "", apperror.NotFound("Product not found")
+	}
+	if resp.StatusCode != http.StatusOK {
+		return "", apperror.Internal(fmt.Errorf("catalog service returned status %d", resp.StatusCode))
+	}
+
+	var body internalProductResponse
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		return "", apperror.Internal(err)
+	}
+
+	return body.Data.Status, nil
 }
 
 type internalVariantOwnerResponse struct {

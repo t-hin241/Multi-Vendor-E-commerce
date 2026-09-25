@@ -37,6 +37,9 @@ func (h *ItemHandler) Create(c *gin.Context) {
 	httpresponse.OK(c, http.StatusCreated, toItemResponse(item))
 }
 
+// Restock now only creates a pending request — see
+// InventoryUseCase.RequestRestock — rather than immediately increasing
+// available_quantity; an admin must approve it first.
 func (h *ItemHandler) Restock(c *gin.Context) {
 	var req restockRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -45,13 +48,13 @@ func (h *ItemHandler) Restock(c *gin.Context) {
 	}
 
 	productID := c.Param("productID")
-	item, err := h.inventory.Restock(c.Request.Context(), middleware.GetUserID(c), &productID, nil, req.Quantity)
+	request, err := h.inventory.RequestRestock(c.Request.Context(), middleware.GetUserID(c), &productID, nil, req.Quantity)
 	if err != nil {
 		httpresponse.HandleError(c, h.log, err)
 		return
 	}
 
-	httpresponse.OK(c, http.StatusOK, toItemResponse(item))
+	httpresponse.OK(c, http.StatusCreated, toRestockRequestResponse(request))
 }
 
 // RestockVariant is Restock's sibling for a variant-scoped stock item —
@@ -66,20 +69,35 @@ func (h *ItemHandler) RestockVariant(c *gin.Context) {
 	}
 
 	variantID := c.Param("variantID")
-	item, err := h.inventory.Restock(c.Request.Context(), middleware.GetUserID(c), nil, &variantID, req.Quantity)
+	request, err := h.inventory.RequestRestock(c.Request.Context(), middleware.GetUserID(c), nil, &variantID, req.Quantity)
 	if err != nil {
 		httpresponse.HandleError(c, h.log, err)
 		return
 	}
 
-	httpresponse.OK(c, http.StatusOK, toItemResponse(item))
+	httpresponse.OK(c, http.StatusCreated, toRestockRequestResponse(request))
+}
+
+// ListMyRestockRequests lets a vendor see the status of their own pending
+// (or already-decided) stock-increase requests.
+func (h *ItemHandler) ListMyRestockRequests(c *gin.Context) {
+	limit := parseIntDefault(c.Query("limit"), 20, 1, 100)
+	offset := parseIntDefault(c.Query("offset"), 0, 0, 1_000_000)
+
+	requests, err := h.inventory.ListMyRestockRequests(c.Request.Context(), middleware.GetUserID(c), c.Query("vendor_id"), limit, offset)
+	if err != nil {
+		httpresponse.HandleError(c, h.log, err)
+		return
+	}
+
+	httpresponse.OK(c, http.StatusOK, toRestockRequestResponseList(requests))
 }
 
 func (h *ItemHandler) ListMine(c *gin.Context) {
 	limit := parseIntDefault(c.Query("limit"), 20, 1, 100)
 	offset := parseIntDefault(c.Query("offset"), 0, 0, 1_000_000)
 
-	items, err := h.inventory.ListMine(c.Request.Context(), middleware.GetUserID(c), limit, offset)
+	items, err := h.inventory.ListMine(c.Request.Context(), middleware.GetUserID(c), c.Query("vendor_id"), limit, offset)
 	if err != nil {
 		httpresponse.HandleError(c, h.log, err)
 		return

@@ -184,9 +184,9 @@ func newFakeVendorGateway() *fakeVendorGateway {
 	return &fakeVendorGateway{approvedVendors: make(map[string]string)}
 }
 
-func (f *fakeVendorGateway) GetApprovedVendorID(_ context.Context, userID string) (string, error) {
-	vendorID, ok := f.approvedVendors[userID]
-	if !ok {
+func (f *fakeVendorGateway) GetApprovedVendorID(_ context.Context, userID, vendorID string) (string, error) {
+	approved, ok := f.approvedVendors[userID]
+	if !ok || approved != vendorID {
 		return "", apperror.Forbidden("You must have an approved vendor account to manage stock")
 	}
 	return vendorID, nil
@@ -198,12 +198,17 @@ type fakeVariantOwner struct {
 }
 
 type fakeCatalogGateway struct {
-	productOwners map[string]string
-	variantOwners map[string]fakeVariantOwner
+	productOwners   map[string]string
+	variantOwners   map[string]fakeVariantOwner
+	productStatuses map[string]string
 }
 
 func newFakeCatalogGateway() *fakeCatalogGateway {
-	return &fakeCatalogGateway{productOwners: make(map[string]string), variantOwners: make(map[string]fakeVariantOwner)}
+	return &fakeCatalogGateway{
+		productOwners:   make(map[string]string),
+		variantOwners:   make(map[string]fakeVariantOwner),
+		productStatuses: make(map[string]string),
+	}
 }
 
 func (f *fakeCatalogGateway) GetProductOwnerVendorID(_ context.Context, productID string) (string, error) {
@@ -220,4 +225,88 @@ func (f *fakeCatalogGateway) GetVariantOwner(_ context.Context, variantID string
 		return "", "", apperror.NotFound("Variant not found")
 	}
 	return owner.VendorID, owner.ProductID, nil
+}
+
+// GetProductStatus defaults to "" (not approved) for a product with no
+// explicit entry, matching a real not-yet-approved product.
+func (f *fakeCatalogGateway) GetProductStatus(_ context.Context, productID string) (string, error) {
+	return f.productStatuses[productID], nil
+}
+
+// fakeRestockRequestRepository mirrors RestockRequestRepository in memory,
+// enough to exercise the use case's create/list/decide flow without a live
+// database.
+type fakeRestockRequestRepository struct {
+	mu     sync.Mutex
+	byID   map[string]*domain.RestockRequest
+	nextID int
+}
+
+func newFakeRestockRequestRepository() *fakeRestockRequestRepository {
+	return &fakeRestockRequestRepository{byID: make(map[string]*domain.RestockRequest)}
+}
+
+func (f *fakeRestockRequestRepository) Create(_ context.Context, req *domain.RestockRequest) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.nextID++
+	req.ID = "restock-request-" + strconv.Itoa(f.nextID)
+	req.Status = domain.RestockPending
+	req.CreatedAt = time.Now()
+	req.UpdatedAt = time.Now()
+	stored := *req
+	f.byID[req.ID] = &stored
+	return nil
+}
+
+func (f *fakeRestockRequestRepository) FindByID(_ context.Context, id string) (*domain.RestockRequest, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	req, ok := f.byID[id]
+	if !ok {
+		return nil, repository.ErrRestockRequestNotFound
+	}
+	copyReq := *req
+	return &copyReq, nil
+}
+
+func (f *fakeRestockRequestRepository) ListByStatus(_ context.Context, status string, _, _ int) ([]*domain.RestockRequest, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var out []*domain.RestockRequest
+	for _, req := range f.byID {
+		if status == "" || string(req.Status) == status {
+			copyReq := *req
+			out = append(out, &copyReq)
+		}
+	}
+	return out, nil
+}
+
+func (f *fakeRestockRequestRepository) ListByVendor(_ context.Context, vendorID string, _, _ int) ([]*domain.RestockRequest, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var out []*domain.RestockRequest
+	for _, req := range f.byID {
+		if req.VendorID == vendorID {
+			copyReq := *req
+			out = append(out, &copyReq)
+		}
+	}
+	return out, nil
+}
+
+func (f *fakeRestockRequestRepository) UpdateStatus(_ context.Context, id string, status domain.RestockStatus, adminUserID string, reason *string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	req, ok := f.byID[id]
+	if !ok {
+		return repository.ErrRestockRequestNotFound
+	}
+	req.Status = status
+	req.RejectionReason = reason
+	req.DecidedBy = &adminUserID
+	now := time.Now()
+	req.DecidedAt = &now
+	return nil
 }

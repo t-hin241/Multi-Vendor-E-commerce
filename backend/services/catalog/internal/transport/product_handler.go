@@ -32,7 +32,7 @@ func (h *ProductHandler) Create(c *gin.Context) {
 		return
 	}
 
-	p, err := h.products.Create(c.Request.Context(), middleware.GetUserID(c), req.CategoryID, req.Name, req.Description, req.PriceAmount, toAttributeValueInputs(req.Attributes))
+	p, err := h.products.Create(c.Request.Context(), middleware.GetUserID(c), req.VendorID, req.CategoryID, req.Name, req.Description, req.PriceAmount, toAttributeValueInputs(req.Attributes))
 	if err != nil {
 		httpresponse.HandleError(c, h.log, err)
 		return
@@ -44,13 +44,25 @@ func (h *ProductHandler) Create(c *gin.Context) {
 func (h *ProductHandler) ListMine(c *gin.Context) {
 	limit, offset := paginationParams(c)
 
-	products, err := h.products.ListMine(c.Request.Context(), middleware.GetUserID(c), limit, offset)
+	products, err := h.products.ListMine(c.Request.Context(), middleware.GetUserID(c), c.Query("vendor_id"), limit, offset)
 	if err != nil {
 		httpresponse.HandleError(c, h.log, err)
 		return
 	}
 
 	httpresponse.OK(c, http.StatusOK, toProductResponseList(products))
+}
+
+// Submit moves a draft product to pending_review, once the vendor has
+// supplied everything admin needs to decide (image + initial stock).
+func (h *ProductHandler) Submit(c *gin.Context) {
+	p, err := h.products.SubmitForReview(c.Request.Context(), middleware.GetUserID(c), c.Param("id"))
+	if err != nil {
+		httpresponse.HandleError(c, h.log, err)
+		return
+	}
+
+	httpresponse.OK(c, http.StatusOK, toProductResponse(p))
 }
 
 func (h *ProductHandler) SetActive(c *gin.Context) {
@@ -101,6 +113,17 @@ func (h *ProductHandler) UploadImage(c *gin.Context) {
 	}
 
 	httpresponse.OK(c, http.StatusCreated, toProductImageResponse(img))
+}
+
+// DeleteImage removes a product's main image entirely (no replacement) —
+// the frontend's corner "×" control on an already-uploaded image.
+func (h *ProductHandler) DeleteImage(c *gin.Context) {
+	if err := h.products.DeleteImage(c.Request.Context(), middleware.GetUserID(c), c.Param("id")); err != nil {
+		httpresponse.HandleError(c, h.log, err)
+		return
+	}
+
+	httpresponse.OK(c, http.StatusOK, gin.H{"deleted": true})
 }
 
 // ListImages returns the vendor's own view of a product's single main

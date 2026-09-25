@@ -22,10 +22,23 @@ type ReservationRepositoryPort interface {
 	CommitByOrderID(ctx context.Context, orderID string) error
 }
 
+// RestockRequestRepositoryPort stores a vendor's asks to add stock to an
+// already-approved product, pending an admin decision. UpdateStatus only
+// ever touches this table — the actual quantity increase on approval goes
+// through InventoryItemRepositoryPort.Restock/RestockVariant, same as
+// before this feature existed.
+type RestockRequestRepositoryPort interface {
+	Create(ctx context.Context, req *domain.RestockRequest) error
+	FindByID(ctx context.Context, id string) (*domain.RestockRequest, error)
+	ListByStatus(ctx context.Context, status string, limit, offset int) ([]*domain.RestockRequest, error)
+	ListByVendor(ctx context.Context, vendorID string, limit, offset int) ([]*domain.RestockRequest, error)
+	UpdateStatus(ctx context.Context, id string, status domain.RestockStatus, adminUserID string, reason *string) error
+}
+
 // VendorGateway lets the use case check vendor approval without owning any
 // vendor data itself.
 type VendorGateway interface {
-	GetApprovedVendorID(ctx context.Context, userID string) (vendorID string, err error)
+	GetApprovedVendorID(ctx context.Context, userID, vendorID string) (string, error)
 }
 
 // CatalogGateway lets the use case verify product (or variant) ownership
@@ -36,4 +49,8 @@ type CatalogGateway interface {
 	// so a variant-scoped stock request never has to trust a client-supplied
 	// product_id for ownership purposes.
 	GetVariantOwner(ctx context.Context, variantID string) (vendorID, productID string, err error)
+	// GetProductStatus resolves a product's current moderation status, so
+	// RequestRestock can gate on "add stock" only being requestable once the
+	// product is approved and live.
+	GetProductStatus(ctx context.Context, productID string) (status string, err error)
 }

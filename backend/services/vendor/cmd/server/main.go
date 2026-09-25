@@ -11,6 +11,7 @@ import (
 	"shopee/backend/pkg/health"
 	"shopee/backend/pkg/logger"
 	"shopee/backend/pkg/platform/natsclient"
+	"shopee/backend/pkg/platform/objectstorage"
 	"shopee/backend/pkg/platform/postgres"
 	"shopee/backend/pkg/platform/redisclient"
 	"shopee/backend/pkg/shutdown"
@@ -55,10 +56,15 @@ func main() {
 	jwtManager := authjwt.NewManager(cfg.JWTSecret)
 	notificationClient := adapter.NewHTTPNotificationClient(cfg.NotificationServiceURL)
 
+	objectStore, err := objectstorage.NewClient(ctx, cfg.ObjectStorage)
+	if err != nil {
+		log.Fatal().Err(err).Msg("object storage connection failed")
+	}
+
 	vendorRepo := repository.NewVendorRepository(dbPool)
 	auditLogRepo := repository.NewAuditLogRepository(dbPool)
 	addressRepo := repository.NewVendorAddressRepository(dbPool)
-	vendorUseCase := usecase.NewVendorUseCase(vendorRepo, auditLogRepo, notificationClient, log)
+	vendorUseCase := usecase.NewVendorUseCase(vendorRepo, auditLogRepo, notificationClient, objectStore, log)
 	addressUseCase := usecase.NewVendorAddressUseCase(addressRepo, vendorRepo)
 
 	vendorHandler := transport.NewVendorHandler(vendorUseCase, log)
@@ -69,6 +75,7 @@ func main() {
 	router := transport.NewRouter(cfg.Base.Env, log, jwtManager, vendorHandler, addressHandler, adminHandler, internalHandler,
 		health.Checker{Name: "postgres", Ping: func(ctx context.Context) error { return dbPool.Ping(ctx) }},
 		health.Checker{Name: "redis", Ping: func(ctx context.Context) error { return redisClient.Ping(ctx).Err() }},
+		health.Checker{Name: "object_storage", Ping: objectStore.Ping},
 		health.Checker{Name: "nats", Ping: func(ctx context.Context) error {
 			if !natsConn.IsConnected() {
 				return fmt.Errorf("nats: not connected")

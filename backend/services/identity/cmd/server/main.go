@@ -66,9 +66,11 @@ func main() {
 
 	authUseCase := usecase.NewAuthUseCase(userRepo, refreshTokenRepo, passwordResetRepo, jwtManager, log, cfg.Env)
 	authHandler := transport.NewAuthHandler(authUseCase, log)
+	adminUseCase := usecase.NewAdminUseCase(userRepo, refreshTokenRepo)
+	adminHandler := transport.NewAdminHandler(adminUseCase, log)
 	internalHandler := transport.NewInternalHandler(authUseCase, log)
 
-	router := transport.NewRouter(cfg.Env, log, jwtManager, authHandler, internalHandler,
+	router := transport.NewRouter(cfg.Env, log, jwtManager, authHandler, adminHandler, internalHandler,
 		health.Checker{Name: "postgres", Ping: func(ctx context.Context) error { return dbPool.Ping(ctx) }},
 		health.Checker{Name: "redis", Ping: func(ctx context.Context) error { return redisClient.Ping(ctx).Err() }},
 		health.Checker{Name: "nats", Ping: func(ctx context.Context) error {

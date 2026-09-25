@@ -18,6 +18,8 @@ type UserRepository interface {
 	FindByEmail(ctx context.Context, email string) (*domain.User, error)
 	FindByID(ctx context.Context, id string) (*domain.User, error)
 	UpdatePasswordHash(ctx context.Context, userID, passwordHash string) error
+	List(ctx context.Context, role, q string, limit, offset int) ([]*domain.User, error)
+	SetActive(ctx context.Context, userID string, isActive bool) error
 }
 
 type RefreshTokenRepository interface {

@@ -360,9 +360,9 @@ func newFakeVendorGateway() *fakeVendorGateway {
 	return &fakeVendorGateway{approvedVendors: make(map[string]string)}
 }
 
-func (f *fakeVendorGateway) GetApprovedVendorID(_ context.Context, userID string) (string, error) {
-	vendorID, ok := f.approvedVendors[userID]
-	if !ok {
+func (f *fakeVendorGateway) GetApprovedVendorID(_ context.Context, userID, vendorID string) (string, error) {
+	approved, ok := f.approvedVendors[userID]
+	if !ok || approved != vendorID {
 		return "", apperror.Forbidden("You must have an approved vendor account")
 	}
 	return vendorID, nil

@@ -1,113 +1,155 @@
 "use client";
 
+import { zodResolver } from "@hookform/resolvers/zod";
+import { ShoppingCart } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useForm } from "react-hook-form";
 
-import { ApiError } from "@/lib/api-client";
-import { useAuth } from "@/lib/auth-context";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Form,
+  FormControl,
+  FormField,
+  FormItem,
+  FormLabel,
+  FormMessage,
+} from "@/components/ui/form";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { describeApiError } from "@/lib/errors";
+import { useRegister } from "@/lib/hooks/use-auth-mutations";
+import { type RegisterInput, registerSchema } from "@/lib/schemas/auth";
 
 export default function RegisterPage() {
-  const { register } = useAuth();
   const router = useRouter();
-  const [fullName, setFullName] = useState("");
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [role, setRole] = useState<"buyer" | "vendor">("buyer");
-  const [error, setError] = useState<string | null>(null);
-  const [isSubmitting, setIsSubmitting] = useState(false);
+  const registerMutation = useRegister();
+  const form = useForm<RegisterInput>({
+    resolver: zodResolver(registerSchema),
+    defaultValues: { fullName: "", email: "", password: "", role: "buyer" },
+  });
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    setError(null);
-    setIsSubmitting(true);
+  async function onSubmit(values: RegisterInput) {
     try {
-      await register(email, password, fullName, role);
-      router.push(role === "vendor" ? "/vendor" : "/");
+      await registerMutation.mutateAsync(values);
+      router.push(values.role === "vendor" ? "/vendor" : "/");
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Registration failed. Please try again.");
-    } finally {
-      setIsSubmitting(false);
+      form.setError("root", {
+        message: describeApiError(err, "Đăng ký thất bại. Vui lòng thử lại."),
+      });
     }
   }
 
   return (
-    <main className="mx-auto max-w-sm px-6 py-16">
-      <h1 className="text-xl font-semibold text-slate-900">Create an account</h1>
+    <div className="mx-auto flex max-w-sm flex-col justify-center px-4 py-16 sm:px-6">
+      <Link
+        href="/"
+        className="mb-6 flex items-center justify-center gap-2 text-lg font-semibold text-primary"
+      >
+        <ShoppingCart className="size-6" />
+        Shopee Multi Vendor
+      </Link>
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-xl">Tạo tài khoản</CardTitle>
+          <CardDescription>Tạo tài khoản để mua sắm hoặc bắt đầu bán hàng</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Form {...form}>
+            <form onSubmit={form.handleSubmit(onSubmit)} className="flex flex-col gap-4">
+              <FormField
+                control={form.control}
+                name="fullName"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Họ và tên</FormLabel>
+                    <FormControl>
+                      <Input autoComplete="name" {...field} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={form.control}
+                name="email"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Email</FormLabel>
+                    <FormControl>
+                      <Input type="email" autoComplete="email" {...field} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={form.control}
+                name="password"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Mật khẩu</FormLabel>
+                    <FormControl>
+                      <Input type="password" autoComplete="new-password" {...field} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={form.control}
+                name="role"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Bạn muốn</FormLabel>
+                    <FormControl>
+                      <RadioGroup
+                        value={field.value}
+                        onValueChange={field.onChange}
+                        className="gap-2"
+                      >
+                        <div className="flex items-center gap-2">
+                          <RadioGroupItem value="buyer" id="role-buyer" />
+                          <Label htmlFor="role-buyer" className="font-normal">
+                            Mua sắm với vai trò người mua
+                          </Label>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <RadioGroupItem value="vendor" id="role-vendor" />
+                          <Label htmlFor="role-vendor" className="font-normal">
+                            Bán hàng với vai trò người bán
+                          </Label>
+                        </div>
+                      </RadioGroup>
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
 
-      <form onSubmit={handleSubmit} className="mt-6 flex flex-col gap-4">
-        <label className="flex flex-col gap-1 text-sm text-slate-700">
-          Full name
-          <input
-            required
-            value={fullName}
-            onChange={(e) => setFullName(e.target.value)}
-            className="rounded border border-slate-300 px-3 py-2"
-          />
-        </label>
+              {form.formState.errors.root && (
+                <Alert variant="destructive">
+                  <AlertDescription>{form.formState.errors.root.message}</AlertDescription>
+                </Alert>
+              )}
 
-        <label className="flex flex-col gap-1 text-sm text-slate-700">
-          Email
-          <input
-            type="email"
-            required
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            className="rounded border border-slate-300 px-3 py-2"
-          />
-        </label>
+              <Button type="submit" disabled={form.formState.isSubmitting} className="mt-2">
+                {form.formState.isSubmitting ? "Đang tạo tài khoản…" : "Đăng ký"}
+              </Button>
+            </form>
+          </Form>
 
-        <label className="flex flex-col gap-1 text-sm text-slate-700">
-          Password (min 8 characters)
-          <input
-            type="password"
-            required
-            minLength={8}
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            className="rounded border border-slate-300 px-3 py-2"
-          />
-        </label>
-
-        <fieldset className="flex flex-col gap-1 text-sm text-slate-700">
-          <legend>I want to</legend>
-          <label className="flex items-center gap-2">
-            <input
-              type="radio"
-              name="role"
-              checked={role === "buyer"}
-              onChange={() => setRole("buyer")}
-            />
-            Shop as a buyer
-          </label>
-          <label className="flex items-center gap-2">
-            <input
-              type="radio"
-              name="role"
-              checked={role === "vendor"}
-              onChange={() => setRole("vendor")}
-            />
-            Sell as a vendor
-          </label>
-        </fieldset>
-
-        {error && <p className="text-sm text-red-600">{error}</p>}
-
-        <button
-          type="submit"
-          disabled={isSubmitting}
-          className="rounded bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
-        >
-          {isSubmitting ? "Creating account…" : "Register"}
-        </button>
-      </form>
-
-      <p className="mt-4 text-sm text-slate-600">
-        Already have an account?{" "}
-        <Link href="/login" className="underline">
-          Log in
-        </Link>
-      </p>
-    </main>
+          <p className="mt-4 text-sm text-muted-foreground">
+            Đã có tài khoản?{" "}
+            <Link href="/login" className="text-primary underline">
+              Đăng nhập
+            </Link>
+          </p>
+        </CardContent>
+      </Card>
+    </div>
   );
 }

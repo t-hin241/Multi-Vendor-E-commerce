@@ -60,16 +60,20 @@ func NewRouter(
 	// a method's route tree, and the vendor GET /:id/media route below sits
 	// at the same position in the GET tree.
 	r.GET("/api/catalog/products", storefrontHandler.List)
-	r.GET("/api/catalog/products/:id", storefrontHandler.GetBySlug)
+	// OptionalAuth: still fully public, but lets GetBySlug show exact stock
+	// to a recognized admin or the product's own vendor (see GetPublicBySlug).
+	r.GET("/api/catalog/products/:id", middleware.OptionalAuth(jwtManager), storefrontHandler.GetBySlug)
 
 	// Vendor product management.
 	vendorGroup := r.Group("/api/catalog/products", requireAuth, middleware.RequireRole("vendor"))
 	{
 		vendorGroup.POST("", productHandler.Create)
 		vendorGroup.GET("/mine", productHandler.ListMine)
+		vendorGroup.PATCH("/:id/submit", productHandler.Submit)
 		vendorGroup.PATCH("/:id/active", productHandler.SetActive)
 		vendorGroup.POST("/:id/images", productHandler.UploadImage)
 		vendorGroup.GET("/:id/images", productHandler.ListImages)
+		vendorGroup.DELETE("/:id/images", productHandler.DeleteImage)
 		vendorGroup.POST("/:id/media", productHandler.UploadMedia)
 		vendorGroup.GET("/:id/media", productHandler.ListMedia)
 		vendorGroup.POST("/:id/variants", productHandler.CreateVariant)
@@ -80,6 +84,8 @@ func NewRouter(
 	adminGroup := r.Group("/api/catalog/products/admin", requireAuth, middleware.RequireRole("admin"))
 	{
 		adminGroup.GET("", adminHandler.ListForModeration)
+		adminGroup.GET("/:id", adminHandler.GetForModeration)
+		adminGroup.GET("/:id/audit-log", adminHandler.GetAuditLog)
 		adminGroup.PATCH("/:id/approve", adminHandler.Approve)
 		adminGroup.PATCH("/:id/reject", adminHandler.Reject)
 	}

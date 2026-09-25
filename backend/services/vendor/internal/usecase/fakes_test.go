@@ -24,12 +24,6 @@ func (f *fakeVendorRepository) Create(_ context.Context, v *domain.Vendor) error
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
-	for _, existing := range f.byID {
-		if existing.UserID == v.UserID {
-			return repository.ErrVendorAlreadyExists
-		}
-	}
-
 	f.nextID++
 	v.ID = "vendor-" + strconv.Itoa(f.nextID)
 	v.Status = domain.StatusPending
@@ -40,17 +34,20 @@ func (f *fakeVendorRepository) Create(_ context.Context, v *domain.Vendor) error
 	return nil
 }
 
-func (f *fakeVendorRepository) FindByUserID(_ context.Context, userID string) (*domain.Vendor, error) {
+// ListByUserID returns every shop a user owns (0, 1, or many) — a user may
+// own several under the 1:N vendor<->user relationship.
+func (f *fakeVendorRepository) ListByUserID(_ context.Context, userID string) ([]*domain.Vendor, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
+	var out []*domain.Vendor
 	for _, v := range f.byID {
 		if v.UserID == userID {
 			copyV := *v
-			return &copyV, nil
+			out = append(out, &copyV)
 		}
 	}
-	return nil, repository.ErrVendorNotFound
+	return out, nil
 }
 
 func (f *fakeVendorRepository) FindByID(_ context.Context, id string) (*domain.Vendor, error) {
@@ -98,7 +95,7 @@ func (f *fakeVendorRepository) ListByIDs(_ context.Context, ids []string) ([]*do
 	return out, nil
 }
 
-func (f *fakeVendorRepository) UpdateProfile(_ context.Context, id, shopName, description string) error {
+func (f *fakeVendorRepository) UpdateProfile(_ context.Context, id, shopName, description, policyText string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
@@ -108,6 +105,31 @@ func (f *fakeVendorRepository) UpdateProfile(_ context.Context, id, shopName, de
 	}
 	v.ShopName = shopName
 	v.Description = description
+	v.PolicyText = policyText
+	return nil
+}
+
+func (f *fakeVendorRepository) SetLogo(_ context.Context, id string, url, objectKey *string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	v, ok := f.byID[id]
+	if !ok {
+		return repository.ErrVendorNotFound
+	}
+	v.LogoURL, v.LogoObjectKey = url, objectKey
+	return nil
+}
+
+func (f *fakeVendorRepository) SetBanner(_ context.Context, id string, url, objectKey *string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	v, ok := f.byID[id]
+	if !ok {
+		return repository.ErrVendorNotFound
+	}
+	v.BannerURL, v.BannerObjectKey = url, objectKey
 	return nil
 }
 
@@ -148,6 +170,24 @@ func (f *fakeAuditLogRepository) Create(_ context.Context, vendorID, actorUserID
 	return nil
 }
 
+// List returns entries newest-first, matching the real repository's
+// ORDER BY created_at DESC -- entries carry no timestamp here, so append
+// order stands in for creation order (reversed).
+func (f *fakeAuditLogRepository) List(_ context.Context, vendorID string) ([]*domain.AuditLog, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	var out []*domain.AuditLog
+	for i := len(f.entries) - 1; i >= 0; i-- {
+		e := f.entries[i]
+		if e.VendorID != vendorID {
+			continue
+		}
+		out = append(out, &domain.AuditLog{ActorUserID: e.ActorUserID, Action: e.Action, Reason: e.Reason, CreatedAt: time.Now()})
+	}
+	return out, nil
+}
+
 type sentNotification struct {
 	userID      string
 	notifType   string
@@ -167,6 +207,34 @@ func (f *fakeNotificationGateway) Notify(_ context.Context, userID, notifType, r
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.sent = append(f.sent, sentNotification{userID: userID, notifType: notifType, referenceID: referenceID})
+	return nil
+}
+
+// fakeObjectStore simulates the object store for logo/banner uploads --
+// Upload just records the key, Delete records which keys were removed so a
+// test can assert a replaced image's old blob was cleaned up.
+type fakeObjectStore struct {
+	mu      sync.Mutex
+	uploads map[string][]byte
+	deleted []string
+}
+
+func newFakeObjectStore() *fakeObjectStore {
+	return &fakeObjectStore{uploads: make(map[string][]byte)}
+}
+
+func (f *fakeObjectStore) Upload(_ context.Context, objectKey string, data []byte, _ string) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.uploads[objectKey] = data
+	return "https://objectstore.local/" + objectKey, nil
+}
+
+func (f *fakeObjectStore) Delete(_ context.Context, objectKey string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	delete(f.uploads, objectKey)
+	f.deleted = append(f.deleted, objectKey)
 	return nil
 }
 

@@ -61,6 +61,26 @@ func (r *ProductImageRepository) ReplaceForProduct(ctx context.Context, img *dom
 	return oldKeys, nil
 }
 
+// DeleteForProduct removes a product's main image entirely, with no
+// replacement — the delete half of ReplaceForProduct, on its own.
+func (r *ProductImageRepository) DeleteForProduct(ctx context.Context, productID string) ([]string, error) {
+	rows, err := r.pool.Query(ctx, `DELETE FROM product_images WHERE product_id = $1 RETURNING object_key`, productID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var deletedKeys []string
+	for rows.Next() {
+		var key string
+		if err := rows.Scan(&key); err != nil {
+			return nil, err
+		}
+		deletedKeys = append(deletedKeys, key)
+	}
+	return deletedKeys, rows.Err()
+}
+
 // ListForProducts batch-looks-up the main image for many products at once
 // (at most one per product, per the single-main-image invariant), for the
 // storefront listing so it doesn't issue one query per product.

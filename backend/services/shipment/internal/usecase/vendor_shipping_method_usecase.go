@@ -22,12 +22,13 @@ func NewVendorShippingMethodUseCase(methods VendorShippingMethodRepositoryPort, 
 	return &VendorShippingMethodUseCase{methods: methods, carriers: carriers, vendors: vendors}
 }
 
-// Enable turns on one of the admin's active carriers for the calling
-// vendor's own shop. The very first method a vendor enables automatically
-// becomes their default — otherwise checkout would have nothing to
-// auto-select until the vendor remembers to set one explicitly.
-func (uc *VendorShippingMethodUseCase) Enable(ctx context.Context, userID, carrierID string) (*domain.VendorShippingMethod, error) {
-	vendorID, err := uc.vendors.GetApprovedVendorID(ctx, userID)
+// Enable turns on one of the admin's active carriers for the named shop —
+// a user may own several (1:N), so vendorID is always given explicitly and
+// confirmed to be the caller's own. The very first method a shop enables
+// automatically becomes its default — otherwise checkout would have
+// nothing to auto-select until the vendor remembers to set one explicitly.
+func (uc *VendorShippingMethodUseCase) Enable(ctx context.Context, userID, vendorID, carrierID string) (*domain.VendorShippingMethod, error) {
+	vendorID, err := uc.vendors.GetApprovedVendorID(ctx, userID, vendorID)
 	if err != nil {
 		return nil, err
 	}
@@ -51,8 +52,8 @@ func (uc *VendorShippingMethodUseCase) Enable(ctx context.Context, userID, carri
 	return method, nil
 }
 
-func (uc *VendorShippingMethodUseCase) ListMine(ctx context.Context, userID string) ([]*domain.VendorShippingMethod, error) {
-	vendorID, err := uc.vendors.GetApprovedVendorID(ctx, userID)
+func (uc *VendorShippingMethodUseCase) ListMine(ctx context.Context, userID, vendorID string) ([]*domain.VendorShippingMethod, error) {
+	vendorID, err := uc.vendors.GetApprovedVendorID(ctx, userID, vendorID)
 	if err != nil {
 		return nil, err
 	}
@@ -64,14 +65,11 @@ func (uc *VendorShippingMethodUseCase) ListMine(ctx context.Context, userID stri
 }
 
 func (uc *VendorShippingMethodUseCase) SetDefault(ctx context.Context, userID, methodID string) error {
-	vendorID, err := uc.vendors.GetApprovedVendorID(ctx, userID)
+	method, err := uc.ownedByUser(ctx, userID, methodID)
 	if err != nil {
 		return err
 	}
-	if err := uc.ownedByVendor(ctx, vendorID, methodID); err != nil {
-		return err
-	}
-	if err := uc.methods.SetDefault(ctx, vendorID, methodID); err != nil {
+	if err := uc.methods.SetDefault(ctx, method.VendorID, methodID); err != nil {
 		if errors.Is(err, repository.ErrVendorShippingMethodNotFound) {
 			return apperror.NotFound("Shipping method not found")
 		}
@@ -81,14 +79,11 @@ func (uc *VendorShippingMethodUseCase) SetDefault(ctx context.Context, userID, m
 }
 
 func (uc *VendorShippingMethodUseCase) SetActive(ctx context.Context, userID, methodID string, isActive bool) error {
-	vendorID, err := uc.vendors.GetApprovedVendorID(ctx, userID)
+	method, err := uc.ownedByUser(ctx, userID, methodID)
 	if err != nil {
 		return err
 	}
-	if err := uc.ownedByVendor(ctx, vendorID, methodID); err != nil {
-		return err
-	}
-	if err := uc.methods.SetActive(ctx, vendorID, methodID, isActive); err != nil {
+	if err := uc.methods.SetActive(ctx, method.VendorID, methodID, isActive); err != nil {
 		if errors.Is(err, repository.ErrVendorShippingMethodNotFound) {
 			return apperror.NotFound("Shipping method not found")
 		}
@@ -97,16 +92,19 @@ func (uc *VendorShippingMethodUseCase) SetActive(ctx context.Context, userID, me
 	return nil
 }
 
-func (uc *VendorShippingMethodUseCase) ownedByVendor(ctx context.Context, vendorID, methodID string) error {
+// ownedByUser derives the owning shop from the method itself — it already
+// has a fixed vendor_id — rather than asking the client which shop it
+// means, and confirms userID actually owns that shop.
+func (uc *VendorShippingMethodUseCase) ownedByUser(ctx context.Context, userID, methodID string) (*domain.VendorShippingMethod, error) {
 	method, err := uc.methods.FindByID(ctx, methodID)
 	if err != nil {
 		if errors.Is(err, repository.ErrVendorShippingMethodNotFound) {
-			return apperror.NotFound("Shipping method not found")
+			return nil, apperror.NotFound("Shipping method not found")
 		}
-		return apperror.Internal(err)
+		return nil, apperror.Internal(err)
 	}
-	if method.VendorID != vendorID {
-		return apperror.Forbidden("You do not have access to this shipping method")
+	if _, err := uc.vendors.GetApprovedVendorID(ctx, userID, method.VendorID); err != nil {
+		return nil, apperror.Forbidden("You do not have access to this shipping method")
 	}
-	return nil
+	return method, nil
 }

@@ -454,11 +454,6 @@ func (uc *OrderUseCase) UpdateVendorOrderStatus(ctx context.Context, userID, ven
 		return nil, apperror.Validation("Vendors can only move an order to processing, shipped or completed")
 	}
 
-	vendorID, err := uc.vendors.GetApprovedVendorID(ctx, userID)
-	if err != nil {
-		return nil, err
-	}
-
 	vo, err := uc.vendorOrders.FindByID(ctx, vendorOrderID)
 	if err != nil {
 		if errors.Is(err, repository.ErrVendorOrderNotFound) {
@@ -466,7 +461,7 @@ func (uc *OrderUseCase) UpdateVendorOrderStatus(ctx context.Context, userID, ven
 		}
 		return nil, apperror.Internal(err)
 	}
-	if vo.VendorID != vendorID {
+	if _, err := uc.vendors.GetApprovedVendorID(ctx, userID, vo.VendorID); err != nil {
 		return nil, apperror.Forbidden("You do not have access to this order")
 	}
 	if !domain.CanTransition(vo.Status, newStatus) {
@@ -605,8 +600,8 @@ func (uc *OrderUseCase) ListMine(ctx context.Context, buyerID string, limit, off
 // ListVendorMine is the vendor's own order list, now including each
 // sub-order's items — previously this returned financial totals only,
 // leaving a vendor with no way to see what they actually need to fulfill.
-func (uc *OrderUseCase) ListVendorMine(ctx context.Context, userID string, limit, offset int) ([]*domain.VendorOrder, map[string][]*domain.OrderItem, error) {
-	vendorID, err := uc.vendors.GetApprovedVendorID(ctx, userID)
+func (uc *OrderUseCase) ListVendorMine(ctx context.Context, userID, vendorID string, limit, offset int) ([]*domain.VendorOrder, map[string][]*domain.OrderItem, error) {
+	vendorID, err := uc.vendors.GetApprovedVendorID(ctx, userID, vendorID)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -631,8 +626,8 @@ func (uc *OrderUseCase) ListVendorMine(ctx context.Context, userID string, limit
 // GetVendorSummary is the vendor dashboard's read model: total orders,
 // revenue, commission and net for everything paid or further, plus their
 // best-selling products by quantity.
-func (uc *OrderUseCase) GetVendorSummary(ctx context.Context, userID string) (*domain.VendorSummary, []*domain.TopProduct, error) {
-	vendorID, err := uc.vendors.GetApprovedVendorID(ctx, userID)
+func (uc *OrderUseCase) GetVendorSummary(ctx context.Context, userID, vendorID string) (*domain.VendorSummary, []*domain.TopProduct, error) {
+	vendorID, err := uc.vendors.GetApprovedVendorID(ctx, userID, vendorID)
 	if err != nil {
 		return nil, nil, err
 	}

@@ -10,6 +10,7 @@ import (
 type Status string
 
 const (
+	StatusDraft         Status = "draft"
 	StatusPendingReview Status = "pending_review"
 	StatusApproved      Status = "approved"
 	StatusRejected      Status = "rejected"
@@ -39,12 +40,20 @@ func (p *Product) IsPubliclyVisible() bool {
 	return p.Status == StatusApproved && p.IsActive
 }
 
-// CanTransition enforces that only a pending_review product can be decided.
+// CanTransition enforces the product lifecycle: a vendor submits a complete
+// draft for review (checked by the caller, not here — see
+// ProductUseCase.SubmitForReview), and only a pending_review product can be
+// decided by admin. Like Vendor's own application review, a decision is
+// terminal — no re-review path exists.
 func CanTransition(from, to Status) bool {
-	if from != StatusPendingReview {
+	switch from {
+	case StatusDraft:
+		return to == StatusPendingReview
+	case StatusPendingReview:
+		return to == StatusApproved || to == StatusRejected
+	default:
 		return false
 	}
-	return to == StatusApproved || to == StatusRejected
 }
 
 type ProductImage struct {
@@ -89,4 +98,14 @@ func ValidateImageUpload(contentType string, size int64) (extension string, err 
 		return "", apperror.Validation("Image must be no larger than 5MB")
 	}
 	return ext, nil
+}
+
+// AuditLog is one recorded moderation decision on a product — written once
+// at Approve/Reject time and never edited, so this is also the full
+// decision history a later admin can review.
+type AuditLog struct {
+	ActorUserID string
+	Action      string
+	Reason      *string
+	CreatedAt   time.Time
 }

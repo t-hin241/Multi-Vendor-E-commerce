@@ -33,7 +33,7 @@ func TestCreate_SkipsRequiredCheckForVariantDefiningAttribute(t *testing.T) {
 	// No "attributes" submitted at all for the required, variant-defining
 	// Size attribute — its value is expressed per-variant instead, so
 	// product creation must not demand one up front.
-	p, err := f.products.Create(ctx, "user-1", "cat-1", "Shirt", "desc", 100000, nil)
+	p, err := f.products.Create(ctx, "user-1", "vendor-1", "cat-1", "Shirt", "desc", 100000, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -48,7 +48,7 @@ func TestCreateVariant_BuildsStableKeyAndRejectsDuplicateCombination(t *testing.
 	ctx := t.Context()
 	seedSizeAxisTemplate(f, "cat-1")
 
-	p, err := f.products.Create(ctx, "user-1", "cat-1", "Sneakers", "desc", 100000, nil)
+	p, err := f.products.Create(ctx, "user-1", "vendor-1", "cat-1", "Sneakers", "desc", 100000, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -76,7 +76,7 @@ func TestCreateVariant_RejectsDuplicateSKU(t *testing.T) {
 	ctx := t.Context()
 	seedSizeAxisTemplate(f, "cat-1")
 
-	p, err := f.products.Create(ctx, "user-1", "cat-1", "Sneakers", "desc", 100000, nil)
+	p, err := f.products.Create(ctx, "user-1", "vendor-1", "cat-1", "Sneakers", "desc", 100000, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -100,7 +100,7 @@ func TestCreateVariant_RejectsMissingAxis(t *testing.T) {
 		{Attribute: domain.Attribute{ID: "attr-color", Name: "Color", DataType: domain.DataTypeSelect, IsVariantDefining: true}, Options: []domain.AttributeOption{{ID: "opt-red", Value: "Red"}}},
 	}
 
-	p, err := f.products.Create(ctx, "user-1", "cat-1", "Sneakers", "desc", 100000, nil)
+	p, err := f.products.Create(ctx, "user-1", "vendor-1", "cat-1", "Sneakers", "desc", 100000, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -121,7 +121,7 @@ func TestCreateVariant_RejectsWhenNoVariantDefiningAttributes(t *testing.T) {
 		{Attribute: domain.Attribute{ID: "attr-material", Name: "Material", DataType: domain.DataTypeText}, RuleID: "rule-1"},
 	}
 
-	p, err := f.products.Create(ctx, "user-1", "cat-1", "Sneakers", "desc", 100000, nil)
+	p, err := f.products.Create(ctx, "user-1", "vendor-1", "cat-1", "Sneakers", "desc", 100000, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -140,7 +140,7 @@ func TestListVariantsForOwner_ResolvesLabelsAndRejectsNonOwner(t *testing.T) {
 	ctx := t.Context()
 	seedSizeAxisTemplate(f, "cat-1")
 
-	p, err := f.products.Create(ctx, "user-1", "cat-1", "Sneakers", "desc", 100000, nil)
+	p, err := f.products.Create(ctx, "user-1", "vendor-1", "cat-1", "Sneakers", "desc", 100000, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

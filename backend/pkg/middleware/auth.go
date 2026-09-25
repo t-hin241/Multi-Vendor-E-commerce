@@ -42,6 +42,33 @@ func RequireAuth(manager *authjwt.Manager) gin.HandlerFunc {
 	}
 }
 
+// OptionalAuth identifies the caller when a valid bearer token is present,
+// without requiring one — for endpoints that serve anonymous visitors but
+// adjust their response for a known caller (e.g. the public product page
+// showing exact stock to the product's own vendor or an admin). A missing or
+// invalid token is never an error here: the request simply proceeds as
+// anonymous, the same as if this middleware weren't present.
+func OptionalAuth(manager *authjwt.Manager) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		header := c.GetHeader("Authorization")
+		tokenString, ok := strings.CutPrefix(header, "Bearer ")
+		if !ok || tokenString == "" {
+			c.Next()
+			return
+		}
+
+		claims, err := manager.Parse(tokenString)
+		if err != nil {
+			c.Next()
+			return
+		}
+
+		c.Set(ContextKeyUserID, claims.UserID)
+		c.Set(ContextKeyRole, claims.Role)
+		c.Next()
+	}
+}
+
 // RequireRole must run after RequireAuth. It rejects requests whose token
 // role is not one of the allowed roles.
 func RequireRole(roles ...string) gin.HandlerFunc {

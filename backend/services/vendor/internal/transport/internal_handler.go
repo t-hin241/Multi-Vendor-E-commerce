@@ -28,12 +28,16 @@ type vendorStatusResponse struct {
 	Status   string `json:"status"`
 }
 
-// GetStatusByUserID lets Catalog check whether a user is an approved vendor
-// before it allows them to publish a product.
-func (h *InternalHandler) GetStatusByUserID(c *gin.Context) {
-	v, err := h.vendors.GetByUserID(c.Request.Context(), c.Param("userID"))
+// GetOwnedStatus lets any other service verify that a specific vendor id
+// both belongs to the calling user and is approved, before letting them act
+// as that shop — a user may own several shops (1:N), so "the vendor for
+// this user" is no longer well-defined; callers now always name which one.
+// Ownership mismatches and unknown ids are both reported as 404: an
+// internal caller only needs a yes/no.
+func (h *InternalHandler) GetOwnedStatus(c *gin.Context) {
+	v, err := h.vendors.GetOwned(c.Request.Context(), c.Param("userID"), c.Param("vendorId"))
 	if err != nil {
-		httpresponse.HandleError(c, h.log, err)
+		httpresponse.Error(c, http.StatusNotFound, "not_found", "Shop not found for this user")
 		return
 	}
 

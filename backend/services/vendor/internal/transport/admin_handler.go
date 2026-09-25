@@ -45,6 +45,18 @@ func (h *AdminHandler) Approve(c *gin.Context) {
 	httpresponse.OK(c, http.StatusOK, toVendorResponse(v))
 }
 
+// GetAuditLog returns the full approve/reject decision history for one
+// vendor application, newest first.
+func (h *AdminHandler) GetAuditLog(c *gin.Context) {
+	entries, err := h.vendors.ListAuditLog(c.Request.Context(), c.Param("id"))
+	if err != nil {
+		httpresponse.HandleError(c, h.log, err)
+		return
+	}
+
+	httpresponse.OK(c, http.StatusOK, toAuditLogEntryResponseList(entries))
+}
+
 func (h *AdminHandler) Reject(c *gin.Context) {
 	var req rejectRequest
 	if err := c.ShouldBindJSON(&req); err != nil {

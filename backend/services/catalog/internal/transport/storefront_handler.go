@@ -7,6 +7,7 @@ import (
 	"github.com/rs/zerolog"
 
 	"shopee/backend/pkg/httpresponse"
+	"shopee/backend/pkg/middleware"
 	"shopee/backend/services/catalog/internal/usecase"
 )
 
@@ -25,22 +26,23 @@ func NewStorefrontHandler(products *usecase.ProductUseCase, log zerolog.Logger) 
 func (h *StorefrontHandler) List(c *gin.Context) {
 	limit, offset := paginationParams(c)
 
-	products, images, vendorNames, quantitySold, vendorInfoDegraded, salesInfoDegraded, err :=
-		h.products.ListStorefront(c.Request.Context(), c.Query("category_id"), c.Query("q"), limit, offset)
+	products, total, images, vendorNames, quantitySold, vendorInfoDegraded, salesInfoDegraded, err :=
+		h.products.ListStorefront(c.Request.Context(), c.Query("category_id"), c.Query("vendor_id"), c.Query("q"), limit, offset)
 	if err != nil {
 		httpresponse.HandleError(c, h.log, err)
 		return
 	}
 
-	httpresponse.OK(c, http.StatusOK, toStorefrontListResponse(products, images, vendorNames, quantitySold, vendorInfoDegraded, salesInfoDegraded))
+	httpresponse.OK(c, http.StatusOK, toStorefrontListResponse(products, total, images, vendorNames, quantitySold, vendorInfoDegraded, salesInfoDegraded))
 }
 
 func (h *StorefrontHandler) GetBySlug(c *gin.Context) {
-	p, images, media, attributeValues, variants, stockInfoDegraded, err := h.products.GetPublicBySlug(c.Request.Context(), c.Param("id"))
+	p, images, media, attributeValues, variants, plainStockQuantity, stockInfoDegraded, vendorName, err :=
+		h.products.GetPublicBySlug(c.Request.Context(), c.Param("id"), middleware.GetUserID(c), middleware.GetRole(c))
 	if err != nil {
 		httpresponse.HandleError(c, h.log, err)
 		return
 	}
 
-	httpresponse.OK(c, http.StatusOK, toProductResponseWithImagesAndMedia(p, images, media, attributeValues, variants, stockInfoDegraded))
+	httpresponse.OK(c, http.StatusOK, toProductResponseWithImagesAndMedia(p, images, media, attributeValues, variants, plainStockQuantity, stockInfoDegraded, vendorName))
 }

@@ -1,78 +1,110 @@
 "use client";
 
+import { zodResolver } from "@hookform/resolvers/zod";
+import { ShoppingCart } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useForm } from "react-hook-form";
 
-import { ApiError } from "@/lib/api-client";
-import { useAuth } from "@/lib/auth-context";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Form,
+  FormControl,
+  FormField,
+  FormItem,
+  FormLabel,
+  FormMessage,
+} from "@/components/ui/form";
+import { Input } from "@/components/ui/input";
+import { describeApiError } from "@/lib/errors";
+import { useLogin } from "@/lib/hooks/use-auth-mutations";
+import { type LoginInput, loginSchema } from "@/lib/schemas/auth";
 
 export default function LoginPage() {
-  const { login } = useAuth();
   const router = useRouter();
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const [isSubmitting, setIsSubmitting] = useState(false);
+  const loginMutation = useLogin();
+  const form = useForm<LoginInput>({
+    resolver: zodResolver(loginSchema),
+    defaultValues: { email: "", password: "" },
+  });
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    setError(null);
-    setIsSubmitting(true);
+  async function onSubmit(values: LoginInput) {
     try {
-      await login(email, password);
+      await loginMutation.mutateAsync(values);
       router.push("/");
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Login failed. Please try again.");
-    } finally {
-      setIsSubmitting(false);
+      form.setError("root", {
+        message: describeApiError(err, "Đăng nhập thất bại. Vui lòng thử lại."),
+      });
     }
   }
 
   return (
-    <main className="mx-auto max-w-sm px-6 py-16">
-      <h1 className="text-xl font-semibold text-slate-900">Log in</h1>
+    <div className="mx-auto flex max-w-sm flex-col justify-center px-4 py-16 sm:px-6">
+      <Link
+        href="/"
+        className="mb-6 flex items-center justify-center gap-2 text-lg font-semibold text-primary"
+      >
+        <ShoppingCart className="size-6" />
+        Shopee Multi Vendor
+      </Link>
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-xl">Đăng nhập</CardTitle>
+          <CardDescription>Đăng nhập để tiếp tục mua sắm</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Form {...form}>
+            <form onSubmit={form.handleSubmit(onSubmit)} className="flex flex-col gap-4">
+              <FormField
+                control={form.control}
+                name="email"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Email</FormLabel>
+                    <FormControl>
+                      <Input type="email" autoComplete="email" {...field} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={form.control}
+                name="password"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Mật khẩu</FormLabel>
+                    <FormControl>
+                      <Input type="password" autoComplete="current-password" {...field} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
 
-      <form onSubmit={handleSubmit} className="mt-6 flex flex-col gap-4">
-        <label className="flex flex-col gap-1 text-sm text-slate-700">
-          Email
-          <input
-            type="email"
-            required
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            className="rounded border border-slate-300 px-3 py-2"
-          />
-        </label>
+              {form.formState.errors.root && (
+                <Alert variant="destructive">
+                  <AlertDescription>{form.formState.errors.root.message}</AlertDescription>
+                </Alert>
+              )}
 
-        <label className="flex flex-col gap-1 text-sm text-slate-700">
-          Password
-          <input
-            type="password"
-            required
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            className="rounded border border-slate-300 px-3 py-2"
-          />
-        </label>
+              <Button type="submit" disabled={form.formState.isSubmitting} className="mt-2">
+                {form.formState.isSubmitting ? "Đang đăng nhập…" : "Đăng nhập"}
+              </Button>
+            </form>
+          </Form>
 
-        {error && <p className="text-sm text-red-600">{error}</p>}
-
-        <button
-          type="submit"
-          disabled={isSubmitting}
-          className="rounded bg-slate-900 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
-        >
-          {isSubmitting ? "Logging in…" : "Log in"}
-        </button>
-      </form>
-
-      <p className="mt-4 text-sm text-slate-600">
-        No account yet?{" "}
-        <Link href="/register" className="underline">
-          Register
-        </Link>
-      </p>
-    </main>
+          <p className="mt-4 text-sm text-muted-foreground">
+            Chưa có tài khoản?{" "}
+            <Link href="/register" className="text-primary underline">
+              Đăng ký
+            </Link>
+          </p>
+        </CardContent>
+      </Card>
+    </div>
   );
 }

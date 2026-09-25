@@ -20,7 +20,8 @@ type ProductRepositoryPort interface {
 	FindBySlug(ctx context.Context, slug string) (*domain.Product, error)
 	ListByVendor(ctx context.Context, vendorID string, limit, offset int) ([]*domain.Product, error)
 	ListByStatus(ctx context.Context, status string, limit, offset int) ([]*domain.Product, error)
-	ListStorefront(ctx context.Context, categoryID, search string, limit, offset int) ([]*domain.Product, error)
+	ListStorefront(ctx context.Context, categoryID, vendorID, search string, limit, offset int) ([]*domain.Product, error)
+	CountStorefront(ctx context.Context, categoryID, vendorID, search string) (int, error)
 	UpdateStatus(ctx context.Context, id string, status domain.Status, rejectionReason *string) error
 	UpdateActive(ctx context.Context, id string, isActive bool) error
 }
@@ -31,6 +32,9 @@ type ProductImageRepositoryPort interface {
 	// transaction, so the product never has zero or two images at once.
 	// Returns the object keys of whatever was deleted, for storage cleanup.
 	ReplaceForProduct(ctx context.Context, img *domain.ProductImage) (deletedObjectKeys []string, err error)
+	// DeleteForProduct removes a product's main image entirely (no
+	// replacement) — returns the object keys removed, for storage cleanup.
+	DeleteForProduct(ctx context.Context, productID string) (deletedObjectKeys []string, err error)
 	ListForProduct(ctx context.Context, productID string) ([]*domain.ProductImage, error)
 	// ListForProducts batch-looks-up the main image for many products at
 	// once, for the storefront listing.
@@ -48,6 +52,7 @@ type ProductMediaRepositoryPort interface {
 
 type AuditLogRepositoryPort interface {
 	Create(ctx context.Context, productID, actorUserID, action string, reason *string) error
+	List(ctx context.Context, productID string) ([]*domain.AuditLog, error)
 }
 
 // ObjectStore is the subset of pkg/platform/objectstorage.Client the use
@@ -57,10 +62,12 @@ type ObjectStore interface {
 	Delete(ctx context.Context, objectKey string) error
 }
 
-// VendorGateway lets the use case check vendor approval without owning any
-// vendor data itself; see internal/adapter for the HTTP implementation.
+// VendorGateway confirms a user owns a specific, approved vendor (shop)
+// without Catalog owning any vendor data itself; see internal/adapter for
+// the HTTP implementation. A user may own several shops (1:N), so callers
+// always name which one they're acting as — this only validates that name.
 type VendorGateway interface {
-	GetApprovedVendorID(ctx context.Context, userID string) (vendorID string, err error)
+	GetApprovedVendorID(ctx context.Context, userID, vendorID string) (string, error)
 }
 
 // VendorNameGateway resolves shop names for the storefront listing. A
@@ -115,6 +122,12 @@ type ProductAttributeValueRepositoryPort interface {
 // it doesn't manage attributes/options/rules themselves.
 type AttributeTemplateResolver interface {
 	ResolveTemplate(ctx context.Context, categoryID string) ([]domain.ResolvedAttribute, error)
+	// LookupAttributeLabels resolves attribute names / option values directly
+	// by id, independent of category_attribute_rules — the fallback path for
+	// a persisted variant selection whose attribute isn't (or is no longer)
+	// part of the category's current rule-driven template, so display never
+	// degrades to a raw id.
+	LookupAttributeLabels(ctx context.Context, attributeIDs, optionIDs []string) (map[string]*domain.Attribute, map[string]*domain.AttributeOption, error)
 }
 
 type ProductVariantRepositoryPort interface {
@@ -130,6 +143,15 @@ type ProductVariantRepositoryPort interface {
 // (quantity SOLD historically) — this is quantity currently AVAILABLE.
 type InventoryGateway interface {
 	GetVariantStock(ctx context.Context, variantIDs []string) (map[string]int64, error)
+	// CheckStockReadiness confirms initial stock has been set up before a
+	// draft product can be submitted for review: if variantIDs is empty, a
+	// plain product-level stock record with quantity > 0; otherwise, a
+	// stocked record for every listed variant.
+	CheckStockReadiness(ctx context.Context, productID string, variantIDs []string) (bool, error)
+	// GetProductStock resolves current stock for a non-variant product, for
+	// the admin moderation detail view. ok is false when no inventory row
+	// exists yet.
+	GetProductStock(ctx context.Context, productID string) (quantity int64, ok bool, err error)
 }
 
 // ProductPackagingRepositoryPort stores each product's shipping

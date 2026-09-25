@@ -208,6 +208,22 @@ func (uc *AttributeUseCase) ResolveTemplate(ctx context.Context, categoryID stri
 	return resolved, nil
 }
 
+// LookupAttributeLabels resolves attributes/options directly by id, bypassing
+// category_attribute_rules entirely — used as ResolveTemplate's fallback when
+// a persisted selection references an attribute/option the current
+// rule-driven template doesn't (or no longer) covers.
+func (uc *AttributeUseCase) LookupAttributeLabels(ctx context.Context, attributeIDs, optionIDs []string) (map[string]*domain.Attribute, map[string]*domain.AttributeOption, error) {
+	attrs, err := uc.attributes.ListByIDs(ctx, attributeIDs)
+	if err != nil {
+		return nil, nil, apperror.Internal(err)
+	}
+	opts, err := uc.attributes.ListOptionsByIDs(ctx, optionIDs)
+	if err != nil {
+		return nil, nil, apperror.Internal(err)
+	}
+	return attrs, opts, nil
+}
+
 // ancestorChainRootFirst walks categoryID's parent_id chain up to the root,
 // returning ids ordered main-category first. A plain loop of FindByID calls
 // is enough given the hard 3-level cap (domain.MaxCategoryLevel) — no

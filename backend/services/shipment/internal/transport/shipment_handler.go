@@ -69,7 +69,7 @@ func (h *ShipmentHandler) ListMine(c *gin.Context) {
 	if middleware.GetRole(c) == "buyer" {
 		shipments, err = h.shipments.ListForBuyer(c.Request.Context(), middleware.GetUserID(c), limit, offset)
 	} else {
-		shipments, err = h.shipments.ListMine(c.Request.Context(), middleware.GetUserID(c), limit, offset)
+		shipments, err = h.shipments.ListMine(c.Request.Context(), middleware.GetUserID(c), c.Query("vendor_id"), limit, offset)
 	}
 	if err != nil {
 		httpresponse.HandleError(c, h.log, err)

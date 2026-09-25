@@ -55,6 +55,37 @@ func toUserResponse(u *domain.User) userResponse {
 	return userResponse{ID: u.ID, Email: u.Email, FullName: u.FullName, Role: string(u.Role)}
 }
 
+// adminUserResponse is deliberately separate from userResponse (used by
+// /me and auth): admin's user directory needs is_active/created_at, which
+// the self-service response never exposed and shouldn't start exposing.
+type adminUserResponse struct {
+	ID        string    `json:"id"`
+	Email     string    `json:"email"`
+	FullName  string    `json:"full_name"`
+	Role      string    `json:"role"`
+	IsActive  bool      `json:"is_active"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+func toAdminUserResponse(u *domain.User) adminUserResponse {
+	return adminUserResponse{
+		ID: u.ID, Email: u.Email, FullName: u.FullName, Role: string(u.Role),
+		IsActive: u.IsActive, CreatedAt: u.CreatedAt,
+	}
+}
+
+func toAdminUserResponseList(users []*domain.User) []adminUserResponse {
+	out := make([]adminUserResponse, 0, len(users))
+	for _, u := range users {
+		out = append(out, toAdminUserResponse(u))
+	}
+	return out
+}
+
+type setActiveRequest struct {
+	IsActive bool `json:"is_active"`
+}
+
 func toAuthResponse(r *usecase.AuthResult) authResponse {
 	return authResponse{
 		User:                  toUserResponse(r.User),

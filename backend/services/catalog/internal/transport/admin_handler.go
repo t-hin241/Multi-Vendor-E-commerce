@@ -32,6 +32,31 @@ func (h *AdminHandler) ListForModeration(c *gin.Context) {
 	httpresponse.OK(c, http.StatusOK, toProductResponseList(products))
 }
 
+// GetForModeration returns the full submission behind a product row —
+// images, media, variants and stock — so admin's approve/reject decision is
+// informed by what the vendor was actually required to supply.
+func (h *AdminHandler) GetForModeration(c *gin.Context) {
+	p, images, media, attributeValues, variants, plainStockQuantity, err := h.products.GetForModeration(c.Request.Context(), c.Param("id"))
+	if err != nil {
+		httpresponse.HandleError(c, h.log, err)
+		return
+	}
+
+	httpresponse.OK(c, http.StatusOK, toProductResponseForModeration(p, images, media, attributeValues, variants, plainStockQuantity))
+}
+
+// GetAuditLog returns the full approve/reject decision history for one
+// product, newest first.
+func (h *AdminHandler) GetAuditLog(c *gin.Context) {
+	entries, err := h.products.ListAuditLog(c.Request.Context(), c.Param("id"))
+	if err != nil {
+		httpresponse.HandleError(c, h.log, err)
+		return
+	}
+
+	httpresponse.OK(c, http.StatusOK, toAuditLogEntryResponseList(entries))
+}
+
 func (h *AdminHandler) Approve(c *gin.Context) {
 	p, err := h.products.Approve(c.Request.Context(), c.Param("id"), middleware.GetUserID(c))
 	if err != nil {

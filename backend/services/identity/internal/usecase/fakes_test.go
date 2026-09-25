@@ -2,6 +2,8 @@ package usecase_test
 
 import (
 	"context"
+	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -73,6 +75,45 @@ func (f *fakeUserRepository) UpdatePasswordHash(_ context.Context, userID, passw
 		return repository.ErrUserNotFound
 	}
 	u.PasswordHash = passwordHash
+	return nil
+}
+
+func (f *fakeUserRepository) List(_ context.Context, role, q string, limit, offset int) ([]*domain.User, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	var matched []*domain.User
+	for _, u := range f.byID {
+		if role != "" && string(u.Role) != role {
+			continue
+		}
+		if q != "" && !strings.Contains(u.Email, q) && !strings.Contains(u.FullName, q) {
+			continue
+		}
+		copyU := *u
+		matched = append(matched, &copyU)
+	}
+	sort.Slice(matched, func(i, j int) bool { return matched[i].CreatedAt.After(matched[j].CreatedAt) })
+
+	if offset >= len(matched) {
+		return nil, nil
+	}
+	end := offset + limit
+	if end > len(matched) {
+		end = len(matched)
+	}
+	return matched[offset:end], nil
+}
+
+func (f *fakeUserRepository) SetActive(_ context.Context, userID string, isActive bool) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	u, ok := f.byID[userID]
+	if !ok {
+		return repository.ErrUserNotFound
+	}
+	u.IsActive = isActive
 	return nil
 }
 

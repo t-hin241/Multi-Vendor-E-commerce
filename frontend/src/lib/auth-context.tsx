@@ -10,12 +10,19 @@ type StoredSession = {
   user: api.User;
   accessToken: string;
   refreshToken: string;
+  // The shop a vendor user is currently acting as — a user may own several
+  // (1:N), so every vendor-scoped screen needs to know which one is active.
+  // Stored alongside the session (not a separate localStorage key) so it's
+  // cleared automatically on logout, like everything else here.
+  selectedVendorId?: string;
 };
 
 type AuthContextValue = {
   user: api.User | null;
   accessToken: string | null;
   isReady: boolean;
+  selectedVendorId: string | null;
+  setSelectedVendorId: (vendorId: string | null) => void;
   login: (email: string, password: string) => Promise<void>;
   register: (
     email: string,
@@ -107,6 +114,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     [applyResult],
   );
 
+  const setSelectedVendorId = useCallback(
+    (vendorId: string | null) => {
+      if (!session) return;
+      setStoredSession({ ...session, selectedVendorId: vendorId ?? undefined });
+    },
+    [session],
+  );
+
   const logout = useCallback(() => {
     const refreshToken = session?.refreshToken;
     setStoredSession(null);
@@ -124,9 +139,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         return await fn(session.accessToken);
       } catch (err) {
         if (err instanceof api.ApiError && err.status === 401) {
-          const result = await api.refreshSession(session.refreshToken);
-          applyResult(result);
-          return fn(result.access_token);
+          try {
+            const result = await api.refreshSession(session.refreshToken);
+            applyResult(result);
+            return await fn(result.access_token);
+          } catch (refreshErr) {
+            // The refresh token itself is dead (expired/revoked) — clear the
+            // stale session so the UI falls back to logged-out instead of
+            // staying stuck showing an authenticated shell that can never
+            // successfully call anything again.
+            setStoredSession(null);
+            throw refreshErr;
+          }
         }
         throw err;
       }
@@ -139,12 +163,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       user: session?.user ?? null,
       accessToken: session?.accessToken ?? null,
       isReady,
+      selectedVendorId: session?.selectedVendorId ?? null,
+      setSelectedVendorId,
       login,
       register,
       logout,
       callWithAuth,
     }),
-    [session, isReady, login, register, logout, callWithAuth],
+    [session, isReady, setSelectedVendorId, login, register, logout, callWithAuth],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

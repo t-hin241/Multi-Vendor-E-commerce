@@ -111,6 +111,8 @@ services:
         condition: service_healthy
       nats:
         condition: service_healthy
+      minio:
+        condition: service_healthy
       notification:
         condition: service_started
     build:
@@ -121,6 +123,12 @@ services:
       PORT: "8082"
       DATABASE_URL: postgres://${POSTGRES_USER:-shopee}:${POSTGRES_PASSWORD}@postgres:5432/vendor_db?sslmode=disable
       NOTIFICATION_SERVICE_URL: http://notification:8090
+      OBJECT_STORAGE_ENDPOINT: minio:9000
+      OBJECT_STORAGE_ACCESS_KEY: ${MINIO_ROOT_USER:?set MINIO_ROOT_USER in .env}
+      OBJECT_STORAGE_SECRET_KEY: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD in .env}
+      OBJECT_STORAGE_USE_SSL: "false"
+      OBJECT_STORAGE_BUCKET: vendor-branding
+      OBJECT_STORAGE_PUBLIC_BASE_URL: ${OBJECT_STORAGE_PUBLIC_BASE_URL:-http://localhost:9000}
     ports:
       - "8082:8082"
 

@@ -99,3 +99,54 @@ func toVariantStockResponseList(stock map[string]int64) []variantStockResponse {
 	}
 	return out
 }
+
+type restockRequestResponse struct {
+	ID                string     `json:"id"`
+	ProductID         string     `json:"product_id"`
+	VariantID         *string    `json:"variant_id,omitempty"`
+	VendorID          string     `json:"vendor_id"`
+	RequestedQuantity int64      `json:"requested_quantity"`
+	Status            string     `json:"status"`
+	RejectionReason   *string    `json:"rejection_reason,omitempty"`
+	CreatedAt         time.Time  `json:"created_at"`
+	DecidedAt         *time.Time `json:"decided_at,omitempty"`
+}
+
+func toRestockRequestResponse(r *domain.RestockRequest) restockRequestResponse {
+	return restockRequestResponse{
+		ID:                r.ID,
+		ProductID:         r.ProductID,
+		VariantID:         r.VariantID,
+		VendorID:          r.VendorID,
+		RequestedQuantity: r.RequestedQuantity,
+		Status:            string(r.Status),
+		RejectionReason:   r.RejectionReason,
+		CreatedAt:         r.CreatedAt,
+		DecidedAt:         r.DecidedAt,
+	}
+}
+
+func toRestockRequestResponseList(requests []*domain.RestockRequest) []restockRequestResponse {
+	out := make([]restockRequestResponse, 0, len(requests))
+	for _, r := range requests {
+		out = append(out, toRestockRequestResponse(r))
+	}
+	return out
+}
+
+type rejectRestockRequest struct {
+	Reason string `json:"reason" binding:"required"`
+}
+
+// stockReadinessResponse backs Catalog's SubmitForReview completeness
+// check.
+type stockReadinessResponse struct {
+	Ready bool `json:"ready"`
+}
+
+// productStockResponse backs Catalog's admin moderation detail view for a
+// non-variant product.
+type productStockResponse struct {
+	AvailableQuantity int64 `json:"available_quantity"`
+	Exists            bool  `json:"exists"`
+}

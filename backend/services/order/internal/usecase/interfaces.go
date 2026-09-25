@@ -75,7 +75,7 @@ type CatalogGateway interface {
 
 // VendorGateway lets a vendor user see their own sub-orders.
 type VendorGateway interface {
-	GetApprovedVendorID(ctx context.Context, userID string) (vendorID string, err error)
+	GetApprovedVendorID(ctx context.Context, userID, vendorID string) (string, error)
 }
 
 // InventoryGateway is the reserve/release/commit contract used at checkout,

@@ -91,7 +91,7 @@ func (f *fakeProductRepository) Create(_ context.Context, p *domain.Product) err
 	defer f.mu.Unlock()
 	f.nextID++
 	p.ID = "product-" + strconv.Itoa(f.nextID)
-	p.Status = domain.StatusPendingReview
+	p.Status = domain.StatusDraft
 	p.IsActive = true
 	p.CreatedAt = time.Now()
 	p.UpdatedAt = time.Now()
@@ -160,7 +160,7 @@ func (f *fakeProductRepository) ListByStatus(_ context.Context, status string, _
 	return out, nil
 }
 
-func (f *fakeProductRepository) ListStorefront(_ context.Context, categoryID, search string, _, _ int) ([]*domain.Product, error) {
+func (f *fakeProductRepository) ListStorefront(_ context.Context, categoryID, vendorID, search string, _, _ int) ([]*domain.Product, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	var out []*domain.Product
@@ -171,10 +171,32 @@ func (f *fakeProductRepository) ListStorefront(_ context.Context, categoryID, se
 		if categoryID != "" && p.CategoryID != categoryID {
 			continue
 		}
+		if vendorID != "" && p.VendorID != vendorID {
+			continue
+		}
 		copyP := *p
 		out = append(out, &copyP)
 	}
 	return out, nil
+}
+
+func (f *fakeProductRepository) CountStorefront(_ context.Context, categoryID, vendorID, _ string) (int, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	count := 0
+	for _, p := range f.byID {
+		if !p.IsPubliclyVisible() {
+			continue
+		}
+		if categoryID != "" && p.CategoryID != categoryID {
+			continue
+		}
+		if vendorID != "" && p.VendorID != vendorID {
+			continue
+		}
+		count++
+	}
+	return count, nil
 }
 
 func (f *fakeProductRepository) UpdateStatus(_ context.Context, id string, status domain.Status, reason *string) error {
@@ -227,6 +249,17 @@ func (f *fakeProductImageRepository) ReplaceForProduct(_ context.Context, img *d
 	return oldKeys, nil
 }
 
+func (f *fakeProductImageRepository) DeleteForProduct(_ context.Context, productID string) ([]string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var deletedKeys []string
+	for _, img := range f.byID[productID] {
+		deletedKeys = append(deletedKeys, img.ObjectKey)
+	}
+	delete(f.byID, productID)
+	return deletedKeys, nil
+}
+
 func (f *fakeProductImageRepository) ListForProduct(_ context.Context, productID string) ([]*domain.ProductImage, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -277,20 +310,46 @@ func (f *fakeProductMediaRepository) ListForProduct(_ context.Context, productID
 	return f.byID[productID], nil
 }
 
+type auditLogRecord struct {
+	ProductID   string
+	ActorUserID string
+	Action      string
+	Reason      *string
+}
+
 type fakeAuditLogRepository struct {
 	mu      sync.Mutex
 	entries []string
+	records []auditLogRecord
 }
 
 func newFakeAuditLogRepository() *fakeAuditLogRepository {
 	return &fakeAuditLogRepository{}
 }
 
-func (f *fakeAuditLogRepository) Create(_ context.Context, productID, actorUserID, action string, _ *string) error {
+func (f *fakeAuditLogRepository) Create(_ context.Context, productID, actorUserID, action string, reason *string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.entries = append(f.entries, action+":"+productID+":"+actorUserID)
+	f.records = append(f.records, auditLogRecord{ProductID: productID, ActorUserID: actorUserID, Action: action, Reason: reason})
 	return nil
+}
+
+// List returns entries newest-first, matching the real repository's
+// ORDER BY created_at DESC.
+func (f *fakeAuditLogRepository) List(_ context.Context, productID string) ([]*domain.AuditLog, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	var out []*domain.AuditLog
+	for i := len(f.records) - 1; i >= 0; i-- {
+		r := f.records[i]
+		if r.ProductID != productID {
+			continue
+		}
+		out = append(out, &domain.AuditLog{ActorUserID: r.ActorUserID, Action: r.Action, Reason: r.Reason, CreatedAt: time.Now()})
+	}
+	return out, nil
 }
 
 // fakeVendorGateway simulates Vendor's internal approval-status endpoint.
@@ -303,9 +362,9 @@ func newFakeVendorGateway() *fakeVendorGateway {
 	return &fakeVendorGateway{approvedVendors: make(map[string]string)}
 }
 
-func (f *fakeVendorGateway) GetApprovedVendorID(_ context.Context, userID string) (string, error) {
-	vendorID, ok := f.approvedVendors[userID]
-	if !ok {
+func (f *fakeVendorGateway) GetApprovedVendorID(_ context.Context, userID, vendorID string) (string, error) {
+	approved, ok := f.approvedVendors[userID]
+	if !ok || approved != vendorID {
 		return "", apperror.Forbidden("You must have an approved vendor account to sell products")
 	}
 	return vendorID, nil
@@ -470,12 +529,13 @@ func (f *fakeStorefrontCacheRepository) GetVariantStock(_ context.Context, varia
 // the public product-detail page, same failure-simulation shape as
 // fakeOrderGateway/fakeVendorNameGateway.
 type fakeInventoryGateway struct {
-	stock map[string]int64
-	err   error
+	stock      map[string]int64 // variant id -> quantity
+	plainStock map[string]int64 // product id -> quantity, for non-variant products
+	err        error
 }
 
 func newFakeInventoryGateway() *fakeInventoryGateway {
-	return &fakeInventoryGateway{stock: make(map[string]int64)}
+	return &fakeInventoryGateway{stock: make(map[string]int64), plainStock: make(map[string]int64)}
 }
 
 func (f *fakeInventoryGateway) GetVariantStock(_ context.Context, variantIDs []string) (map[string]int64, error) {
@@ -491,17 +551,53 @@ func (f *fakeInventoryGateway) GetVariantStock(_ context.Context, variantIDs []s
 	return out, nil
 }
 
+// CheckStockReadiness mirrors Inventory's own readiness rule: a plain
+// product needs a positive plainStock entry, a variant product needs every
+// listed variant to have a positive stock entry.
+func (f *fakeInventoryGateway) CheckStockReadiness(_ context.Context, productID string, variantIDs []string) (bool, error) {
+	if f.err != nil {
+		return false, f.err
+	}
+	if len(variantIDs) == 0 {
+		qty, ok := f.plainStock[productID]
+		return ok && qty > 0, nil
+	}
+	for _, id := range variantIDs {
+		qty, ok := f.stock[id]
+		if !ok || qty <= 0 {
+			return false, nil
+		}
+	}
+	return true, nil
+}
+
+func (f *fakeInventoryGateway) GetProductStock(_ context.Context, productID string) (int64, bool, error) {
+	if f.err != nil {
+		return 0, false, f.err
+	}
+	qty, ok := f.plainStock[productID]
+	return qty, ok, nil
+}
+
 // fakeAttributeTemplateResolver simulates AttributeUseCase.ResolveTemplate
-// for ProductUseCase's tests, without exercising the real inheritance/merge
-// logic (that's covered directly in attribute_usecase_test.go). templates
-// is keyed by category id; err, if set, simulates the resolve call failing.
+// (and its LookupAttributeLabels fallback) for ProductUseCase's tests,
+// without exercising the real inheritance/merge logic (that's covered
+// directly in attribute_usecase_test.go). templates is keyed by category id;
+// attrsByID/optsByID back the direct-lookup fallback; err, if set, simulates
+// the resolve call failing.
 type fakeAttributeTemplateResolver struct {
 	templates map[string][]domain.ResolvedAttribute
+	attrsByID map[string]*domain.Attribute
+	optsByID  map[string]*domain.AttributeOption
 	err       error
 }
 
 func newFakeAttributeTemplateResolver() *fakeAttributeTemplateResolver {
-	return &fakeAttributeTemplateResolver{templates: make(map[string][]domain.ResolvedAttribute)}
+	return &fakeAttributeTemplateResolver{
+		templates: make(map[string][]domain.ResolvedAttribute),
+		attrsByID: make(map[string]*domain.Attribute),
+		optsByID:  make(map[string]*domain.AttributeOption),
+	}
 }
 
 func (f *fakeAttributeTemplateResolver) ResolveTemplate(_ context.Context, categoryID string) ([]domain.ResolvedAttribute, error) {
@@ -509,6 +605,25 @@ func (f *fakeAttributeTemplateResolver) ResolveTemplate(_ context.Context, categ
 		return nil, f.err
 	}
 	return f.templates[categoryID], nil
+}
+
+func (f *fakeAttributeTemplateResolver) LookupAttributeLabels(_ context.Context, attributeIDs, optionIDs []string) (map[string]*domain.Attribute, map[string]*domain.AttributeOption, error) {
+	if f.err != nil {
+		return nil, nil, f.err
+	}
+	attrs := make(map[string]*domain.Attribute, len(attributeIDs))
+	for _, id := range attributeIDs {
+		if a, ok := f.attrsByID[id]; ok {
+			attrs[id] = a
+		}
+	}
+	opts := make(map[string]*domain.AttributeOption, len(optionIDs))
+	for _, id := range optionIDs {
+		if o, ok := f.optsByID[id]; ok {
+			opts[id] = o
+		}
+	}
+	return attrs, opts, nil
 }
 
 type fakeProductAttributeValueRepository struct {

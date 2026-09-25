@@ -18,6 +18,7 @@ func NewRouter(
 	jwtManager *authjwt.Manager,
 	itemHandler *ItemHandler,
 	internalHandler *InternalHandler,
+	adminHandler *AdminHandler,
 	checkers ...health.Checker,
 ) *gin.Engine {
 	if env == "production" {
@@ -37,6 +38,14 @@ func NewRouter(
 		vendorGroup.GET("/items/mine", itemHandler.ListMine)
 		vendorGroup.PATCH("/items/:productID/restock", itemHandler.Restock)
 		vendorGroup.PATCH("/items/variant/:variantID/restock", itemHandler.RestockVariant)
+		vendorGroup.GET("/restock-requests/mine", itemHandler.ListMyRestockRequests)
+	}
+
+	adminGroup := r.Group("/api/inventory/admin", middleware.RequireAuth(jwtManager), middleware.RequireRole("admin"))
+	{
+		adminGroup.GET("/restock-requests", adminHandler.ListRestockRequests)
+		adminGroup.PATCH("/restock-requests/:id/approve", adminHandler.Approve)
+		adminGroup.PATCH("/restock-requests/:id/reject", adminHandler.Reject)
 	}
 
 	internalGroup := r.Group("/internal/inventory")
@@ -45,6 +54,8 @@ func NewRouter(
 		internalGroup.POST("/release", internalHandler.Release)
 		internalGroup.POST("/commit", internalHandler.Commit)
 		internalGroup.GET("/variants/stock", internalHandler.GetVariantStock)
+		internalGroup.GET("/products/:productID/readiness", internalHandler.CheckStockReadiness)
+		internalGroup.GET("/products/:productID/stock", internalHandler.GetProductStock)
 	}
 
 	return r

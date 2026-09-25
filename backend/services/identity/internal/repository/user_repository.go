@@ -68,6 +68,50 @@ func (r *UserRepository) UpdatePasswordHash(ctx context.Context, userID, passwor
 	return nil
 }
 
+// List is admin's user directory: role is an exact-match filter (empty =
+// every role), q is a substring match against email or full name (empty =
+// unfiltered). Newest accounts first.
+func (r *UserRepository) List(ctx context.Context, role, q string, limit, offset int) ([]*domain.User, error) {
+	const query = `
+		SELECT id, email, password_hash, full_name, role, is_active, created_at, updated_at
+		FROM users
+		WHERE ($1 = '' OR role = $1)
+		  AND ($2 = '' OR email ILIKE '%' || $2 || '%' OR full_name ILIKE '%' || $2 || '%')
+		ORDER BY created_at DESC
+		LIMIT $3 OFFSET $4`
+
+	rows, err := r.pool.Query(ctx, query, role, q, limit, offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var users []*domain.User
+	for rows.Next() {
+		u, err := scanUser(rows)
+		if err != nil {
+			return nil, err
+		}
+		users = append(users, u)
+	}
+	return users, rows.Err()
+}
+
+// SetActive flips a user's account status. Login already checks IsActive
+// (auth_usecase.go), so deactivating blocks future logins; the caller is
+// responsible for also revoking any already-issued session.
+func (r *UserRepository) SetActive(ctx context.Context, userID string, isActive bool) error {
+	const query = `UPDATE users SET is_active = $1, updated_at = now() WHERE id = $2`
+	tag, err := r.pool.Exec(ctx, query, isActive, userID)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrUserNotFound
+	}
+	return nil
+}
+
 func scanUser(row pgx.Row) (*domain.User, error) {
 	var u domain.User
 	err := row.Scan(&u.ID, &u.Email, &u.PasswordHash, &u.FullName, &u.Role, &u.IsActive, &u.CreatedAt, &u.UpdatedAt)

@@ -300,17 +300,17 @@ func derefString(s *string) string {
 // Order itself used to quote the fee at checkout time) and runs it
 // through the same resolveAndCreate path, so a vendor is never permanently
 // stuck with a missing shipment just because one HTTP call once failed.
+// CreateOrGet derives the owning shop from the vendor order itself — it
+// already has a fixed vendor_id, established at checkout from the
+// product's own vendor — rather than asking the client which shop it
+// means, and confirms userID actually owns that shop.
 func (uc *ShipmentUseCase) CreateOrGet(ctx context.Context, userID, vendorOrderID string) (*domain.Shipment, error) {
-	vendorID, err := uc.vendors.GetApprovedVendorID(ctx, userID)
-	if err != nil {
-		return nil, err
-	}
-
 	vo, err := uc.orders.GetVendorOrder(ctx, vendorOrderID)
 	if err != nil {
 		return nil, err
 	}
-	if vo.VendorID != vendorID {
+	vendorID, err := uc.vendors.GetApprovedVendorID(ctx, userID, vo.VendorID)
+	if err != nil {
 		return nil, apperror.Forbidden("You do not have access to this order")
 	}
 	if notShippableStatuses[vo.Status] {
@@ -378,8 +378,8 @@ func (uc *ShipmentUseCase) Advance(ctx context.Context, userID, shipmentID strin
 	return shipment, nil
 }
 
-func (uc *ShipmentUseCase) ListMine(ctx context.Context, userID string, limit, offset int) ([]*domain.Shipment, error) {
-	vendorID, err := uc.vendors.GetApprovedVendorID(ctx, userID)
+func (uc *ShipmentUseCase) ListMine(ctx context.Context, userID, vendorID string, limit, offset int) ([]*domain.Shipment, error) {
+	vendorID, err := uc.vendors.GetApprovedVendorID(ctx, userID, vendorID)
 	if err != nil {
 		return nil, err
 	}
@@ -402,12 +402,10 @@ func (uc *ShipmentUseCase) ListForBuyer(ctx context.Context, buyerID string, lim
 	return shipments, nil
 }
 
+// GetByVendorOrderID derives the owning shop from the shipment itself
+// rather than asking the client which shop it means, and confirms userID
+// actually owns that shop.
 func (uc *ShipmentUseCase) GetByVendorOrderID(ctx context.Context, userID, vendorOrderID string) (*domain.Shipment, error) {
-	vendorID, err := uc.vendors.GetApprovedVendorID(ctx, userID)
-	if err != nil {
-		return nil, err
-	}
-
 	shipment, err := uc.shipments.FindByVendorOrderID(ctx, vendorOrderID)
 	if err != nil {
 		if errors.Is(err, repository.ErrShipmentNotFound) {
@@ -415,7 +413,7 @@ func (uc *ShipmentUseCase) GetByVendorOrderID(ctx context.Context, userID, vendo
 		}
 		return nil, apperror.Internal(err)
 	}
-	if shipment.VendorID != vendorID {
+	if _, err := uc.vendors.GetApprovedVendorID(ctx, userID, shipment.VendorID); err != nil {
 		return nil, apperror.Forbidden("You do not have access to this shipment")
 	}
 	return shipment, nil
@@ -433,8 +431,7 @@ func (uc *ShipmentUseCase) ListEventsForShipment(ctx context.Context, userID, sh
 		return nil, apperror.Internal(err)
 	}
 	if shipment.BuyerID != userID {
-		vendorID, err := uc.vendors.GetApprovedVendorID(ctx, userID)
-		if err != nil || shipment.VendorID != vendorID {
+		if _, err := uc.vendors.GetApprovedVendorID(ctx, userID, shipment.VendorID); err != nil {
 			return nil, apperror.Forbidden("You do not have access to this shipment")
 		}
 	}
@@ -446,12 +443,10 @@ func (uc *ShipmentUseCase) ListEventsForShipment(ctx context.Context, userID, sh
 	return events, nil
 }
 
+// findOwned derives the owning shop from the shipment itself rather than
+// asking the client which shop it means, and confirms userID actually owns
+// that shop.
 func (uc *ShipmentUseCase) findOwned(ctx context.Context, userID, shipmentID string) (*domain.Shipment, error) {
-	vendorID, err := uc.vendors.GetApprovedVendorID(ctx, userID)
-	if err != nil {
-		return nil, err
-	}
-
 	shipment, err := uc.shipments.FindByID(ctx, shipmentID)
 	if err != nil {
 		if errors.Is(err, repository.ErrShipmentNotFound) {
@@ -459,7 +454,7 @@ func (uc *ShipmentUseCase) findOwned(ctx context.Context, userID, shipmentID str
 		}
 		return nil, apperror.Internal(err)
 	}
-	if shipment.VendorID != vendorID {
+	if _, err := uc.vendors.GetApprovedVendorID(ctx, userID, shipment.VendorID); err != nil {
 		return nil, apperror.Forbidden("You do not have access to this shipment")
 	}
 	return shipment, nil

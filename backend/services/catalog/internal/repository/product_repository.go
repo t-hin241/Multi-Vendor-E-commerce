@@ -88,23 +88,43 @@ func (r *ProductRepository) ListByStatus(ctx context.Context, status string, lim
 	return scanProducts(rows)
 }
 
-// ListStorefront returns only publicly visible products (approved and
-// active), optionally filtered by category and a case-insensitive name
-// search.
-func (r *ProductRepository) ListStorefront(ctx context.Context, categoryID, search string, limit, offset int) ([]*domain.Product, error) {
-	query := productSelectColumns + `
-		FROM products
-		WHERE status = 'approved' AND is_active = TRUE`
-	args := []any{}
+// storefrontWhereClause builds the WHERE clause shared by ListStorefront and
+// CountStorefront, so the two never drift apart on what counts as "visible".
+func storefrontWhereClause(categoryID, vendorID, search string) (clause string, args []any) {
+	clause = `WHERE status = 'approved' AND is_active = TRUE`
 
+	if vendorID != "" {
+		args = append(args, vendorID)
+		clause += ` AND vendor_id = $` + strconv.Itoa(len(args))
+	}
 	if categoryID != "" {
 		args = append(args, categoryID)
-		query += ` AND category_id = $` + strconv.Itoa(len(args))
+		// Products can be attached at any depth under the selected category
+		// (categories only carry their own leaf-ish products, not those of
+		// their descendants), so browsing a parent node must include every
+		// descendant's products too, not just an exact category_id match.
+		clause += ` AND category_id IN (
+			WITH RECURSIVE descendants AS (
+				SELECT id FROM categories WHERE id = $` + strconv.Itoa(len(args)) + `
+				UNION ALL
+				SELECT c.id FROM categories c JOIN descendants d ON c.parent_id = d.id
+			)
+			SELECT id FROM descendants
+		)`
 	}
 	if search != "" {
 		args = append(args, search)
-		query += ` AND name ILIKE '%' || $` + strconv.Itoa(len(args)) + ` || '%'`
+		clause += ` AND name ILIKE '%' || $` + strconv.Itoa(len(args)) + ` || '%'`
 	}
+	return clause, args
+}
+
+// ListStorefront returns only publicly visible products (approved and
+// active), optionally filtered by category, vendor and a case-insensitive
+// name search.
+func (r *ProductRepository) ListStorefront(ctx context.Context, categoryID, vendorID, search string, limit, offset int) ([]*domain.Product, error) {
+	where, args := storefrontWhereClause(categoryID, vendorID, search)
+	query := productSelectColumns + `FROM products ` + where
 
 	args = append(args, limit, offset)
 	query += ` ORDER BY created_at DESC LIMIT $` + strconv.Itoa(len(args)-1) + ` OFFSET $` + strconv.Itoa(len(args))
@@ -115,6 +135,18 @@ func (r *ProductRepository) ListStorefront(ctx context.Context, categoryID, sear
 	}
 	defer rows.Close()
 	return scanProducts(rows)
+}
+
+// CountStorefront returns the total number of products ListStorefront would
+// return across all pages for the same filters, so the client can render
+// page-number pagination instead of an open-ended "load more."
+func (r *ProductRepository) CountStorefront(ctx context.Context, categoryID, vendorID, search string) (int, error) {
+	where, args := storefrontWhereClause(categoryID, vendorID, search)
+	query := `SELECT count(*) FROM products ` + where
+
+	var total int
+	err := r.pool.QueryRow(ctx, query, args...).Scan(&total)
+	return total, err
 }
 
 func (r *ProductRepository) UpdateStatus(ctx context.Context, id string, status domain.Status, rejectionReason *string) error {

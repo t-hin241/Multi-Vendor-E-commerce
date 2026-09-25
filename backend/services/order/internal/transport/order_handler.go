@@ -82,7 +82,7 @@ func (h *OrderHandler) ListMine(c *gin.Context) {
 func (h *OrderHandler) ListVendorMine(c *gin.Context) {
 	limit, offset := paginationParams(c)
 
-	vendorOrders, items, err := h.orders.ListVendorMine(c.Request.Context(), middleware.GetUserID(c), limit, offset)
+	vendorOrders, items, err := h.orders.ListVendorMine(c.Request.Context(), middleware.GetUserID(c), c.Query("vendor_id"), limit, offset)
 	if err != nil {
 		httpresponse.HandleError(c, h.log, err)
 		return
@@ -108,7 +108,7 @@ func (h *OrderHandler) UpdateVendorOrderStatus(c *gin.Context) {
 }
 
 func (h *OrderHandler) Summary(c *gin.Context) {
-	summary, topProducts, err := h.orders.GetVendorSummary(c.Request.Context(), middleware.GetUserID(c))
+	summary, topProducts, err := h.orders.GetVendorSummary(c.Request.Context(), middleware.GetUserID(c), c.Query("vendor_id"))
 	if err != nil {
 		httpresponse.HandleError(c, h.log, err)
 		return
@@ -124,7 +124,7 @@ func (h *OrderHandler) Summary(c *gin.Context) {
 func (h *OrderHandler) ExportCSV(c *gin.Context) {
 	const maxExportRows = 5000
 
-	vendorOrders, itemsByVendorOrder, err := h.orders.ListVendorMine(c.Request.Context(), middleware.GetUserID(c), maxExportRows, 0)
+	vendorOrders, itemsByVendorOrder, err := h.orders.ListVendorMine(c.Request.Context(), middleware.GetUserID(c), c.Query("vendor_id"), maxExportRows, 0)
 	if err != nil {
 		httpresponse.HandleError(c, h.log, err)
 		return

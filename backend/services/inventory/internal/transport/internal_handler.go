@@ -68,6 +68,40 @@ func (h *InternalHandler) GetVariantStock(c *gin.Context) {
 	httpresponse.OK(c, http.StatusOK, toVariantStockResponseList(stock))
 }
 
+// CheckStockReadiness serves Catalog's SubmitForReview completeness gate: a
+// plain product needs its own stocked inventory row, a variant product
+// needs every listed variant stocked.
+func (h *InternalHandler) CheckStockReadiness(c *gin.Context) {
+	raw := strings.Split(c.Query("variant_ids"), ",")
+	variantIDs := make([]string, 0, len(raw))
+	for _, id := range raw {
+		id = strings.TrimSpace(id)
+		if id != "" {
+			variantIDs = append(variantIDs, id)
+		}
+	}
+
+	ready, err := h.inventory.CheckStockReadiness(c.Request.Context(), c.Param("productID"), variantIDs)
+	if err != nil {
+		httpresponse.HandleError(c, h.log, err)
+		return
+	}
+
+	httpresponse.OK(c, http.StatusOK, stockReadinessResponse{Ready: ready})
+}
+
+// GetProductStock serves Catalog's admin moderation detail view for a
+// non-variant product's current stock.
+func (h *InternalHandler) GetProductStock(c *gin.Context) {
+	qty, exists, err := h.inventory.GetProductStock(c.Request.Context(), c.Param("productID"))
+	if err != nil {
+		httpresponse.HandleError(c, h.log, err)
+		return
+	}
+
+	httpresponse.OK(c, http.StatusOK, productStockResponse{AvailableQuantity: qty, Exists: exists})
+}
+
 func (h *InternalHandler) Release(c *gin.Context) {
 	var req releaseRequest
 	if err := c.ShouldBindJSON(&req); err != nil {

@@ -26,7 +26,7 @@ func (h *VendorShippingMethodHandler) Enable(c *gin.Context) {
 		httpresponse.Error(c, http.StatusBadRequest, "validation_error", err.Error())
 		return
 	}
-	method, err := h.methods.Enable(c.Request.Context(), middleware.GetUserID(c), req.CarrierID)
+	method, err := h.methods.Enable(c.Request.Context(), middleware.GetUserID(c), req.VendorID, req.CarrierID)
 	if err != nil {
 		httpresponse.HandleError(c, h.log, err)
 		return
@@ -35,7 +35,7 @@ func (h *VendorShippingMethodHandler) Enable(c *gin.Context) {
 }
 
 func (h *VendorShippingMethodHandler) ListMine(c *gin.Context) {
-	methods, err := h.methods.ListMine(c.Request.Context(), middleware.GetUserID(c))
+	methods, err := h.methods.ListMine(c.Request.Context(), middleware.GetUserID(c), c.Query("vendor_id"))
 	if err != nil {
 		httpresponse.HandleError(c, h.log, err)
 		return

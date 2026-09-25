@@ -14,6 +14,7 @@ type applyRequest struct {
 type updateProfileRequest struct {
 	ShopName    string `json:"shop_name" binding:"required"`
 	Description string `json:"description"`
+	PolicyText  string `json:"policy_text"`
 }
 
 type rejectRequest struct {
@@ -28,6 +29,9 @@ type vendorResponse struct {
 	Status          string     `json:"status"`
 	RejectionReason *string    `json:"rejection_reason,omitempty"`
 	ApprovedAt      *time.Time `json:"approved_at,omitempty"`
+	LogoURL         *string    `json:"logo_url,omitempty"`
+	BannerURL       *string    `json:"banner_url,omitempty"`
+	PolicyText      string     `json:"policy_text"`
 	CreatedAt       time.Time  `json:"created_at"`
 	UpdatedAt       time.Time  `json:"updated_at"`
 }
@@ -41,8 +45,30 @@ func toVendorResponse(v *domain.Vendor) vendorResponse {
 		Status:          string(v.Status),
 		RejectionReason: v.RejectionReason,
 		ApprovedAt:      v.ApprovedAt,
+		LogoURL:         v.LogoURL,
+		BannerURL:       v.BannerURL,
+		PolicyText:      v.PolicyText,
 		CreatedAt:       v.CreatedAt,
 		UpdatedAt:       v.UpdatedAt,
+	}
+}
+
+// publicVendorResponse is the public shop page's response shape — no
+// user_id/rejection_reason/approved_by, which are internal moderation
+// details a public page has no business exposing.
+type publicVendorResponse struct {
+	ID          string  `json:"id"`
+	ShopName    string  `json:"shop_name"`
+	Description string  `json:"description"`
+	LogoURL     *string `json:"logo_url,omitempty"`
+	BannerURL   *string `json:"banner_url,omitempty"`
+	PolicyText  string  `json:"policy_text,omitempty"`
+}
+
+func toPublicVendorResponse(v *domain.Vendor) publicVendorResponse {
+	return publicVendorResponse{
+		ID: v.ID, ShopName: v.ShopName, Description: v.Description,
+		LogoURL: v.LogoURL, BannerURL: v.BannerURL, PolicyText: v.PolicyText,
 	}
 }
 
@@ -50,6 +76,23 @@ func toVendorResponseList(vendors []*domain.Vendor) []vendorResponse {
 	out := make([]vendorResponse, 0, len(vendors))
 	for _, v := range vendors {
 		out = append(out, toVendorResponse(v))
+	}
+	return out
+}
+
+type auditLogEntryResponse struct {
+	ActorUserID string    `json:"actor_user_id"`
+	Action      string    `json:"action"`
+	Reason      *string   `json:"reason,omitempty"`
+	CreatedAt   time.Time `json:"created_at"`
+}
+
+func toAuditLogEntryResponseList(entries []*domain.AuditLog) []auditLogEntryResponse {
+	out := make([]auditLogEntryResponse, 0, len(entries))
+	for _, e := range entries {
+		out = append(out, auditLogEntryResponse{
+			ActorUserID: e.ActorUserID, Action: e.Action, Reason: e.Reason, CreatedAt: e.CreatedAt,
+		})
 	}
 	return out
 }

@@ -1,27 +1,45 @@
 "use client";
 
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { Download } from "lucide-react";
+import Link from "next/link";
 import { useState } from "react";
 
+import { OrderStatusBadge } from "@/components/order-status-badge";
+import { SectionHeader } from "@/components/section-header";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Separator } from "@/components/ui/separator";
+import { StatCard } from "@/components/vendor/stat-card";
 import * as api from "@/lib/api-client";
 import { useAuth } from "@/lib/auth-context";
+import { formatMoney } from "@/lib/format";
 
-function formatMoney(amount: number, currency: string) {
-  return `${amount.toLocaleString("vi-VN")} ${currency}`;
+// A vendor order still needs a vendor action if it's paid (not started),
+// processing (not shipped), or shipped but the carrier's interception
+// decision is still pending -- everything else is resolved history.
+function needsAction(vo: api.VendorOrder, shipment?: api.Shipment): boolean {
+  if (vo.status === "paid" || vo.status === "processing") return true;
+  return vo.status === "shipped" && shipment?.status === "interception_requested";
 }
 
 export default function VendorOrdersPage() {
-  const { callWithAuth } = useAuth();
+  const { callWithAuth, selectedVendorId } = useAuth();
   const queryClient = useQueryClient();
+  const [showAllHistory, setShowAllHistory] = useState(false);
 
   const ordersQuery = useQuery({
-    queryKey: ["vendor-orders"],
-    queryFn: () => callWithAuth((token) => api.listVendorOrders(token)),
+    queryKey: ["vendor-orders", selectedVendorId],
+    queryFn: () => callWithAuth((token) => api.listVendorOrders(token, selectedVendorId!)),
+    enabled: Boolean(selectedVendorId),
   });
 
   const shipmentsQuery = useQuery({
-    queryKey: ["vendor-shipments"],
-    queryFn: () => callWithAuth((token) => api.listMyShipments(token, { limit: 100 })),
+    queryKey: ["vendor-shipments", selectedVendorId],
+    queryFn: () =>
+      callWithAuth((token) => api.listMyShipments(token, { vendorId: selectedVendorId!, limit: 100 })),
+    enabled: Boolean(selectedVendorId),
   });
 
   async function refresh() {
@@ -29,119 +47,120 @@ export default function VendorOrdersPage() {
     await queryClient.invalidateQueries({ queryKey: ["vendor-shipments"] });
   }
 
+  if (!selectedVendorId) {
+    return (
+      <p className="text-sm text-muted-foreground">
+        Bạn chưa có cửa hàng nào.{" "}
+        <Link href="/vendor/shops" className="text-primary underline">
+          Quản lý cửa hàng
+        </Link>
+      </p>
+    );
+  }
+
+  const shipmentFor = (vo: api.VendorOrder) =>
+    shipmentsQuery.data?.find((s) => s.vendor_order_id === vo.id);
+
+  const orders = ordersQuery.data ?? [];
+  const queue = orders.filter((vo) => needsAction(vo, shipmentFor(vo)));
+  const history = orders.filter((vo) => !needsAction(vo, shipmentFor(vo)));
+  const visibleHistory = showAllHistory ? history : history.slice(0, 5);
+
   return (
-    <main className="mx-auto max-w-2xl px-6 py-12">
-      <div className="flex items-center justify-between">
-        <h1 className="text-xl font-semibold text-slate-900">My vendor orders</h1>
-        <ExportCsvButton />
-      </div>
+    <div className="flex flex-col gap-6">
+      <SectionHeader
+        as="h1"
+        title="Đơn hàng của tôi"
+        action={<ExportCsvButton vendorId={selectedVendorId} />}
+      />
 
-      <SummarySection />
+      <SummarySection vendorId={selectedVendorId} />
 
-      {ordersQuery.isPending && <p className="mt-6 text-sm text-slate-500">Loading…</p>}
+      {ordersQuery.isPending && <p className="text-sm text-muted-foreground">Đang tải…</p>}
       {ordersQuery.data?.length === 0 && (
-        <p className="mt-6 text-sm text-slate-500">No orders yet.</p>
+        <p className="text-sm text-muted-foreground">Chưa có đơn hàng nào.</p>
       )}
 
-      <ul className="mt-6 space-y-3">
-        {ordersQuery.data?.map((vo) => (
-          <li key={vo.id} className="rounded border border-slate-200 bg-white p-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <p className="font-medium text-slate-900">Order #{vo.order_id.slice(0, 8)}</p>
-                <p className="text-sm text-slate-600">{new Date(vo.created_at).toLocaleString()}</p>
-              </div>
-              <div className="text-right">
-                <p className="text-sm font-medium capitalize text-slate-900">
-                  {vo.status.replace("_", " ")}
-                </p>
-                <p className="text-sm text-slate-600">
-                  {formatMoney(vo.subtotal_amount, vo.currency)}
-                  {vo.shipping_fee_amount > 0 && ` + ${formatMoney(vo.shipping_fee_amount, vo.currency)} ship`}
-                </p>
-              </div>
-            </div>
-            {vo.items && vo.items.length > 0 && (
-              <ul className="mt-3 space-y-1 border-t border-slate-100 pt-3">
-                {vo.items.map((item, idx) => (
-                  <li key={idx} className="flex items-center justify-between text-sm text-slate-700">
-                    <span>
-                      {item.product_name}
-                      {item.variant_label ? ` — ${item.variant_label}` : ""}
-                      {item.variant_sku ? ` (${item.variant_sku})` : ""}
-                      {` × ${item.quantity}`}
-                    </span>
-                    <span className="text-slate-600">
-                      {formatMoney(item.subtotal_amount, vo.currency)}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            )}
-            <VendorOrderActions
-              vendorOrder={vo}
-              shipment={shipmentsQuery.data?.find((s) => s.vendor_order_id === vo.id)}
-              onChanged={refresh}
-            />
-          </li>
-        ))}
-      </ul>
-    </main>
-  );
-}
-
-function SummarySection() {
-  const { callWithAuth } = useAuth();
-  const summaryQuery = useQuery({
-    queryKey: ["vendor-summary"],
-    queryFn: () => callWithAuth((token) => api.getVendorSummary(token)),
-  });
-
-  if (summaryQuery.isPending || !summaryQuery.data) return null;
-  const s = summaryQuery.data;
-
-  return (
-    <div className="mt-4 rounded border border-slate-200 bg-white p-4">
-      <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-        <Stat label="Orders" value={String(s.total_orders)} />
-        <Stat label="Revenue" value={formatMoney(s.total_revenue, "VND")} />
-        <Stat label="Commission" value={formatMoney(s.total_commission, "VND")} />
-        <Stat label="Net" value={formatMoney(s.total_net, "VND")} />
-      </div>
-
-      {s.top_products.length > 0 && (
-        <div className="mt-4 border-t border-slate-100 pt-3">
-          <p className="text-sm font-medium text-slate-700">Best sellers</p>
-          <ul className="mt-1 space-y-1">
-            {s.top_products.map((p) => (
-              <li key={p.product_id} className="text-sm text-slate-600">
-                {p.product_name} — {p.quantity_sold} sold ({formatMoney(p.revenue_amount, "VND")})
-              </li>
+      {queue.length > 0 && (
+        <div>
+          <p className="text-sm font-medium">Cần xử lý ({queue.length})</p>
+          <ul className="mt-2 flex flex-col gap-3">
+            {queue.map((vo) => (
+              <VendorOrderCard key={vo.id} vendorOrder={vo} shipment={shipmentFor(vo)} onChanged={refresh} />
             ))}
           </ul>
+        </div>
+      )}
+
+      {history.length > 0 && (
+        <div>
+          <p className="text-sm font-medium">Lịch sử</p>
+          <ul className="mt-2 flex flex-col gap-3">
+            {visibleHistory.map((vo) => (
+              <VendorOrderCard key={vo.id} vendorOrder={vo} shipment={shipmentFor(vo)} onChanged={refresh} />
+            ))}
+          </ul>
+          {history.length > 5 && (
+            <Button
+              variant="link"
+              size="sm"
+              className="mt-1 h-auto p-0"
+              onClick={() => setShowAllHistory((v) => !v)}
+            >
+              {showAllHistory ? "Thu gọn" : `Xem tất cả ${history.length} đơn`}
+            </Button>
+          )}
         </div>
       )}
     </div>
   );
 }
 
-function Stat({ label, value }: { label: string; value: string }) {
+function SummarySection({ vendorId }: { vendorId: string }) {
+  const { callWithAuth } = useAuth();
+  const summaryQuery = useQuery({
+    queryKey: ["vendor-summary", vendorId],
+    queryFn: () => callWithAuth((token) => api.getVendorSummary(token, vendorId)),
+  });
+
+  if (summaryQuery.isPending || !summaryQuery.data) return null;
+  const s = summaryQuery.data;
+
   return (
     <div>
-      <p className="text-xs uppercase tracking-wide text-slate-400">{label}</p>
-      <p className="text-sm font-semibold text-slate-900">{value}</p>
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+        <StatCard label="Đơn hàng" value={s.total_orders} />
+        <StatCard label="Doanh thu" value={formatMoney(s.total_revenue)} />
+        <StatCard label="Hoa hồng" value={formatMoney(s.total_commission)} />
+        <StatCard label="Thực nhận" value={formatMoney(s.total_net)} />
+      </div>
+
+      {s.top_products.length > 0 && (
+        <Card className="mt-3">
+          <CardContent>
+            <p className="text-sm font-medium">Bán chạy nhất</p>
+            <ul className="mt-2 flex flex-col gap-1">
+              {s.top_products.map((p) => (
+                <li key={p.product_id} className="text-sm text-muted-foreground">
+                  {p.product_name} — đã bán {p.quantity_sold} ({formatMoney(p.revenue_amount)})
+                </li>
+              ))}
+            </ul>
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 }
 
-function ExportCsvButton() {
+function ExportCsvButton({ vendorId }: { vendorId: string }) {
   const { callWithAuth } = useAuth();
   const [isBusy, setIsBusy] = useState(false);
 
   async function handleExport() {
     setIsBusy(true);
     try {
-      const csv = await callWithAuth((token) => api.exportVendorOrdersCSV(token));
+      const csv = await callWithAuth((token) => api.exportVendorOrdersCSV(token, vendorId));
       const blob = new Blob([csv], { type: "text/csv" });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
@@ -155,19 +174,70 @@ function ExportCsvButton() {
   }
 
   return (
-    <button
-      onClick={handleExport}
-      disabled={isBusy}
-      className="rounded border border-slate-300 px-3 py-1.5 text-sm text-slate-700 disabled:opacity-50"
-    >
-      {isBusy ? "Exporting…" : "Export CSV"}
-    </button>
+    <Button variant="outline" size="sm" onClick={handleExport} disabled={isBusy}>
+      <Download className="size-4" />
+      {isBusy ? "Đang xuất…" : "Xuất CSV"}
+    </Button>
+  );
+}
+
+function VendorOrderCard({
+  vendorOrder,
+  shipment,
+  onChanged,
+}: {
+  vendorOrder: api.VendorOrder;
+  shipment?: api.Shipment;
+  onChanged: () => void;
+}) {
+  return (
+    <Card>
+      <CardContent>
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="font-medium">Đơn #{vendorOrder.order_id.slice(0, 8)}</p>
+            <p className="text-sm text-muted-foreground">
+              {new Date(vendorOrder.created_at).toLocaleString("vi-VN")}
+            </p>
+          </div>
+          <div className="text-right">
+            <OrderStatusBadge status={vendorOrder.status} />
+            <p className="mt-1 text-sm text-muted-foreground">
+              {formatMoney(vendorOrder.subtotal_amount, vendorOrder.currency)}
+              {vendorOrder.shipping_fee_amount > 0 &&
+                ` + ${formatMoney(vendorOrder.shipping_fee_amount, vendorOrder.currency)} ship`}
+            </p>
+          </div>
+        </div>
+        {vendorOrder.items && vendorOrder.items.length > 0 && (
+          <>
+            <Separator className="my-3" />
+            <ul className="flex flex-col gap-1">
+              {vendorOrder.items.map((item, idx) => (
+                <li key={idx} className="flex items-center justify-between text-sm">
+                  <span>
+                    {item.product_name}
+                    {item.variant_label ? ` — ${item.variant_label}` : ""}
+                    {item.variant_sku ? ` (${item.variant_sku})` : ""}
+                    {` × ${item.quantity}`}
+                  </span>
+                  <span className="text-muted-foreground">
+                    {formatMoney(item.subtotal_amount, vendorOrder.currency)}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </>
+        )}
+        <VendorOrderActions vendorOrder={vendorOrder} shipment={shipment} onChanged={onChanged} />
+      </CardContent>
+    </Card>
   );
 }
 
 // VendorOrderActions lets a vendor advance their own sub-order one step at a
 // time. Marking a package "shipped" also opens (or reuses) its Shipment
-// record with the carrier/tracking number the buyer will see — Order owns
+// record with the carrier/tracking number the buyer will see -- Order owns
 // the buyer-facing status, Shipment owns the tracking detail; this UI
 // exercises both to keep them consistent.
 function VendorOrderActions({
@@ -188,12 +258,10 @@ function VendorOrderActions({
     setError(null);
     setIsBusy(true);
     try {
-      await callWithAuth((token) =>
-        api.updateVendorOrderStatus(token, vendorOrder.id, "processing"),
-      );
+      await callWithAuth((token) => api.updateVendorOrderStatus(token, vendorOrder.id, "processing"));
       onChanged();
     } catch (err) {
-      setError(err instanceof api.ApiError ? err.message : "Could not update this order.");
+      setError(err instanceof api.ApiError ? err.message : "Không thể cập nhật đơn hàng.");
     } finally {
       setIsBusy(false);
     }
@@ -206,7 +274,7 @@ function VendorOrderActions({
     try {
       await callWithAuth(async (token) => {
         // The shipment is normally already created automatically at
-        // checkout (with its carrier and fee already set) — createOrGet
+        // checkout (with its carrier and fee already set) -- createOrGet
         // here is just the fallback for the rare case that call failed.
         const shipment = await api.createOrGetShipment(token, vendorOrder.id);
         if (shipment.status === "pending") {
@@ -217,7 +285,7 @@ function VendorOrderActions({
       });
       onChanged();
     } catch (err) {
-      setError(err instanceof api.ApiError ? err.message : "Could not mark this order shipped.");
+      setError(err instanceof api.ApiError ? err.message : "Không thể đánh dấu đơn đã giao.");
     } finally {
       setIsBusy(false);
     }
@@ -227,65 +295,52 @@ function VendorOrderActions({
     setError(null);
     setIsBusy(true);
     try {
-      await callWithAuth((token) =>
-        api.updateVendorOrderStatus(token, vendorOrder.id, "completed"),
-      );
+      await callWithAuth((token) => api.updateVendorOrderStatus(token, vendorOrder.id, "completed"));
       onChanged();
     } catch (err) {
-      setError(err instanceof api.ApiError ? err.message : "Could not update this order.");
+      setError(err instanceof api.ApiError ? err.message : "Không thể cập nhật đơn hàng.");
     } finally {
       setIsBusy(false);
     }
   }
 
   return (
-    <div className="mt-3 border-t border-slate-100 pt-3">
+    <div className="mt-3">
+      <Separator className="mb-3" />
       {vendorOrder.status === "paid" && (
-        <button
-          onClick={handleStartProcessing}
-          disabled={isBusy}
-          className="rounded bg-slate-900 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50"
-        >
-          Start processing
-        </button>
+        <Button size="sm" onClick={handleStartProcessing} disabled={isBusy}>
+          Bắt đầu xử lý
+        </Button>
       )}
 
       {vendorOrder.status === "processing" && (
         <form onSubmit={handleMarkShipped} className="flex flex-wrap items-end gap-2">
-          <label className="flex flex-col gap-1 text-xs text-slate-600">
-            Tracking number
-            <input
+          <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+            Mã vận đơn
+            <Input
               required
               value={trackingNumber}
               onChange={(e) => setTrackingNumber(e.target.value)}
-              className="rounded border border-slate-300 px-2 py-1 text-sm"
+              className="w-40"
             />
           </label>
-          <button
-            type="submit"
-            disabled={isBusy}
-            className="rounded bg-slate-900 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50"
-          >
-            Mark shipped
-          </button>
+          <Button type="submit" size="sm" disabled={isBusy}>
+            Đánh dấu đã giao
+          </Button>
         </form>
       )}
 
       {vendorOrder.status === "shipped" && (
-        <button
-          onClick={handleMarkCompleted}
-          disabled={isBusy}
-          className="rounded bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50"
-        >
-          Mark completed
-        </button>
+        <Button size="sm" variant="secondary" onClick={handleMarkCompleted} disabled={isBusy}>
+          Đánh dấu hoàn tất
+        </Button>
       )}
 
       {shipment?.status === "interception_requested" && (
         <CarrierInterceptionActions shipmentId={shipment.id} onChanged={onChanged} />
       )}
 
-      {error && <p className="mt-2 text-sm text-red-600">{error}</p>}
+      {error && <p className="mt-2 text-sm text-destructive">{error}</p>}
     </div>
   );
 }
@@ -314,35 +369,27 @@ function CarrierInterceptionActions({
       await callWithAuth((token) => api.simulateCarrierDecision(token, shipmentId, accepted));
       onChanged();
     } catch (err) {
-      setError(err instanceof api.ApiError ? err.message : "Could not record the carrier's decision.");
+      setError(err instanceof api.ApiError ? err.message : "Không thể ghi nhận quyết định của đơn vị vận chuyển.");
     } finally {
       setIsBusy(false);
     }
   }
 
   return (
-    <div className="mt-3 rounded border border-amber-200 bg-amber-50 p-3">
-      <p className="text-sm text-amber-800">
-        The buyer cancelled this order after it shipped. We asked the carrier to intercept it —
-        record their decision once you hear back:
+    <div className="mt-3 rounded-lg border border-warning/40 bg-warning/10 p-3">
+      <p className="text-sm">
+        Người mua đã hủy đơn này sau khi đã giao cho đơn vị vận chuyển — chúng ta đã yêu cầu họ chặn
+        lại. Ghi nhận quyết định của họ khi có phản hồi:
       </p>
       <div className="mt-2 flex gap-2">
-        <button
-          onClick={() => handleDecision(true)}
-          disabled={isBusy}
-          className="rounded bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white disabled:opacity-50"
-        >
-          Carrier stopped it
-        </button>
-        <button
-          onClick={() => handleDecision(false)}
-          disabled={isBusy}
-          className="rounded border border-slate-300 px-3 py-1.5 text-sm text-slate-700 disabled:opacity-50"
-        >
-          Carrier couldn&apos;t stop it
-        </button>
+        <Button size="sm" onClick={() => handleDecision(true)} disabled={isBusy}>
+          Đã chặn được
+        </Button>
+        <Button size="sm" variant="outline" onClick={() => handleDecision(false)} disabled={isBusy}>
+          Không chặn được
+        </Button>
       </div>
-      {error && <p className="mt-2 text-sm text-red-600">{error}</p>}
+      {error && <p className="mt-2 text-sm text-destructive">{error}</p>}
     </div>
   );
 }

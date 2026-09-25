@@ -30,7 +30,7 @@ type CarrierSimulator interface {
 // VendorGateway lets the use case check vendor approval without owning any
 // vendor data itself.
 type VendorGateway interface {
-	GetApprovedVendorID(ctx context.Context, userID string) (vendorID string, err error)
+	GetApprovedVendorID(ctx context.Context, userID, vendorID string) (string, error)
 }
 
 // OrderGateway lets the use case verify a vendor sub-order's owner and

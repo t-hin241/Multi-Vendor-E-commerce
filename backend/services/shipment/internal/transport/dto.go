@@ -173,6 +173,7 @@ func toFeeRuleResponseList(rules []*domain.FeeRule) []feeRuleResponse {
 // ---------- Vendor shipping methods ----------
 
 type enableShippingMethodRequest struct {
+	VendorID  string `json:"vendor_id" binding:"required"`
 	CarrierID string `json:"carrier_id" binding:"required"`
 }
 

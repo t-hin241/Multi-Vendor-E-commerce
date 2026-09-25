@@ -34,6 +34,7 @@ func toCategoryResponseList(categories []*domain.Category) []categoryResponse {
 }
 
 type createProductRequest struct {
+	VendorID    string                  `json:"vendor_id" binding:"required"`
 	CategoryID  string                  `json:"category_id" binding:"required"`
 	Name        string                  `json:"name" binding:"required"`
 	Description string                  `json:"description"`
@@ -106,26 +107,33 @@ func toProductMediaResponseList(items []*domain.ProductMedia) []productMediaResp
 }
 
 type productResponse struct {
-	ID                string                   `json:"id"`
-	VendorID          string                   `json:"vendor_id"`
-	CategoryID        string                   `json:"category_id"`
-	Name              string                   `json:"name"`
-	Slug              string                   `json:"slug"`
-	Description       string                   `json:"description"`
-	PriceAmount       int64                    `json:"price_amount"`
-	Currency          string                   `json:"currency"`
-	Status            string                   `json:"status"`
-	RejectionReason   *string                  `json:"rejection_reason,omitempty"`
-	IsActive          bool                     `json:"is_active"`
-	Images            []productImageResponse   `json:"images,omitempty"`
-	Media             []productMediaResponse   `json:"media,omitempty"`
-	Attributes        []attributeValueResponse `json:"attributes,omitempty"`
-	Variants          []variantResponse        `json:"variants,omitempty"`
-	StockInfoDegraded bool                     `json:"stock_info_degraded"`
-	VendorName        string                   `json:"vendor_name,omitempty"`
-	QuantitySold      int64                    `json:"quantity_sold"`
-	CreatedAt         time.Time                `json:"created_at"`
-	UpdatedAt         time.Time                `json:"updated_at"`
+	ID              string                   `json:"id"`
+	VendorID        string                   `json:"vendor_id"`
+	CategoryID      string                   `json:"category_id"`
+	Name            string                   `json:"name"`
+	Slug            string                   `json:"slug"`
+	Description     string                   `json:"description"`
+	PriceAmount     int64                    `json:"price_amount"`
+	Currency        string                   `json:"currency"`
+	Status          string                   `json:"status"`
+	RejectionReason *string                  `json:"rejection_reason,omitempty"`
+	IsActive        bool                     `json:"is_active"`
+	Images          []productImageResponse   `json:"images,omitempty"`
+	Media           []productMediaResponse   `json:"media,omitempty"`
+	Attributes      []attributeValueResponse `json:"attributes,omitempty"`
+	Variants        []variantResponse        `json:"variants,omitempty"`
+	// StockQuantity is populated by the admin moderation detail view, and by
+	// the public product-detail view when the caller is recognized as an
+	// admin or the product's own vendor (see GetPublicBySlug) — never for an
+	// anonymous or unrelated caller. Only meaningful for a non-variant
+	// product (a variant product's stock is on each of Variants instead).
+	// Pointer: distinguishes "no stock set up yet" from a genuine zero.
+	StockQuantity     *int64    `json:"stock_quantity,omitempty"`
+	StockInfoDegraded bool      `json:"stock_info_degraded"`
+	VendorName        string    `json:"vendor_name,omitempty"`
+	QuantitySold      int64     `json:"quantity_sold"`
+	CreatedAt         time.Time `json:"created_at"`
+	UpdatedAt         time.Time `json:"updated_at"`
 }
 
 // attributeValueResponse is a captured product attribute value, as raw
@@ -178,7 +186,9 @@ func toProductResponseWithImagesAndMedia(
 	media []*domain.ProductMedia,
 	attributeValues []*domain.ProductAttributeValue,
 	variants []domain.VariantView,
+	plainStockQuantity *int64,
 	stockInfoDegraded bool,
+	vendorName string,
 ) productResponse {
 	resp := toProductResponse(p)
 	resp.Images = make([]productImageResponse, 0, len(images))
@@ -188,7 +198,30 @@ func toProductResponseWithImagesAndMedia(
 	resp.Media = toProductMediaResponseList(media)
 	resp.Attributes = toAttributeValueResponseList(attributeValues)
 	resp.Variants = toPublicVariantResponseList(variants)
+	resp.StockQuantity = plainStockQuantity
 	resp.StockInfoDegraded = stockInfoDegraded
+	resp.VendorName = vendorName
+	return resp
+}
+
+// toProductResponseForModeration is the admin moderation detail view's
+// builder — everything a vendor was required to supply before submitting,
+// so admin's approve/reject decision is informed by the same completeness
+// bar SubmitForReview enforced.
+func toProductResponseForModeration(
+	p *domain.Product,
+	images []*domain.ProductImage,
+	media []*domain.ProductMedia,
+	attributeValues []*domain.ProductAttributeValue,
+	variants []domain.VariantView,
+	plainStockQuantity *int64,
+) productResponse {
+	resp := toProductResponse(p)
+	resp.Images = toProductImageResponseList(images)
+	resp.Media = toProductMediaResponseList(media)
+	resp.Attributes = toAttributeValueResponseList(attributeValues)
+	resp.Variants = toPublicVariantResponseList(variants)
+	resp.StockQuantity = plainStockQuantity
 	return resp
 }
 
@@ -196,6 +229,23 @@ func toProductResponseList(products []*domain.Product) []productResponse {
 	out := make([]productResponse, 0, len(products))
 	for _, p := range products {
 		out = append(out, toProductResponse(p))
+	}
+	return out
+}
+
+type auditLogEntryResponse struct {
+	ActorUserID string    `json:"actor_user_id"`
+	Action      string    `json:"action"`
+	Reason      *string   `json:"reason,omitempty"`
+	CreatedAt   time.Time `json:"created_at"`
+}
+
+func toAuditLogEntryResponseList(entries []*domain.AuditLog) []auditLogEntryResponse {
+	out := make([]auditLogEntryResponse, 0, len(entries))
+	for _, e := range entries {
+		out = append(out, auditLogEntryResponse{
+			ActorUserID: e.ActorUserID, Action: e.Action, Reason: e.Reason, CreatedAt: e.CreatedAt,
+		})
 	}
 	return out
 }
@@ -208,6 +258,7 @@ func toProductResponseList(products []*domain.Product) []productResponse {
 // "may be outdated" notice without ever hiding the products themselves.
 type storefrontListResponse struct {
 	Products           []productResponse `json:"products"`
+	Total              int               `json:"total"`
 	VendorInfoDegraded bool              `json:"vendor_info_degraded"`
 	SalesInfoDegraded  bool              `json:"sales_info_degraded"`
 }
@@ -406,6 +457,7 @@ func toAttributeOptionResponseListFromValues(options []domain.AttributeOption) [
 
 func toStorefrontListResponse(
 	products []*domain.Product,
+	total int,
 	images map[string]*domain.ProductImage,
 	vendorNames map[string]string,
 	quantitySold map[string]int64,
@@ -424,6 +476,7 @@ func toStorefrontListResponse(
 	}
 	return storefrontListResponse{
 		Products:           out,
+		Total:              total,
 		VendorInfoDegraded: vendorInfoDegraded,
 		SalesInfoDegraded:  salesInfoDegraded,
 	}

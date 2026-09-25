@@ -77,7 +77,7 @@ type AttributeValueInput struct {
 	OptionIDs   []string
 }
 
-func (uc *ProductUseCase) Create(ctx context.Context, userID, categoryID, name, description string, priceAmount int64, submittedAttributes []AttributeValueInput) (*domain.Product, error) {
+func (uc *ProductUseCase) Create(ctx context.Context, userID, vendorID, categoryID, name, description string, priceAmount int64, submittedAttributes []AttributeValueInput) (*domain.Product, error) {
 	if err := domain.ValidateProductInput(name, description, priceAmount); err != nil {
 		return nil, err
 	}
@@ -96,7 +96,10 @@ func (uc *ProductUseCase) Create(ctx context.Context, userID, categoryID, name, 
 		return nil, err
 	}
 
-	vendorID, err := uc.vendors.GetApprovedVendorID(ctx, userID)
+	// A user may own several shops (1:N) — vendorID names which one this
+	// product belongs to, and must be confirmed to actually belong to the
+	// caller before anything is written.
+	vendorID, err = uc.vendors.GetApprovedVendorID(ctx, userID, vendorID)
 	if err != nil {
 		return nil, err
 	}
@@ -254,50 +257,72 @@ func optionBelongsTo(options []domain.AttributeOption, optionID string) bool {
 }
 
 // GetPublicBySlug is the public product-detail page's read model: the
-// product itself plus its images/media/attribute values, and — for a
-// product with variants — each variant resolved to its display labels and
-// current stock (live from Inventory, with the same last-known-value
-// cache fallback used for vendor names/units-sold on the storefront
-// listing, flagged via stockInfoDegraded).
-func (uc *ProductUseCase) GetPublicBySlug(ctx context.Context, slug string) (
+// product itself plus its images/media/attribute values, its vendor's shop
+// name (same live-with-cache-fallback resolution the storefront listing
+// uses), and — for a product with variants — each variant resolved to its
+// display labels and current stock (live from Inventory, with the same
+// last-known-value cache fallback, flagged via stockInfoDegraded).
+//
+// For a non-variant product, exact stock is intentionally withheld from the
+// general public (a plain buyer gets no numeric signal here, same as
+// before) and only resolved when viewerUserID/viewerRole identify the
+// caller as an admin or the product's own vendor — the two roles that
+// actually need the number, mirroring what GetForModeration already grants
+// admin and what the vendor console already grants via Inventory directly.
+// viewerUserID/viewerRole are empty for an anonymous caller.
+func (uc *ProductUseCase) GetPublicBySlug(ctx context.Context, slug, viewerUserID, viewerRole string) (
 	p *domain.Product,
 	images []*domain.ProductImage,
 	media []*domain.ProductMedia,
 	attributeValues []*domain.ProductAttributeValue,
 	variants []domain.VariantView,
+	plainStockQuantity *int64,
 	stockInfoDegraded bool,
+	vendorName string,
 	err error,
 ) {
 	p, err = uc.products.FindBySlug(ctx, slug)
 	if err != nil {
 		if errors.Is(err, repository.ErrProductNotFound) {
-			return nil, nil, nil, nil, nil, false, apperror.NotFound("Product not found")
+			return nil, nil, nil, nil, nil, nil, false, "", apperror.NotFound("Product not found")
 		}
-		return nil, nil, nil, nil, nil, false, apperror.Internal(err)
+		return nil, nil, nil, nil, nil, nil, false, "", apperror.Internal(err)
 	}
 	if !p.IsPubliclyVisible() {
-		return nil, nil, nil, nil, nil, false, apperror.NotFound("Product not found")
+		return nil, nil, nil, nil, nil, nil, false, "", apperror.NotFound("Product not found")
 	}
 
 	images, err = uc.images.ListForProduct(ctx, p.ID)
 	if err != nil {
-		return nil, nil, nil, nil, nil, false, apperror.Internal(err)
+		return nil, nil, nil, nil, nil, nil, false, "", apperror.Internal(err)
 	}
 	media, err = uc.media.ListForProduct(ctx, p.ID)
 	if err != nil {
-		return nil, nil, nil, nil, nil, false, apperror.Internal(err)
+		return nil, nil, nil, nil, nil, nil, false, "", apperror.Internal(err)
 	}
 	attributeValues, err = uc.attributeValues.ListForProduct(ctx, p.ID)
 	if err != nil {
-		return nil, nil, nil, nil, nil, false, apperror.Internal(err)
+		return nil, nil, nil, nil, nil, nil, false, "", apperror.Internal(err)
 	}
+
+	vendorNames, _ := uc.resolveVendorNames(ctx, []string{p.VendorID})
+	vendorName = vendorNames[p.VendorID]
 
 	variantRows, err := uc.variants.ListForProduct(ctx, p.ID)
 	if err != nil {
-		return nil, nil, nil, nil, nil, false, apperror.Internal(err)
+		return nil, nil, nil, nil, nil, nil, false, "", apperror.Internal(err)
 	}
 	if len(variantRows) == 0 {
-		return p, images, media, attributeValues, nil, false, nil
+		if uc.canViewExactStock(ctx, p.VendorID, viewerUserID, viewerRole) {
+			qty, ok, stockErr := uc.inventory.GetProductStock(ctx, p.ID)
+			if stockErr != nil {
+				return nil, nil, nil, nil, nil, nil, false, "", apperror.Internal(stockErr)
+			}
+			if ok {
+				plainStockQuantity = &qty
+			}
+		}
+		return p, images, media, attributeValues, nil, plainStockQuantity, false, vendorName, nil
 	}
 
 	variantIDs := make([]string, 0, len(variantRows))
@@ -306,25 +331,40 @@ func (uc *ProductUseCase) GetPublicBySlug(ctx context.Context, slug string) (
 	}
 	optionsByVariant, err := uc.variants.ListOptionsForVariants(ctx, variantIDs)
 	if err != nil {
-		return nil, nil, nil, nil, nil, false, apperror.Internal(err)
+		return nil, nil, nil, nil, nil, nil, false, "", apperror.Internal(err)
 	}
-	resolved, err := uc.attributeTemplate.ResolveTemplate(ctx, p.CategoryID)
+	optionDetailsByVariant, err := uc.resolveVariantOptionsForProduct(ctx, p.CategoryID, optionsByVariant)
 	if err != nil {
-		return nil, nil, nil, nil, nil, false, err
+		return nil, nil, nil, nil, nil, nil, false, "", err
 	}
-	resolvedByAttribute := indexResolvedByAttribute(resolved)
 	stock, degraded := uc.resolveVariantStock(ctx, variantIDs)
 
 	variants = make([]domain.VariantView, 0, len(variantRows))
 	for _, v := range variantRows {
 		variants = append(variants, domain.VariantView{
 			Variant:           *v,
-			Options:           resolveVariantOptionDetails(resolvedByAttribute, optionsByVariant[v.ID]),
+			Options:           optionDetailsByVariant[v.ID],
 			AvailableQuantity: stock[v.ID],
 		})
 	}
 
-	return p, images, media, attributeValues, variants, degraded, nil
+	return p, images, media, attributeValues, variants, nil, degraded, vendorName, nil
+}
+
+// canViewExactStock reports whether viewerUserID/viewerRole may see a
+// product's exact stock count on the public detail page: an admin, or the
+// approved vendor account that owns vendorID. Empty viewerUserID (anonymous)
+// short-circuits without a remote call, since that's the overwhelming
+// majority of storefront traffic.
+func (uc *ProductUseCase) canViewExactStock(ctx context.Context, vendorID, viewerUserID, viewerRole string) bool {
+	if viewerRole == "admin" {
+		return true
+	}
+	if viewerUserID == "" {
+		return false
+	}
+	_, err := uc.vendors.GetApprovedVendorID(ctx, viewerUserID, vendorID)
+	return err == nil
 }
 
 // ListStorefront is the public product grid's read model. Besides the
@@ -336,8 +376,9 @@ func (uc *ProductUseCase) GetPublicBySlug(ctx context.Context, slug string) (
 // down. The two degraded flags tell the caller when that fallback was used,
 // so the frontend can show a "may be outdated" notice without hiding or
 // blocking the product grid.
-func (uc *ProductUseCase) ListStorefront(ctx context.Context, categoryID, search string, limit, offset int) (
+func (uc *ProductUseCase) ListStorefront(ctx context.Context, categoryID, vendorID, search string, limit, offset int) (
 	products []*domain.Product,
+	total int,
 	images map[string]*domain.ProductImage,
 	vendorNames map[string]string,
 	quantitySold map[string]int64,
@@ -345,12 +386,16 @@ func (uc *ProductUseCase) ListStorefront(ctx context.Context, categoryID, search
 	salesInfoDegraded bool,
 	err error,
 ) {
-	products, err = uc.products.ListStorefront(ctx, categoryID, search, limit, offset)
+	products, err = uc.products.ListStorefront(ctx, categoryID, vendorID, search, limit, offset)
 	if err != nil {
-		return nil, nil, nil, nil, false, false, apperror.Internal(err)
+		return nil, 0, nil, nil, nil, false, false, apperror.Internal(err)
+	}
+	total, err = uc.products.CountStorefront(ctx, categoryID, vendorID, search)
+	if err != nil {
+		return nil, 0, nil, nil, nil, false, false, apperror.Internal(err)
 	}
 	if len(products) == 0 {
-		return products, map[string]*domain.ProductImage{}, map[string]string{}, map[string]int64{}, false, false, nil
+		return products, total, map[string]*domain.ProductImage{}, map[string]string{}, map[string]int64{}, false, false, nil
 	}
 
 	productIDs := make([]string, 0, len(products))
@@ -366,13 +411,13 @@ func (uc *ProductUseCase) ListStorefront(ctx context.Context, categoryID, search
 
 	images, err = uc.images.ListForProducts(ctx, productIDs)
 	if err != nil {
-		return nil, nil, nil, nil, false, false, apperror.Internal(err)
+		return nil, 0, nil, nil, nil, false, false, apperror.Internal(err)
 	}
 
 	vendorNames, vendorInfoDegraded = uc.resolveVendorNames(ctx, vendorIDs)
 	quantitySold, salesInfoDegraded = uc.resolveQuantitySold(ctx, productIDs)
 
-	return products, images, vendorNames, quantitySold, vendorInfoDegraded, salesInfoDegraded, nil
+	return products, total, images, vendorNames, quantitySold, vendorInfoDegraded, salesInfoDegraded, nil
 }
 
 // resolveVendorNames prefers the live Vendor lookup. If the call fails
@@ -462,8 +507,8 @@ func (uc *ProductUseCase) GetByIDForOwnerLookup(ctx context.Context, productID s
 	return product, hasVariants, pkg.WeightGrams, nil
 }
 
-func (uc *ProductUseCase) ListMine(ctx context.Context, userID string, limit, offset int) ([]*domain.Product, error) {
-	vendorID, err := uc.vendors.GetApprovedVendorID(ctx, userID)
+func (uc *ProductUseCase) ListMine(ctx context.Context, userID, vendorID string, limit, offset int) ([]*domain.Product, error) {
+	vendorID, err := uc.vendors.GetApprovedVendorID(ctx, userID, vendorID)
 	if err != nil {
 		return nil, err
 	}
@@ -473,6 +518,52 @@ func (uc *ProductUseCase) ListMine(ctx context.Context, userID string, limit, of
 		return nil, apperror.Internal(err)
 	}
 	return products, nil
+}
+
+// SubmitForReview moves a draft product to pending_review once the vendor
+// has supplied everything admin needs to decide: at least one image, and
+// initial stock — either a plain stock record (no variants) or a stocked
+// record for every variant that exists. Media and variants themselves stay
+// optional; description was already optional at Create.
+func (uc *ProductUseCase) SubmitForReview(ctx context.Context, userID, productID string) (*domain.Product, error) {
+	p, err := uc.ownedByUser(ctx, userID, productID)
+	if err != nil {
+		return nil, err
+	}
+	if !domain.CanTransition(p.Status, domain.StatusPendingReview) {
+		return nil, apperror.Conflict("Only a draft product can be submitted for review")
+	}
+
+	images, err := uc.images.ListForProduct(ctx, p.ID)
+	if err != nil {
+		return nil, apperror.Internal(err)
+	}
+	if len(images) == 0 {
+		return nil, apperror.Validation("Add at least one product image before submitting")
+	}
+
+	variants, err := uc.variants.ListForProduct(ctx, p.ID)
+	if err != nil {
+		return nil, apperror.Internal(err)
+	}
+	variantIDs := make([]string, 0, len(variants))
+	for _, v := range variants {
+		variantIDs = append(variantIDs, v.ID)
+	}
+
+	ready, err := uc.inventory.CheckStockReadiness(ctx, p.ID, variantIDs)
+	if err != nil {
+		return nil, apperror.Internal(err)
+	}
+	if !ready {
+		return nil, apperror.Validation("Set the initial stock before submitting")
+	}
+
+	if err := uc.products.UpdateStatus(ctx, p.ID, domain.StatusPendingReview, nil); err != nil {
+		return nil, apperror.Internal(err)
+	}
+	p.Status = domain.StatusPendingReview
+	return p, nil
 }
 
 func (uc *ProductUseCase) SetActive(ctx context.Context, userID, productID string, isActive bool) (*domain.Product, error) {
@@ -526,6 +617,30 @@ func (uc *ProductUseCase) UploadImage(ctx context.Context, userID, productID, co
 	}
 
 	return img, nil
+}
+
+// DeleteImage removes a product's main image entirely (no replacement) —
+// the frontend's corner "×" control on an already-uploaded image, letting a
+// vendor clear it and pick a different one before submitting for review.
+// A no-op (not an error) if there's nothing to delete.
+func (uc *ProductUseCase) DeleteImage(ctx context.Context, userID, productID string) error {
+	p, err := uc.ownedByUser(ctx, userID, productID)
+	if err != nil {
+		return err
+	}
+
+	deletedKeys, err := uc.images.DeleteForProduct(ctx, p.ID)
+	if err != nil {
+		return apperror.Internal(err)
+	}
+
+	// Best-effort, same tolerance as UploadImage's own cleanup: the DB row
+	// (already gone) is the source of truth, so a storage-delete failure
+	// here only leaves an orphaned blob, not an inconsistency.
+	for _, key := range deletedKeys {
+		_ = uc.store.Delete(ctx, key)
+	}
+	return nil
 }
 
 // ListImagesForOwner serves the vendor's own view of a product's single
@@ -619,6 +734,79 @@ func (uc *ProductUseCase) ListForModeration(ctx context.Context, status string, 
 	return products, nil
 }
 
+// GetForModeration is the admin moderation detail view's read model: the
+// full submission a vendor assembled before submitting for review — images,
+// media, attribute values, and either resolved variants (each with current
+// stock) or, for a non-variant product, its own plain stock quantity —
+// regardless of moderation status, unlike the public GetPublicBySlug.
+func (uc *ProductUseCase) GetForModeration(ctx context.Context, productID string) (
+	p *domain.Product,
+	images []*domain.ProductImage,
+	media []*domain.ProductMedia,
+	attributeValues []*domain.ProductAttributeValue,
+	variants []domain.VariantView,
+	plainStockQuantity *int64,
+	err error,
+) {
+	p, err = uc.findForDecision(ctx, productID)
+	if err != nil {
+		return nil, nil, nil, nil, nil, nil, err
+	}
+
+	images, err = uc.images.ListForProduct(ctx, p.ID)
+	if err != nil {
+		return nil, nil, nil, nil, nil, nil, apperror.Internal(err)
+	}
+	media, err = uc.media.ListForProduct(ctx, p.ID)
+	if err != nil {
+		return nil, nil, nil, nil, nil, nil, apperror.Internal(err)
+	}
+	attributeValues, err = uc.attributeValues.ListForProduct(ctx, p.ID)
+	if err != nil {
+		return nil, nil, nil, nil, nil, nil, apperror.Internal(err)
+	}
+
+	variantRows, err := uc.variants.ListForProduct(ctx, p.ID)
+	if err != nil {
+		return nil, nil, nil, nil, nil, nil, apperror.Internal(err)
+	}
+	if len(variantRows) == 0 {
+		qty, ok, stockErr := uc.inventory.GetProductStock(ctx, p.ID)
+		if stockErr != nil {
+			return nil, nil, nil, nil, nil, nil, apperror.Internal(stockErr)
+		}
+		if ok {
+			plainStockQuantity = &qty
+		}
+		return p, images, media, attributeValues, nil, plainStockQuantity, nil
+	}
+
+	variantIDs := make([]string, 0, len(variantRows))
+	for _, v := range variantRows {
+		variantIDs = append(variantIDs, v.ID)
+	}
+	optionsByVariant, err := uc.variants.ListOptionsForVariants(ctx, variantIDs)
+	if err != nil {
+		return nil, nil, nil, nil, nil, nil, apperror.Internal(err)
+	}
+	optionDetailsByVariant, err := uc.resolveVariantOptionsForProduct(ctx, p.CategoryID, optionsByVariant)
+	if err != nil {
+		return nil, nil, nil, nil, nil, nil, err
+	}
+	stock, _ := uc.resolveVariantStock(ctx, variantIDs)
+
+	variants = make([]domain.VariantView, 0, len(variantRows))
+	for _, v := range variantRows {
+		variants = append(variants, domain.VariantView{
+			Variant:           *v,
+			Options:           optionDetailsByVariant[v.ID],
+			AvailableQuantity: stock[v.ID],
+		})
+	}
+
+	return p, images, media, attributeValues, variants, nil, nil
+}
+
 func (uc *ProductUseCase) Approve(ctx context.Context, productID, adminUserID string) (*domain.Product, error) {
 	p, err := uc.findForDecision(ctx, productID)
 	if err != nil {
@@ -664,12 +852,11 @@ func (uc *ProductUseCase) Reject(ctx context.Context, productID, adminUserID, re
 	return p, nil
 }
 
+// ownedByUser derives the owning vendor from the product itself (rather
+// than asking the client which shop it means) and confirms userID actually
+// owns that shop — a product's vendor_id is fixed at creation time, so
+// there's nothing for the caller to disambiguate here.
 func (uc *ProductUseCase) ownedByUser(ctx context.Context, userID, productID string) (*domain.Product, error) {
-	vendorID, err := uc.vendors.GetApprovedVendorID(ctx, userID)
-	if err != nil {
-		return nil, err
-	}
-
 	p, err := uc.products.FindByID(ctx, productID)
 	if err != nil {
 		if errors.Is(err, repository.ErrProductNotFound) {
@@ -678,7 +865,7 @@ func (uc *ProductUseCase) ownedByUser(ctx context.Context, userID, productID str
 		return nil, apperror.Internal(err)
 	}
 
-	if p.VendorID != vendorID {
+	if _, err := uc.vendors.GetApprovedVendorID(ctx, userID, p.VendorID); err != nil {
 		return nil, apperror.Forbidden("You do not own this product")
 	}
 	return p, nil
@@ -720,8 +907,10 @@ func (uc *ProductUseCase) CreateVariant(ctx context.Context, userID, productID, 
 		return nil, nil, apperror.Internal(err)
 	}
 
+	// matchVariantOptions above already guarantees every selection resolves
+	// against resolved, so no fallback lookup is ever needed here.
 	resolvedByAttribute := indexResolvedByAttribute(resolved)
-	return v, resolveVariantOptionDetails(resolvedByAttribute, selections), nil
+	return v, resolveVariantOptionDetails(resolvedByAttribute, nil, nil, selections), nil
 }
 
 // matchVariantOptions validates that optionIDs cover exactly the product
@@ -791,15 +980,9 @@ func (uc *ProductUseCase) ListVariantsForOwner(ctx context.Context, userID, prod
 		return nil, nil, apperror.Internal(err)
 	}
 
-	resolved, err := uc.attributeTemplate.ResolveTemplate(ctx, p.CategoryID)
+	details, err := uc.resolveVariantOptionsForProduct(ctx, p.CategoryID, rawOptions)
 	if err != nil {
 		return nil, nil, err
-	}
-	resolvedByAttribute := indexResolvedByAttribute(resolved)
-
-	details := make(map[string][]domain.VariantOptionDetail, len(rawOptions))
-	for variantID, selections := range rawOptions {
-		details[variantID] = resolveVariantOptionDetails(resolvedByAttribute, selections)
 	}
 	return variants, details, nil
 }
@@ -812,21 +995,102 @@ func indexResolvedByAttribute(resolved []domain.ResolvedAttribute) map[string]do
 	return out
 }
 
-// resolveVariantOptionDetails attaches display labels to raw selections by
-// looking them up in the category's resolved template; a selection whose
-// attribute/option no longer resolves (e.g. removed since the variant was
-// created) falls back to showing its raw id rather than failing.
-func resolveVariantOptionDetails(resolvedByAttribute map[string]domain.ResolvedAttribute, selections []domain.VariantOptionSelection) []domain.VariantOptionDetail {
+// resolveVariantOptionsForProduct resolves every variant's option selections
+// to display labels for categoryID: primarily via the category's current
+// attribute-rule template, falling back to a direct by-id lookup
+// (AttributeTemplateResolver.LookupAttributeLabels) for any attribute/option
+// the template doesn't cover — e.g. a category_attribute_rules gap — so a
+// persisted, already-valid selection never displays a raw id. Only a truly
+// deleted attribute/option row falls through to the id itself.
+func (uc *ProductUseCase) resolveVariantOptionsForProduct(ctx context.Context, categoryID string, optionsByVariant map[string][]domain.VariantOptionSelection) (map[string][]domain.VariantOptionDetail, error) {
+	resolved, err := uc.attributeTemplate.ResolveTemplate(ctx, categoryID)
+	if err != nil {
+		return nil, err
+	}
+	resolvedByAttribute := indexResolvedByAttribute(resolved)
+
+	missingAttrIDs, missingOptIDs := missingIDsForFallback(resolvedByAttribute, optionsByVariant)
+	var fallbackAttrs map[string]*domain.Attribute
+	var fallbackOpts map[string]*domain.AttributeOption
+	if len(missingAttrIDs) > 0 || len(missingOptIDs) > 0 {
+		fallbackAttrs, fallbackOpts, err = uc.attributeTemplate.LookupAttributeLabels(ctx, missingAttrIDs, missingOptIDs)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	out := make(map[string][]domain.VariantOptionDetail, len(optionsByVariant))
+	for variantID, selections := range optionsByVariant {
+		out[variantID] = resolveVariantOptionDetails(resolvedByAttribute, fallbackAttrs, fallbackOpts, selections)
+	}
+	return out, nil
+}
+
+// missingIDsForFallback walks every selection once and collects the deduped
+// attribute/option ids resolvedByAttribute can't already answer.
+func missingIDsForFallback(resolvedByAttribute map[string]domain.ResolvedAttribute, optionsByVariant map[string][]domain.VariantOptionSelection) (attributeIDs, optionIDs []string) {
+	seenAttr := make(map[string]bool)
+	seenOpt := make(map[string]bool)
+	for _, selections := range optionsByVariant {
+		for _, sel := range selections {
+			axis, ok := resolvedByAttribute[sel.AttributeID]
+			if !ok {
+				if !seenAttr[sel.AttributeID] {
+					seenAttr[sel.AttributeID] = true
+					attributeIDs = append(attributeIDs, sel.AttributeID)
+				}
+				if !seenOpt[sel.OptionID] {
+					seenOpt[sel.OptionID] = true
+					optionIDs = append(optionIDs, sel.OptionID)
+				}
+				continue
+			}
+			found := false
+			for _, o := range axis.Options {
+				if o.ID == sel.OptionID {
+					found = true
+					break
+				}
+			}
+			if !found && !seenOpt[sel.OptionID] {
+				seenOpt[sel.OptionID] = true
+				optionIDs = append(optionIDs, sel.OptionID)
+			}
+		}
+	}
+	return attributeIDs, optionIDs
+}
+
+// resolveVariantOptionDetails attaches display labels to raw selections,
+// trying the category's resolved template first, then the direct-lookup
+// fallback maps (see resolveVariantOptionsForProduct); a selection whose
+// attribute/option resolves in neither (e.g. the row itself was deleted)
+// falls back to showing its raw id rather than failing.
+func resolveVariantOptionDetails(
+	resolvedByAttribute map[string]domain.ResolvedAttribute,
+	fallbackAttrs map[string]*domain.Attribute,
+	fallbackOpts map[string]*domain.AttributeOption,
+	selections []domain.VariantOptionSelection,
+) []domain.VariantOptionDetail {
 	details := make([]domain.VariantOptionDetail, 0, len(selections))
 	for _, sel := range selections {
 		detail := domain.VariantOptionDetail{AttributeID: sel.AttributeID, AttributeName: sel.AttributeID, OptionID: sel.OptionID, OptionValue: sel.OptionID}
+		resolvedValue := false
 		if axis, ok := resolvedByAttribute[sel.AttributeID]; ok {
 			detail.AttributeName = axis.Attribute.Name
 			for _, o := range axis.Options {
 				if o.ID == sel.OptionID {
 					detail.OptionValue = o.Value
+					resolvedValue = true
 					break
 				}
+			}
+		} else if attr, ok := fallbackAttrs[sel.AttributeID]; ok {
+			detail.AttributeName = attr.Name
+		}
+		if !resolvedValue {
+			if opt, ok := fallbackOpts[sel.OptionID]; ok {
+				detail.OptionValue = opt.Value
 			}
 		}
 		details = append(details, detail)
@@ -851,15 +1115,15 @@ func (uc *ProductUseCase) GetVariantOwner(ctx context.Context, variantID string)
 		return "", "", "", nil, err
 	}
 
-	resolved, err := uc.attributeTemplate.ResolveTemplate(ctx, p.CategoryID)
-	if err != nil {
-		return "", "", "", nil, err
-	}
 	rawOptions, err := uc.variants.ListOptionsForVariants(ctx, []string{v.ID})
 	if err != nil {
 		return "", "", "", nil, apperror.Internal(err)
 	}
-	options = resolveVariantOptionDetails(indexResolvedByAttribute(resolved), rawOptions[v.ID])
+	details, err := uc.resolveVariantOptionsForProduct(ctx, p.CategoryID, rawOptions)
+	if err != nil {
+		return "", "", "", nil, err
+	}
+	options = details[v.ID]
 
 	return p.VendorID, p.ID, v.SKU, options, nil
 }
@@ -873,6 +1137,17 @@ func (uc *ProductUseCase) validateCategory(ctx context.Context, categoryID strin
 		return apperror.Internal(err)
 	}
 	return nil
+}
+
+// ListAuditLog returns the full moderation decision history for one
+// product. The route is already admin-gated (same as ListForModeration), so
+// no extra ownership check is needed here.
+func (uc *ProductUseCase) ListAuditLog(ctx context.Context, productID string) ([]*domain.AuditLog, error) {
+	entries, err := uc.auditLogs.List(ctx, productID)
+	if err != nil {
+		return nil, apperror.Internal(err)
+	}
+	return entries, nil
 }
 
 func (uc *ProductUseCase) findForDecision(ctx context.Context, productID string) (*domain.Product, error) {
