@@ -34,3 +34,4 @@ DATABASE_SCHEMA.md
 Makefile.txt
 docs/
 fetching_data/
+migrations/
