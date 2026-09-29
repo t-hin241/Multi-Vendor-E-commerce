@@ -7,6 +7,7 @@ import (
 	"github.com/rs/zerolog"
 
 	"shopee/backend/pkg/httpresponse"
+	"shopee/backend/pkg/middleware"
 	"shopee/backend/services/catalog/internal/usecase"
 )
 
@@ -26,7 +27,7 @@ func (h *CategoryHandler) Create(c *gin.Context) {
 		return
 	}
 
-	category, err := h.categories.Create(c.Request.Context(), req.Name, req.ParentID)
+	category, err := h.categories.Create(c.Request.Context(), middleware.GetUserID(c), req.Name, req.ParentID)
 	if err != nil {
 		httpresponse.HandleError(c, h.log, err)
 		return

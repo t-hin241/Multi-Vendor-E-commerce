@@ -136,6 +136,29 @@ jobs:
       - run: go test -race -count=1 ./...
         working-directory: backend/services/review
 
+  catalog-integration:
+    name: Catalog PostgreSQL and checkout fencing integration
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: catalog_test
+          POSTGRES_DB: catalog_test
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports: ["5432:5432"]
+        options: --health-cmd "pg_isready -U catalog_test -d catalog_test" --health-interval 5s --health-timeout 3s --health-retries 10
+    env:
+      CATALOG_TEST_DATABASE_URL: postgres://catalog_test@localhost:5432/catalog_test?sslmode=disable
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache-dependency-path: backend/services/catalog/go.sum
+      - run: go test -race -count=1 ./...
+        working-directory: backend/services/catalog
+
   frontend:
     name: Frontend (lint + test + build)
     runs-on: ubuntu-latest

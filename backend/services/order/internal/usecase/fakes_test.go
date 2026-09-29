@@ -350,8 +350,9 @@ func (f *fakeCartGateway) Clear(_ context.Context, bearerToken string) error {
 }
 
 type fakeCatalogGateway struct {
-	products map[string]*adapter.ProductInfo
-	variants map[string]*adapter.VariantInfo
+	products   map[string]*adapter.ProductInfo
+	variants   map[string]*adapter.VariantInfo
+	getProduct func(string) (*adapter.ProductInfo, error)
 }
 
 func newFakeCatalogGateway() *fakeCatalogGateway {
@@ -359,6 +360,9 @@ func newFakeCatalogGateway() *fakeCatalogGateway {
 }
 
 func (f *fakeCatalogGateway) GetProduct(_ context.Context, productID string) (*adapter.ProductInfo, error) {
+	if f.getProduct != nil {
+		return f.getProduct(productID)
+	}
 	p, ok := f.products[productID]
 	if !ok {
 		return nil, apperror.NotFound("Product not found")

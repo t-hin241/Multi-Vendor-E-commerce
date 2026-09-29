@@ -17,6 +17,7 @@ export default function VendorProductsPage() {
   const queryClient = useQueryClient();
   const [error, setError] = useState<string | null>(null);
   const [isSubmittingReview, setIsSubmittingReview] = useState(false);
+  const [pagination, setPagination] = useState({ vendorId: "", page: 0 });
   // Set right after a product is created, so the create form's spot shows a
   // focused "finish setting up this product" checklist instead -- no
   // scrolling down to the list to find it. Cleared once submitted for
@@ -29,12 +30,19 @@ export default function VendorProductsPage() {
   });
   const vendors = vendorsQuery.data ?? [];
   const vendor = resolveActiveVendor(vendors, selectedVendorId);
+  const page = pagination.vendorId === vendor?.id ? pagination.page : 0;
+  const pageSize = 20;
 
   const categoriesQuery = useQuery({ queryKey: ["categories"], queryFn: api.listCategories });
   const productsQuery = useQuery({
-    queryKey: ["vendor-products", vendor?.id],
-    queryFn: () => callWithAuth((token) => api.listMyProducts(token, vendor!.id)),
+    queryKey: ["vendor-products", vendor?.id, page],
+    queryFn: () =>
+      callWithAuth((token) =>
+        api.listMyProducts(token, vendor!.id, { limit: pageSize, offset: page * pageSize }),
+      ),
     enabled: Boolean(vendor),
+    refetchInterval: (query) =>
+      query.state.data?.some((p) => p.selling_sync_pending) ? 2000 : false,
   });
 
   if (!vendor) {
@@ -110,6 +118,7 @@ export default function VendorProductsPage() {
           vendorId={vendor.id}
           categories={categoriesQuery.data ?? []}
           onCreated={(created) => {
+            setPagination({ vendorId: vendor.id, page: 0 });
             queryClient.invalidateQueries({ queryKey: ["vendor-products"] });
             setJustCreatedProductId(created.id);
           }}
@@ -117,6 +126,17 @@ export default function VendorProductsPage() {
       )}
 
       {error && <p className="text-sm text-destructive">{error}</p>}
+      {productsQuery.isPending && (
+        <p className="text-sm text-muted-foreground">Đang tải sản phẩm…</p>
+      )}
+      {productsQuery.isError && (
+        <div role="alert" className="text-sm text-destructive">
+          Không thể tải sản phẩm.{" "}
+          <button type="button" className="underline" onClick={() => productsQuery.refetch()}>
+            Thử lại
+          </button>
+        </div>
+      )}
 
       <div className="flex flex-col gap-3">
         {remainingProducts?.map((product) => (
@@ -132,6 +152,30 @@ export default function VendorProductsPage() {
           <p className="text-sm text-muted-foreground">Chưa có sản phẩm nào.</p>
         )}
       </div>
+      <nav aria-label="Phân trang sản phẩm" className="flex items-center gap-4 text-sm">
+        <button
+          type="button"
+          disabled={page === 0 || productsQuery.isFetching}
+          className="disabled:opacity-40"
+          onClick={() => setPagination({ vendorId: vendor.id, page: page - 1 })}
+        >
+          Trang trước
+        </button>
+        <span>Trang {page + 1}</span>
+        <button
+          type="button"
+          disabled={
+            productsQuery.isFetching ||
+            productsQuery.isError ||
+            (productsQuery.data?.length ?? 0) < pageSize ||
+            (page + 1) * pageSize > 10000
+          }
+          className="disabled:opacity-40"
+          onClick={() => setPagination({ vendorId: vendor.id, page: page + 1 })}
+        >
+          Trang sau
+        </button>
+      </nav>
     </div>
   );
 }

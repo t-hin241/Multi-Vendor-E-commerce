@@ -80,6 +80,7 @@ export function ProductStockManager({
         productId={productId}
         axes={variantAxes}
         onCreated={() => {
+          queryClient.invalidateQueries({ queryKey: ["vendor-products"] });
           queryClient.invalidateQueries({ queryKey: ["product-variants", productId] });
           invalidateInventory();
         }}

@@ -203,6 +203,8 @@ export type AttributeValue = {
 };
 
 export type Product = {
+  version?: number;
+  selling_sync_pending?: boolean;
   id: string;
   vendor_id: string;
   category_id: string;
@@ -531,6 +533,7 @@ export function listStorefrontProducts(
     categoryId?: string;
     vendorId?: string;
     q?: string;
+    sort?: "newest" | "price_asc" | "price_desc";
     limit?: number;
     offset?: number;
   } = {},
@@ -540,6 +543,7 @@ export function listStorefrontProducts(
       category_id: params.categoryId,
       vendor_id: params.vendorId,
       q: params.q,
+      sort: params.sort,
       limit: params.limit,
       offset: params.offset,
     },
@@ -1718,5 +1722,31 @@ export function updateModerationReason(
     method: "PATCH",
     token,
     json: reason,
+  });
+}
+
+export type ProductEditor = {
+  product: Product;
+  attributes: AttributeValue[];
+  packaging: Record<string, number | null>;
+};
+export function getProductEditor(token: string, productId: string): Promise<ProductEditor> {
+  return request(`/api/catalog/products/${productId}/editor`, { token });
+}
+export function updateProductContent(
+  token: string,
+  productId: string,
+  input: {
+    version: number;
+    name: string;
+    description: string;
+    price_amount: number;
+    attributes: { attribute_id: string; value?: string; option_ids?: string[] }[];
+  },
+): Promise<Product> {
+  return request(`/api/catalog/products/${productId}/content`, {
+    token,
+    method: "PATCH",
+    json: input,
   });
 }

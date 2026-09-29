@@ -24,6 +24,7 @@ func (p ProductStatusPublisher) Publish(ctx context.Context, v productsales.Stat
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Request-ID", fmt.Sprintf("catalog-%s-%d", v.ProductID, v.Version))
 	serviceauth.SetRequestHeaders(req, p.Key)
 	resp, err := (&http.Client{Timeout: 5 * time.Second}).Do(req)
 	if err != nil {

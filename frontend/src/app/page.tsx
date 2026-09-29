@@ -22,6 +22,7 @@ function StorefrontContent() {
   const searchParams = useSearchParams();
   const qFromUrl = searchParams.get("q") ?? "";
   const [page, setPage] = useState(1);
+  const [sort, setSort] = useState<"newest" | "price_asc" | "price_desc">("newest");
   const [searchInput, setSearchInput] = useState(qFromUrl);
   const debouncedSearch = useDebouncedValue(searchInput, 400).trim();
 
@@ -50,6 +51,7 @@ function StorefrontContent() {
   const categoriesQuery = useCategories();
   const productsQuery = useStorefrontProducts(page, undefined, {
     q: debouncedSearch || undefined,
+    sort,
   });
 
   const rootCategories = categoriesQuery.data?.filter((c) => c.parent_id == null) ?? [];
@@ -70,6 +72,7 @@ function StorefrontContent() {
           value={searchInput}
           onChange={(e) => setSearchInput(e.target.value)}
           className="pl-9"
+          maxLength={200}
           aria-label="Tìm sản phẩm"
         />
       </div>
@@ -82,6 +85,22 @@ function StorefrontContent() {
           </div>
         </div>
       )}
+
+      <label className="mt-4 flex items-center gap-2 text-sm">
+        Sắp xếp
+        <select
+          className="rounded border bg-background p-2"
+          value={sort}
+          onChange={(event) => {
+            setSort(event.target.value as typeof sort);
+            setPage(1);
+          }}
+        >
+          <option value="newest">Mới nhất</option>
+          <option value="price_asc">Giá tăng dần</option>
+          <option value="price_desc">Giá giảm dần</option>
+        </select>
+      </label>
 
       <div className="mt-8">
         <SectionHeader

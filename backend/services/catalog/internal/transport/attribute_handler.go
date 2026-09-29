@@ -31,7 +31,7 @@ func (h *AttributeHandler) Create(c *gin.Context) {
 		return
 	}
 
-	a, err := h.attributes.CreateAttribute(c.Request.Context(), req.Code, req.Name, domain.DataType(req.DataType), req.Unit, req.IsVariantDefining)
+	a, err := h.attributes.CreateAttribute(c.Request.Context(), middleware.GetUserID(c), req.Code, req.Name, domain.DataType(req.DataType), req.Unit, req.IsVariantDefining)
 	if err != nil {
 		httpresponse.HandleError(c, h.log, err)
 		return
@@ -57,7 +57,7 @@ func (h *AttributeHandler) AddOption(c *gin.Context) {
 		return
 	}
 
-	o, err := h.attributes.AddOption(c.Request.Context(), c.Param("id"), req.Value)
+	o, err := h.attributes.AddOption(c.Request.Context(), middleware.GetUserID(c), c.Param("id"), req.Value)
 	if err != nil {
 		httpresponse.HandleError(c, h.log, err)
 		return

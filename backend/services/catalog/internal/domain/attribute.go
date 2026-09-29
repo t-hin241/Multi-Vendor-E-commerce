@@ -60,7 +60,7 @@ type CategoryAttributeRule struct {
 
 // ProductAttributeValue is one captured value on a product. Exactly one of
 // OptionID, ValueText, ValueNumber, ValueBoolean is populated, matching the
-// owning Attribute's DataType — enforced by the use case, not the DB.
+// owning Attribute's DataType. The database also enforces exactly one value.
 type ProductAttributeValue struct {
 	ID           string
 	ProductID    string

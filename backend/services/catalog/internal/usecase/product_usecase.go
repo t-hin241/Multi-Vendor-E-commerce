@@ -969,7 +969,7 @@ func (uc *ProductUseCase) ownedByUser(ctx context.Context, userID, productID str
 	}
 
 	if _, err := uc.vendors.GetApprovedVendorID(ctx, userID, p.VendorID); err != nil {
-		return nil, apperror.Forbidden("You do not own this product")
+		return nil, err
 	}
 	return p, nil
 }
@@ -991,6 +991,13 @@ func (uc *ProductUseCase) createVariant(ctx context.Context, userID, productID, 
 	}
 	if err := domain.ValidateSKU(sku); err != nil {
 		return nil, nil, err
+	}
+	existing, err := uc.variants.ListForProduct(ctx, p.ID)
+	if err != nil {
+		return nil, nil, apperror.Internal(err)
+	}
+	if len(existing) >= 100 || len(optionIDs) > 100 {
+		return nil, nil, apperror.Validation("Maximum 100 variants per product and 100 options per variant")
 	}
 
 	resolved, err := uc.attributeTemplate.ResolveTemplate(ctx, p.CategoryID)

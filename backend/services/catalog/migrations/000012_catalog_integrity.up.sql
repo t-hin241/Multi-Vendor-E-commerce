@@ -1,5 +1,8 @@
 ALTER TABLE products ADD COLUMN version BIGINT NOT NULL DEFAULT 1 CHECK(version > 0);
 ALTER TABLE products ADD COLUMN enforced_version BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE product_audit_logs DROP CONSTRAINT product_audit_logs_action_check;
+ALTER TABLE product_audit_logs ADD CONSTRAINT product_audit_logs_action_check
+ CHECK(action IN ('approved','rejected','content_revision','replay_status','replay_cleanup'));
 
 CREATE TABLE product_status_outbox (
  product_id UUID PRIMARY KEY REFERENCES products(id),

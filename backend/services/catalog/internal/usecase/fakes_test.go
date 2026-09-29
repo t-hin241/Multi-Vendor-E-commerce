@@ -160,7 +160,7 @@ func (f *fakeProductRepository) ListByStatus(_ context.Context, status string, _
 	return out, nil
 }
 
-func (f *fakeProductRepository) ListStorefront(_ context.Context, categoryID, vendorID, search string, _, _ int) ([]*domain.Product, error) {
+func (f *fakeProductRepository) ListStorefront(_ context.Context, categoryID, vendorID, search string, _, _ int, _ ...string) ([]*domain.Product, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	var out []*domain.Product

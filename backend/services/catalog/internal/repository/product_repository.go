@@ -133,8 +133,15 @@ func (r *ProductRepository) ListStorefront(ctx context.Context, categoryID, vend
 
 	args = append(args, limit, offset)
 	order := "created_at DESC, id DESC"
- if len(sortBy)>0 { switch sortBy[0] {case "price_asc":order="price_amount ASC, id ASC";case "price_desc":order="price_amount DESC, id DESC"} }
- query += ` ORDER BY `+order+` LIMIT $` + strconv.Itoa(len(args)-1) + ` OFFSET $` + strconv.Itoa(len(args))
+	if len(sortBy) > 0 {
+		switch sortBy[0] {
+		case "price_asc":
+			order = "price_amount ASC, id ASC"
+		case "price_desc":
+			order = "price_amount DESC, id DESC"
+		}
+	}
+	query += ` ORDER BY ` + order + ` LIMIT $` + strconv.Itoa(len(args)-1) + ` OFFSET $` + strconv.Itoa(len(args))
 
 	rows, err := connection(ctx, r.pool).Query(ctx, query, args...)
 	if err != nil {

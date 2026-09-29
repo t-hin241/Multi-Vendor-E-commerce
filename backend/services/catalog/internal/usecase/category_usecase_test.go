@@ -9,13 +9,13 @@ import (
 
 func newCategoryFixture() (*usecase.CategoryUseCase, *fakeCategoryRepository) {
 	categories := newFakeCategoryRepository()
-	return usecase.NewCategoryUseCase(categories), categories
+	return usecase.NewCategoryUseCase(categories, fakeIdentity{}), categories
 }
 
 func TestCategoryCreate_RootCategoryHasLevelOne(t *testing.T) {
 	uc, _ := newCategoryFixture()
 
-	c, err := uc.Create(t.Context(), "Quần áo", nil)
+	c, err := uc.Create(t.Context(), "admin-1", "Quần áo", nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -31,7 +31,7 @@ func TestCategoryCreate_ChildInheritsParentLevelPlusOne(t *testing.T) {
 	uc, categories := newCategoryFixture()
 	categories.seed("main-1", "Quần áo", "quan-ao")
 
-	c, err := uc.Create(t.Context(), "Quần áo nam", strPtr("main-1"))
+	c, err := uc.Create(t.Context(), "admin-1", "Quần áo nam", strPtr("main-1"))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -46,7 +46,7 @@ func TestCategoryCreate_ChildInheritsParentLevelPlusOne(t *testing.T) {
 func TestCategoryCreate_RejectsUnknownParent(t *testing.T) {
 	uc, _ := newCategoryFixture()
 
-	_, err := uc.Create(t.Context(), "Áo thun nam", strPtr("no-such-category"))
+	_, err := uc.Create(t.Context(), "admin-1", "Áo thun nam", strPtr("no-such-category"))
 	appErr := mustAppError(t, err)
 	if appErr.Code != apperror.CodeValidation {
 		t.Errorf("expected validation error, got %v", appErr.Code)
@@ -59,7 +59,7 @@ func TestCategoryCreate_RejectsNestingUnderSubCategory(t *testing.T) {
 	categories.seedChild("mid-1", "Quần áo nam", "quan-ao-nam", "main-1", 2)
 	categories.seedChild("sub-1", "Áo thun nam", "ao-thun-nam", "mid-1", 3)
 
-	_, err := uc.Create(t.Context(), "Áo thun nam cổ tròn", strPtr("sub-1"))
+	_, err := uc.Create(t.Context(), "admin-1", "Áo thun nam cổ tròn", strPtr("sub-1"))
 	appErr := mustAppError(t, err)
 	if appErr.Code != apperror.CodeValidation {
 		t.Errorf("expected validation error nesting under a sub-category, got %v", appErr.Code)

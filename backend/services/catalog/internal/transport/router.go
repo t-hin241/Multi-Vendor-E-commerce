@@ -34,7 +34,7 @@ func NewRouter(
 	r.Use(middleware.RequestID())
 	r.Use(middleware.StructuredLogging(log))
 	r.Use(middleware.Recovery(log))
- r.Use(validateRequest())
+	r.Use(validateRequest())
 
 	health.RegisterRoutes(r, checkers...)
 

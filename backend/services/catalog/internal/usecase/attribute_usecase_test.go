@@ -12,7 +12,7 @@ func newAttributeFixture() (*usecase.AttributeUseCase, *fakeAttributeRepository,
 	attributes := newFakeAttributeRepository()
 	rules := newFakeCategoryAttributeRuleRepository()
 	categories := newFakeCategoryRepository()
-	return usecase.NewAttributeUseCase(attributes, rules, categories), attributes, rules, categories
+	return usecase.NewAttributeUseCase(attributes, rules, categories, fakeIdentity{}), attributes, rules, categories
 }
 
 func TestResolveTemplate_InheritsFromMainCategory(t *testing.T) {
@@ -134,7 +134,7 @@ func TestSetCategoryRule_RejectsUnknownAttribute(t *testing.T) {
 func TestCreateAttribute_RejectsVariantDefiningOnNonSelect(t *testing.T) {
 	uc, _, _, _ := newAttributeFixture()
 
-	_, err := uc.CreateAttribute(t.Context(), "size", "Size", domain.DataTypeText, nil, true)
+	_, err := uc.CreateAttribute(t.Context(), "admin-1", "size", "Size", domain.DataTypeText, nil, true)
 	appErr := mustAppError(t, err)
 	if appErr.Code != apperror.CodeValidation {
 		t.Errorf("expected validation error for a variant-defining text attribute, got %v", appErr.Code)
@@ -144,7 +144,7 @@ func TestCreateAttribute_RejectsVariantDefiningOnNonSelect(t *testing.T) {
 func TestCreateAttribute_AllowsVariantDefiningOnSelect(t *testing.T) {
 	uc, _, _, _ := newAttributeFixture()
 
-	a, err := uc.CreateAttribute(t.Context(), "size", "Size", domain.DataTypeSelect, nil, true)
+	a, err := uc.CreateAttribute(t.Context(), "admin-1", "size", "Size", domain.DataTypeSelect, nil, true)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
