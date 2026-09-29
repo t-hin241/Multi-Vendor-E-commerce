@@ -1,0 +1,181 @@
+package usecase
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"strings"
+
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+
+	"shopee/backend/pkg/apperror"
+	"shopee/backend/services/vendorsvc/internal/domain"
+)
+
+type PayoutRepository interface {
+	NextVersion(context.Context, string) (int64, error)
+	Create(context.Context, *domain.PayoutAccount) error
+	Find(context.Context, string, string, int64) (*domain.PayoutAccount, error)
+	List(context.Context, string, int, int) ([]*domain.PayoutAccount, error)
+	Decide(context.Context, *domain.PayoutAccount, string, string, string) error
+	AuditRead(context.Context, string, string, string, string) error
+}
+type PayoutCipher interface {
+	Encrypt(string, string) ([]byte, error)
+	Decrypt([]byte, string) (string, error)
+}
+type PayoutUseCase struct {
+	Accounts PayoutRepository
+	Vendors  VendorRepositoryPort
+	Audit    AuditLogRepositoryPort
+	Ops      Operations
+	Cipher   PayoutCipher
+}
+
+func payoutAAD(a *domain.PayoutAccount, field string) string {
+	return fmt.Sprintf("vendor-payout:%s:%s:%d:%s", a.VendorID, a.ID, a.Version, field)
+}
+func (u *PayoutUseCase) Submit(ctx context.Context, user, vendor, bank, number, name string) (out *domain.PayoutAccount, err error) {
+	if err = u.Ops.Actors.RequireRole(ctx, user, "vendor"); err != nil {
+		return
+	}
+	bank, number, name = strings.TrimSpace(bank), strings.TrimSpace(number), strings.TrimSpace(name)
+	if err = domain.ValidatePayout(bank, number, name); err != nil {
+		return
+	}
+	err = u.Ops.Tx.Run(ctx, func(ctx context.Context) error {
+		if _, e := getOwnedVendor(ctx, u.Vendors, user, vendor); e != nil {
+			return e
+		}
+		version, e := u.Accounts.NextVersion(ctx, vendor)
+		if e != nil {
+			return e
+		}
+		a := &domain.PayoutAccount{ID: uuid.NewString(), VendorID: vendor, Version: version, BankBIN: bank, Last4: number[len(number)-4:], Status: "pending"}
+		a.NumberCipher, e = u.Cipher.Encrypt(number, payoutAAD(a, "number"))
+		if e != nil {
+			return e
+		}
+		a.NameCipher, e = u.Cipher.Encrypt(name, payoutAAD(a, "name"))
+		if e != nil {
+			return e
+		}
+		if e = u.Accounts.Create(ctx, a); e != nil {
+			return e
+		}
+		if e = u.Audit.Create(ctx, vendor, user, "payout_submitted", nil, version); e != nil {
+			return e
+		}
+		out = a
+		return nil
+	})
+	return out, wrap(err)
+}
+func (u *PayoutUseCase) List(ctx context.Context, user, vendor string, admin bool, limit, offset int) ([]*domain.PayoutAccount, error) {
+	role := "vendor"
+	if admin {
+		role = "admin"
+	}
+	if err := u.Ops.Actors.RequireRole(ctx, user, role); err != nil {
+		return nil, err
+	}
+	if !admin {
+		if _, err := getOwnedVendor(ctx, u.Vendors, user, vendor); err != nil {
+			return nil, err
+		}
+	}
+	if limit < 1 || limit > 100 || offset < 0 {
+		return nil, apperror.Validation("Invalid pagination")
+	}
+	out, err := u.Accounts.List(ctx, vendor, limit, offset)
+	return out, wrap(err)
+}
+func (u *PayoutUseCase) Decide(ctx context.Context, actor, vendor, id string, version int64, verify bool, reason string) (out *domain.PayoutAccount, err error) {
+	if err = u.Ops.Actors.RequireRole(ctx, actor, "admin"); err != nil {
+		return
+	}
+	reason = strings.TrimSpace(reason)
+	if len(reason) < 2 || len(reason) > 1000 {
+		return nil, apperror.Validation("Verification evidence or rejection reason is required (2 to 1000 bytes)")
+	}
+	err = u.Ops.Tx.Run(ctx, func(ctx context.Context) error {
+		v, e := u.Vendors.FindByID(ctx, vendor)
+		if e != nil {
+			return e
+		}
+		if v.UserID == actor {
+			return apperror.Forbidden("Cannot verify your own payout account")
+		}
+		a, e := u.Accounts.Find(ctx, vendor, id, version)
+		if errors.Is(e, pgx.ErrNoRows) {
+			return apperror.NotFound("Account version not found")
+		}
+		if e != nil {
+			return e
+		}
+		if a.Status != "pending" {
+			return apperror.Conflict("Only pending account versions can be reviewed")
+		}
+		status := "rejected"
+		if verify {
+			status = "verified"
+		}
+		if e = u.Accounts.Decide(ctx, a, actor, status, reason); e != nil {
+			return e
+		}
+		if e = u.Audit.Create(ctx, vendor, actor, "payout_"+status, &reason, version); e != nil {
+			return e
+		}
+		out, e = u.Accounts.Find(ctx, vendor, id, version)
+		return e
+	})
+	return out, wrap(err)
+}
+
+// Details releases plaintext only after recording the authorized access.
+func (u *PayoutUseCase) Details(ctx context.Context, actor, vendor, id string, version int64, purpose string, payment bool) (out *domain.PayoutDetails, err error) {
+	if !payment {
+		if err = u.Ops.Actors.RequireRole(ctx, actor, "admin"); err != nil {
+			return
+		}
+	}
+	purpose = strings.TrimSpace(purpose)
+	if len(purpose) < 2 || len(purpose) > 200 {
+		return nil, apperror.Validation("An access purpose of 2 to 200 bytes is required")
+	}
+	err = u.Ops.Tx.Run(ctx, func(ctx context.Context) error {
+		if _, e := u.Vendors.FindByID(ctx, vendor); e != nil {
+			return e
+		}
+		a, e := u.Accounts.Find(ctx, vendor, id, version)
+		if errors.Is(e, pgx.ErrNoRows) {
+			return apperror.NotFound("Account version not found")
+		}
+		if e != nil {
+			return e
+		}
+		if payment && a.Status != "verified" {
+			return apperror.Conflict("Payout destination is not verified; review required")
+		}
+		number, e := u.Cipher.Decrypt(a.NumberCipher, payoutAAD(a, "number"))
+		if e != nil {
+			return e
+		}
+		name, e := u.Cipher.Decrypt(a.NameCipher, payoutAAD(a, "name"))
+		if e != nil {
+			return e
+		}
+		scope := "admin-verification"
+		if payment {
+			scope = "payment-payout"
+			actor = ""
+		}
+		if e = u.Accounts.AuditRead(ctx, id, actor, scope, purpose); e != nil {
+			return e
+		}
+		out = &domain.PayoutDetails{AccountID: id, Version: version, BankBIN: a.BankBIN, Number: number, Name: name}
+		return nil
+	})
+	return out, wrap(err)
+}

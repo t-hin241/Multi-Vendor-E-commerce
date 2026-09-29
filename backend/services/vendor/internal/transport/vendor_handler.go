@@ -43,7 +43,7 @@ func (h *VendorHandler) Apply(c *gin.Context) {
 // several under the 1:N vendor↔user relationship. Backs the frontend's
 // shop switcher and "My Shops" management page.
 func (h *VendorHandler) Mine(c *gin.Context) {
-	vendors, err := h.vendors.ListByUserID(c.Request.Context(), middleware.GetUserID(c))
+	vendors, err := h.vendors.ListByUserID(c.Request.Context(), middleware.GetUserID(c), parseIntDefault(c.Query("limit"), 20, 1, 100), parseIntDefault(c.Query("offset"), 0, 0, 1000000))
 	if err != nil {
 		httpresponse.HandleError(c, h.log, err)
 		return

@@ -23,18 +23,25 @@ func NewCategoryAttributeRuleRepository(pool *pgxpool.Pool) *CategoryAttributeRu
 func (r *CategoryAttributeRuleRepository) CurrentVersion(ctx context.Context, categoryID, attributeID string) (int, error) {
 	const query = `SELECT COALESCE(MAX(version), 0) FROM category_attribute_rules WHERE category_id = $1 AND attribute_id = $2`
 	var version int
-	err := r.pool.QueryRow(ctx, query, categoryID, attributeID).Scan(&version)
+	err := connection(ctx, r.pool).QueryRow(ctx, query, categoryID, attributeID).Scan(&version)
 	return version, err
 }
 
 func (r *CategoryAttributeRuleRepository) Insert(ctx context.Context, rule *domain.CategoryAttributeRule) error {
-	const query = `
-		INSERT INTO category_attribute_rules (category_id, attribute_id, version, is_required, is_excluded, position, created_by)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)
-		RETURNING id, created_at`
-	return r.pool.QueryRow(ctx, query,
-		rule.CategoryID, rule.AttributeID, rule.Version, rule.IsRequired, rule.IsExcluded, rule.Position, rule.CreatedBy,
-	).Scan(&rule.ID, &rule.CreatedAt)
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(19030703)`); err != nil {
+		return err
+	}
+	if err := tx.QueryRow(ctx, `INSERT INTO category_attribute_rules(category_id,attribute_id,version,is_required,is_excluded,position,created_by)
+ SELECT $1,$2,COALESCE(max(version),0)+1,$3,$4,$5,$6 FROM category_attribute_rules WHERE category_id=$1 AND attribute_id=$2
+ RETURNING id,version,created_at`, rule.CategoryID, rule.AttributeID, rule.IsRequired, rule.IsExcluded, rule.Position, rule.CreatedBy).Scan(&rule.ID, &rule.Version, &rule.CreatedAt); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
 }
 
 // CurrentRulesForCategories batch-fetches the current (highest-version) rule
@@ -50,7 +57,7 @@ func (r *CategoryAttributeRuleRepository) CurrentRulesForCategories(ctx context.
 		FROM category_attribute_rules
 		WHERE category_id = ANY($1)
 		ORDER BY category_id, attribute_id, version DESC`
-	rows, err := r.pool.Query(ctx, query, categoryIDs)
+	rows, err := connection(ctx, r.pool).Query(ctx, query, categoryIDs)
 	if err != nil {
 		return nil, err
 	}

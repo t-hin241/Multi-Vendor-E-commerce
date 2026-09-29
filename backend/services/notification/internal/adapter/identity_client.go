@@ -18,12 +18,13 @@ type UserSnapshot struct {
 }
 
 type HTTPIdentityClient struct {
-	baseURL string
-	client  *http.Client
+	baseURL    string
+	serviceKey string
+	client     *http.Client
 }
 
-func NewHTTPIdentityClient(baseURL string) *HTTPIdentityClient {
-	return &HTTPIdentityClient{baseURL: baseURL, client: &http.Client{Timeout: 5 * time.Second}}
+func NewHTTPIdentityClient(baseURL, serviceKey string) *HTTPIdentityClient {
+	return &HTTPIdentityClient{serviceKey: serviceKey, baseURL: baseURL, client: &http.Client{Timeout: 5 * time.Second}}
 }
 
 type internalUserResponseBody struct {
@@ -44,6 +45,7 @@ func (c *HTTPIdentityClient) GetUser(ctx context.Context, userID string) (*UserS
 		return nil, apperror.Internal(err)
 	}
 
+	req.Header.Set("X-Identity-Service-Key", c.serviceKey)
 	resp, err := c.client.Do(req)
 	if err != nil {
 		return nil, apperror.Internal(err)

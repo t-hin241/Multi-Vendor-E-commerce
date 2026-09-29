@@ -10,6 +10,7 @@ import (
 	"shopee/backend/pkg/authjwt"
 	"shopee/backend/pkg/health"
 	"shopee/backend/pkg/middleware"
+	"shopee/backend/pkg/serviceauth"
 )
 
 func NewRouter(
@@ -22,6 +23,7 @@ func NewRouter(
 	adminHandler *AdminHandler,
 	internalHandler *InternalHandler,
 	attributeHandler *AttributeHandler,
+	internalKey string,
 	checkers ...health.Checker,
 ) *gin.Engine {
 	if env == "production" {
@@ -32,6 +34,7 @@ func NewRouter(
 	r.Use(middleware.RequestID())
 	r.Use(middleware.StructuredLogging(log))
 	r.Use(middleware.Recovery(log))
+ r.Use(validateRequest())
 
 	health.RegisterRoutes(r, checkers...)
 
@@ -68,6 +71,8 @@ func NewRouter(
 	vendorGroup := r.Group("/api/catalog/products", requireAuth, middleware.RequireRole("vendor"))
 	{
 		vendorGroup.POST("", productHandler.Create)
+		vendorGroup.PATCH("/:id/content", productHandler.UpdateContent)
+		vendorGroup.GET("/:id/editor", productHandler.GetForOwner)
 		vendorGroup.GET("/mine", productHandler.ListMine)
 		vendorGroup.PATCH("/:id/submit", productHandler.Submit)
 		vendorGroup.PATCH("/:id/active", productHandler.SetActive)
@@ -90,8 +95,8 @@ func NewRouter(
 		adminGroup.PATCH("/:id/reject", adminHandler.Reject)
 	}
 
-	r.GET("/internal/products/:id", internalHandler.GetByID)
-	r.GET("/internal/products/variants/:variantId", internalHandler.GetVariantOwner)
+	r.GET("/internal/products/:id", serviceauth.Require(internalKey, serviceauth.Header), internalHandler.GetByID)
+	r.GET("/internal/products/variants/:variantId", serviceauth.Require(internalKey, serviceauth.Header), internalHandler.GetVariantOwner)
 
 	return r
 }

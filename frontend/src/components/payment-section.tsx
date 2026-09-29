@@ -21,6 +21,14 @@ export function PaymentSection({ orderId }: { orderId: string }) {
   async function handleStartPayment() {
     try {
       const created = await createIntent.mutateAsync();
+
+      // A real provider owns its checkout UI. The browser redirect is only
+      // navigation; Payment still waits for its signed webhook before Order
+      // can become paid.
+      if (created.checkout_url) {
+        window.location.assign(created.checkout_url);
+        return;
+      }
       setIntent(created);
     } catch {
       // toasted by the mutation's onError
@@ -32,6 +40,17 @@ export function PaymentSection({ orderId }: { orderId: string }) {
       <Button onClick={handleStartPayment} disabled={createIntent.isPending}>
         {createIntent.isPending ? "Đang khởi tạo…" : "Thanh toán ngay"}
       </Button>
+    );
+  }
+
+  if (intent.checkout_url) {
+    return (
+      <Card className="w-full max-w-sm">
+        <CardContent className="flex flex-col gap-3">
+          <Alert><AlertDescription>Đang chuyển đến cổng thanh toán an toàn…</AlertDescription></Alert>
+          <Button asChild><a href={intent.checkout_url}>Mở trang thanh toán</a></Button>
+        </CardContent>
+      </Card>
     );
   }
 

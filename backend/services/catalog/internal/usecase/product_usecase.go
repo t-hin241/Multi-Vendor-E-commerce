@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"strconv"
+	"strings"
 
 	"shopee/backend/pkg/apperror"
 	"shopee/backend/services/catalog/internal/domain"
@@ -12,6 +14,7 @@ import (
 )
 
 type ProductUseCase struct {
+	ops               Operations
 	products          ProductRepositoryPort
 	images            ProductImageRepositoryPort
 	media             ProductMediaRepositoryPort
@@ -45,8 +48,10 @@ func NewProductUseCase(
 	variants ProductVariantRepositoryPort,
 	inventory InventoryGateway,
 	packaging ProductPackagingRepositoryPort,
+	ops Operations,
 ) *ProductUseCase {
 	return &ProductUseCase{
+		ops:               ops,
 		products:          products,
 		images:            images,
 		media:             media,
@@ -77,7 +82,7 @@ type AttributeValueInput struct {
 	OptionIDs   []string
 }
 
-func (uc *ProductUseCase) Create(ctx context.Context, userID, vendorID, categoryID, name, description string, priceAmount int64, submittedAttributes []AttributeValueInput) (*domain.Product, error) {
+func (uc *ProductUseCase) create(ctx context.Context, userID, vendorID, categoryID, name, description string, priceAmount int64, submittedAttributes []AttributeValueInput) (*domain.Product, error) {
 	if err := domain.ValidateProductInput(name, description, priceAmount); err != nil {
 		return nil, err
 	}
@@ -114,7 +119,7 @@ func (uc *ProductUseCase) Create(ctx context.Context, userID, vendorID, category
 		CategoryID:  categoryID,
 		Name:        name,
 		Slug:        slug,
-		Description: description,
+		Description: domain.SanitizeDescription(description),
 		PriceAmount: priceAmount,
 		Currency:    defaultCurrency,
 	}
@@ -146,8 +151,30 @@ func (uc *ProductUseCase) Create(ctx context.Context, userID, vendorID, category
 // the returned Packaging value instead of the generic attribute-value list
 // — see domain.IsPackagingCode.
 func buildAttributeValues(resolved []domain.ResolvedAttribute, submitted []AttributeValueInput) ([]*domain.ProductAttributeValue, domain.Packaging, error) {
+	if len(submitted) > 100 {
+		return nil, domain.Packaging{}, apperror.Validation("Maximum 100 attributes")
+	}
+	allowed := map[string]bool{}
+	for _, r := range resolved {
+		if !r.Attribute.IsVariantDefining {
+			allowed[r.Attribute.ID] = true
+		}
+	}
 	submittedByAttribute := make(map[string]AttributeValueInput, len(submitted))
 	for _, s := range submitted {
+		if !allowed[s.AttributeID] {
+			return nil, domain.Packaging{}, apperror.Validation("Attribute is not allowed for this category")
+		}
+		if _, ok := submittedByAttribute[s.AttributeID]; ok {
+			return nil, domain.Packaging{}, apperror.Validation("Duplicate attribute")
+		}
+		seen := map[string]bool{}
+		for _, id := range s.OptionIDs {
+			if seen[id] {
+				return nil, domain.Packaging{}, apperror.Validation("Duplicate option")
+			}
+			seen[id] = true
+		}
 		submittedByAttribute[s.AttributeID] = s
 	}
 
@@ -176,8 +203,11 @@ func buildAttributeValues(resolved []domain.ResolvedAttribute, submitted []Attri
 				return nil, domain.Packaging{}, apperror.Validation(fmt.Sprintf("%s must be a number", r.Attribute.Name))
 			}
 			num, err := strconv.ParseFloat(*input.Value, 64)
-			if err != nil {
+			if err != nil || math.IsNaN(num) || math.IsInf(num, 0) {
 				return nil, domain.Packaging{}, apperror.Validation(fmt.Sprintf("%s must be a number", r.Attribute.Name))
+			}
+			if num <= 0 || num > 1_000_000_000 || math.Trunc(num) != num {
+				return nil, domain.Packaging{}, apperror.Validation("Packaging values must be positive integers no greater than 1000000000")
 			}
 			whole := int64(num)
 			switch domain.PackagingAttributeCode(r.Attribute.Code) {
@@ -206,7 +236,7 @@ func buildAttributeValues(resolved []domain.ResolvedAttribute, submitted []Attri
 				return nil, domain.Packaging{}, apperror.Validation(fmt.Sprintf("%s must be a number", r.Attribute.Name))
 			}
 			num, err := strconv.ParseFloat(*input.Value, 64)
-			if err != nil {
+			if err != nil || math.IsNaN(num) || math.IsInf(num, 0) {
 				return nil, domain.Packaging{}, apperror.Validation(fmt.Sprintf("%s must be a number", r.Attribute.Name))
 			}
 			values = append(values, &domain.ProductAttributeValue{AttributeID: r.Attribute.ID, RuleID: &ruleID, ValueNumber: &num})
@@ -292,6 +322,9 @@ func (uc *ProductUseCase) GetPublicBySlug(ctx context.Context, slug, viewerUserI
 		return nil, nil, nil, nil, nil, nil, false, "", apperror.NotFound("Product not found")
 	}
 
+	if _, err = uc.vendors.Approved(ctx, []string{p.VendorID}); err != nil {
+		return nil, nil, nil, nil, nil, nil, false, "", err
+	}
 	images, err = uc.images.ListForProduct(ctx, p.ID)
 	if err != nil {
 		return nil, nil, nil, nil, nil, nil, false, "", apperror.Internal(err)
@@ -376,7 +409,7 @@ func (uc *ProductUseCase) canViewExactStock(ctx context.Context, vendorID, viewe
 // down. The two degraded flags tell the caller when that fallback was used,
 // so the frontend can show a "may be outdated" notice without hiding or
 // blocking the product grid.
-func (uc *ProductUseCase) ListStorefront(ctx context.Context, categoryID, vendorID, search string, limit, offset int) (
+func (uc *ProductUseCase) ListStorefront(ctx context.Context, categoryID, vendorID, search string, limit, offset int, sortBy ...string) (
 	products []*domain.Product,
 	total int,
 	images map[string]*domain.ProductImage,
@@ -386,7 +419,7 @@ func (uc *ProductUseCase) ListStorefront(ctx context.Context, categoryID, vendor
 	salesInfoDegraded bool,
 	err error,
 ) {
-	products, err = uc.products.ListStorefront(ctx, categoryID, vendorID, search, limit, offset)
+	products, err = uc.products.ListStorefront(ctx, categoryID, vendorID, search, limit, offset, sortBy...)
 	if err != nil {
 		return nil, 0, nil, nil, nil, false, false, apperror.Internal(err)
 	}
@@ -428,24 +461,30 @@ func (uc *ProductUseCase) ListStorefront(ctx context.Context, categoryID, vendor
 // can't fill counts as degraded.
 func (uc *ProductUseCase) resolveVendorNames(ctx context.Context, vendorIDs []string) (map[string]string, bool) {
 	live, err := uc.vendorNames.GetShopNames(ctx, vendorIDs)
+	if live == nil {
+		live = map[string]string{}
+	}
 	if err != nil {
-		cached, _ := uc.storefrontCache.GetVendorNames(ctx, vendorIDs)
+		uc.observe(ctx, "vendor_names_live", err)
+		cached, cacheErr := uc.storefrontCache.GetVendorNames(ctx, vendorIDs)
+		uc.observe(ctx, "vendor_names_cache_read", cacheErr)
 		return cached, true
 	}
 
-	_ = uc.storefrontCache.UpsertVendorNames(ctx, live) // best-effort refresh of the fallback
+	uc.observe(ctx, "vendor_names_cache_write", uc.storefrontCache.UpsertVendorNames(ctx, live))
 
 	missing := idsNotIn(vendorIDs, live)
 	if len(missing) == 0 {
 		return live, false
 	}
 	cachedForMissing, cacheErr := uc.storefrontCache.GetVendorNames(ctx, missing)
+	uc.observe(ctx, "vendor_names_cache_read", cacheErr)
 	if cacheErr == nil {
 		for id, name := range cachedForMissing {
 			live[id] = name
 		}
 	}
-	return live, len(idsNotIn(missing, cachedForMissing)) > 0
+	return live, true
 }
 
 // resolveQuantitySold prefers the live Order lookup. Unlike vendor names,
@@ -455,11 +494,21 @@ func (uc *ProductUseCase) resolveVendorNames(ctx context.Context, vendorIDs []st
 // live call fails entirely.
 func (uc *ProductUseCase) resolveQuantitySold(ctx context.Context, productIDs []string) (map[string]int64, bool) {
 	live, err := uc.orders.GetQuantitySold(ctx, productIDs)
+	if live == nil {
+		live = map[string]int64{}
+	}
 	if err == nil {
-		_ = uc.storefrontCache.UpsertQuantitySold(ctx, live) // best-effort refresh of the fallback
+		for _, id := range productIDs {
+			if _, ok := live[id]; !ok {
+				live[id] = 0
+			}
+		}
+		uc.observe(ctx, "sales_cache_write", uc.storefrontCache.UpsertQuantitySold(ctx, live))
 		return live, false
 	}
-	cached, _ := uc.storefrontCache.GetQuantitySold(ctx, productIDs)
+	uc.observe(ctx, "sales_live", err)
+	cached, cacheErr := uc.storefrontCache.GetQuantitySold(ctx, productIDs)
+	uc.observe(ctx, "sales_cache_read", cacheErr)
 	return cached, true
 }
 
@@ -469,11 +518,21 @@ func (uc *ProductUseCase) resolveQuantitySold(ctx context.Context, productIDs []
 // for every requested variant and reports degraded.
 func (uc *ProductUseCase) resolveVariantStock(ctx context.Context, variantIDs []string) (map[string]int64, bool) {
 	live, err := uc.inventory.GetVariantStock(ctx, variantIDs)
+	if live == nil {
+		live = map[string]int64{}
+	}
 	if err == nil {
-		_ = uc.storefrontCache.UpsertVariantStock(ctx, live) // best-effort refresh of the fallback
+		for _, id := range variantIDs {
+			if _, ok := live[id]; !ok {
+				live[id] = 0
+			}
+		}
+		uc.observe(ctx, "stock_cache_write", uc.storefrontCache.UpsertVariantStock(ctx, live))
 		return live, false
 	}
-	cached, _ := uc.storefrontCache.GetVariantStock(ctx, variantIDs)
+	uc.observe(ctx, "stock_live", err)
+	cached, cacheErr := uc.storefrontCache.GetVariantStock(ctx, variantIDs)
+	uc.observe(ctx, "stock_cache_read", cacheErr)
 	return cached, true
 }
 
@@ -495,6 +554,17 @@ func (uc *ProductUseCase) GetByIDForOwnerLookup(ctx context.Context, productID s
 	product, err = uc.findForDecision(ctx, productID)
 	if err != nil {
 		return nil, false, nil, err
+	}
+	if product.IsPubliclyVisible() {
+		if _, saleErr := uc.vendors.Approved(ctx, []string{product.VendorID}); saleErr != nil {
+			var app *apperror.Error
+			if !errors.As(saleErr, &app) || app.Code != apperror.CodeConflict {
+				return nil, false, nil, saleErr
+			}
+			copyProduct := *product
+			copyProduct.IsActive = false
+			product = &copyProduct
+		}
 	}
 	hasVariants, err = uc.variants.HasVariantsForProduct(ctx, productID)
 	if err != nil {
@@ -525,7 +595,7 @@ func (uc *ProductUseCase) ListMine(ctx context.Context, userID, vendorID string,
 // initial stock — either a plain stock record (no variants) or a stocked
 // record for every variant that exists. Media and variants themselves stay
 // optional; description was already optional at Create.
-func (uc *ProductUseCase) SubmitForReview(ctx context.Context, userID, productID string) (*domain.Product, error) {
+func (uc *ProductUseCase) submitForReview(ctx context.Context, userID, productID string) (*domain.Product, error) {
 	p, err := uc.ownedByUser(ctx, userID, productID)
 	if err != nil {
 		return nil, err
@@ -559,6 +629,9 @@ func (uc *ProductUseCase) SubmitForReview(ctx context.Context, userID, productID
 		return nil, apperror.Validation("Set the initial stock before submitting")
 	}
 
+	if err := uc.validateCurrentRules(ctx, p); err != nil {
+		return nil, err
+	}
 	if err := uc.products.UpdateStatus(ctx, p.ID, domain.StatusPendingReview, nil); err != nil {
 		return nil, apperror.Internal(err)
 	}
@@ -566,7 +639,7 @@ func (uc *ProductUseCase) SubmitForReview(ctx context.Context, userID, productID
 	return p, nil
 }
 
-func (uc *ProductUseCase) SetActive(ctx context.Context, userID, productID string, isActive bool) (*domain.Product, error) {
+func (uc *ProductUseCase) setActive(ctx context.Context, userID, productID string, isActive bool) (*domain.Product, error) {
 	p, err := uc.ownedByUser(ctx, userID, productID)
 	if err != nil {
 		return nil, err
@@ -579,13 +652,16 @@ func (uc *ProductUseCase) SetActive(ctx context.Context, userID, productID strin
 	return p, nil
 }
 
-func (uc *ProductUseCase) UploadImage(ctx context.Context, userID, productID, contentType string, data []byte) (*domain.ProductImage, error) {
+func (uc *ProductUseCase) uploadImage(ctx context.Context, userID, productID, contentType string, data []byte) (*domain.ProductImage, error) {
 	p, err := uc.ownedByUser(ctx, userID, productID)
 	if err != nil {
 		return nil, err
 	}
+	if err := uc.revise(ctx, p, userID); err != nil {
+		return nil, err
+	}
 
-	ext, err := domain.ValidateImageUpload(contentType, int64(len(data)))
+	_, ext, detectedType, err := domain.ValidateMediaBytes(contentType, data, true)
 	if err != nil {
 		return nil, err
 	}
@@ -596,24 +672,27 @@ func (uc *ProductUseCase) UploadImage(ctx context.Context, userID, productID, co
 	}
 	objectKey := fmt.Sprintf("products/%s/%s%s", p.ID, suffix, ext)
 
-	url, err := uc.store.Upload(ctx, objectKey, data, contentType)
+	if err := uc.ops.Cleanup.Track(ctx, objectKey, p.ID); err != nil {
+		return nil, apperror.Internal(err)
+	}
+	url, err := uc.store.Upload(ctx, objectKey, data, detectedType)
 	if err != nil {
 		return nil, apperror.Internal(err)
 	}
 
+	if !domain.SafeMediaURL(url) {
+		return nil, apperror.Validation("Unsafe media URL")
+	}
 	img := &domain.ProductImage{ProductID: p.ID, ObjectKey: objectKey, URL: url}
 	oldKeys, err := uc.images.ReplaceForProduct(ctx, img)
 	if err != nil {
 		return nil, apperror.Internal(err)
 	}
 
-	// Best-effort: the DB row (just swapped atomically above) is the source
-	// of truth for "the product's image", so a storage-delete failure here
-	// only leaves an orphaned blob, not an inconsistency — same tolerance
-	// this codebase already applies to secondary side effects like
-	// notification sends failing without rolling back the main transaction.
 	for _, key := range oldKeys {
-		_ = uc.store.Delete(ctx, key)
+		if err := uc.ops.Cleanup.Enqueue(ctx, key, p.ID); err != nil {
+			return nil, apperror.Internal(err)
+		}
 	}
 
 	return img, nil
@@ -623,9 +702,12 @@ func (uc *ProductUseCase) UploadImage(ctx context.Context, userID, productID, co
 // the frontend's corner "×" control on an already-uploaded image, letting a
 // vendor clear it and pick a different one before submitting for review.
 // A no-op (not an error) if there's nothing to delete.
-func (uc *ProductUseCase) DeleteImage(ctx context.Context, userID, productID string) error {
+func (uc *ProductUseCase) deleteImage(ctx context.Context, userID, productID string) error {
 	p, err := uc.ownedByUser(ctx, userID, productID)
 	if err != nil {
+		return err
+	}
+	if err := uc.revise(ctx, p, userID); err != nil {
 		return err
 	}
 
@@ -634,11 +716,10 @@ func (uc *ProductUseCase) DeleteImage(ctx context.Context, userID, productID str
 		return apperror.Internal(err)
 	}
 
-	// Best-effort, same tolerance as UploadImage's own cleanup: the DB row
-	// (already gone) is the source of truth, so a storage-delete failure
-	// here only leaves an orphaned blob, not an inconsistency.
 	for _, key := range deletedKeys {
-		_ = uc.store.Delete(ctx, key)
+		if err := uc.ops.Cleanup.Enqueue(ctx, key, p.ID); err != nil {
+			return apperror.Internal(err)
+		}
 	}
 	return nil
 }
@@ -663,13 +744,16 @@ func (uc *ProductUseCase) ListImagesForOwner(ctx context.Context, userID, produc
 // gallery — a separate concept from UploadImage's plain photo gallery, that
 // also accepts short videos. Mirrors UploadImage's ownership-then-validate
 // flow exactly.
-func (uc *ProductUseCase) UploadMedia(ctx context.Context, userID, productID, contentType string, data []byte) (*domain.ProductMedia, error) {
+func (uc *ProductUseCase) uploadMedia(ctx context.Context, userID, productID, contentType string, data []byte) (*domain.ProductMedia, error) {
 	p, err := uc.ownedByUser(ctx, userID, productID)
 	if err != nil {
 		return nil, err
 	}
+	if err := uc.revise(ctx, p, userID); err != nil {
+		return nil, err
+	}
 
-	kind, ext, err := domain.ValidateMediaUpload(contentType, int64(len(data)))
+	kind, ext, detectedType, err := domain.ValidateMediaBytes(contentType, data, false)
 	if err != nil {
 		return nil, err
 	}
@@ -688,14 +772,20 @@ func (uc *ProductUseCase) UploadMedia(ctx context.Context, userID, productID, co
 	}
 	objectKey := fmt.Sprintf("products/%s/media/%s%s", p.ID, suffix, ext)
 
-	url, err := uc.store.Upload(ctx, objectKey, data, contentType)
+	if err := uc.ops.Cleanup.Track(ctx, objectKey, p.ID); err != nil {
+		return nil, apperror.Internal(err)
+	}
+	url, err := uc.store.Upload(ctx, objectKey, data, detectedType)
 	if err != nil {
 		return nil, apperror.Internal(err)
 	}
 
+	if !domain.SafeMediaURL(url) {
+		return nil, apperror.Validation("Unsafe media URL")
+	}
 	m := &domain.ProductMedia{
 		ProductID: p.ID, Kind: kind, ObjectKey: objectKey, URL: url,
-		ContentType: contentType, SizeBytes: int64(len(data)), Position: position,
+		ContentType: detectedType, SizeBytes: int64(len(data)), Position: position,
 	}
 	if err := uc.media.Create(ctx, m); err != nil {
 		return nil, apperror.Internal(err)
@@ -807,15 +897,24 @@ func (uc *ProductUseCase) GetForModeration(ctx context.Context, productID string
 	return p, images, media, attributeValues, variants, nil, nil
 }
 
-func (uc *ProductUseCase) Approve(ctx context.Context, productID, adminUserID string) (*domain.Product, error) {
+func (uc *ProductUseCase) approve(ctx context.Context, productID, adminUserID string) (*domain.Product, error) {
+	if err := uc.ops.Identity.RequireRole(ctx, adminUserID, "admin"); err != nil {
+		return nil, err
+	}
 	p, err := uc.findForDecision(ctx, productID)
 	if err != nil {
+		return nil, err
+	}
+	if _, err := uc.vendors.Approved(ctx, []string{p.VendorID}); err != nil {
 		return nil, err
 	}
 	if !domain.CanTransition(p.Status, domain.StatusApproved) {
 		return nil, apperror.Conflict("Only a pending_review product can be approved")
 	}
 
+	if err := uc.validateCurrentRules(ctx, p); err != nil {
+		return nil, err
+	}
 	if err := uc.products.UpdateStatus(ctx, p.ID, domain.StatusApproved, nil); err != nil {
 		return nil, apperror.Internal(err)
 	}
@@ -827,7 +926,11 @@ func (uc *ProductUseCase) Approve(ctx context.Context, productID, adminUserID st
 	return p, nil
 }
 
-func (uc *ProductUseCase) Reject(ctx context.Context, productID, adminUserID, reason string) (*domain.Product, error) {
+func (uc *ProductUseCase) reject(ctx context.Context, productID, adminUserID, reason string) (*domain.Product, error) {
+	if err := uc.ops.Identity.RequireRole(ctx, adminUserID, "admin"); err != nil {
+		return nil, err
+	}
+	reason = strings.TrimSpace(reason)
 	if reason == "" {
 		return nil, apperror.Validation("A rejection reason is required")
 	}
@@ -877,9 +980,13 @@ func (uc *ProductUseCase) ownedByUser(ctx context.Context, userID, productID str
 // itself. Only attributes marked variant-defining in the product's
 // resolved category template are valid axes; every such axis must get
 // exactly one submitted option.
-func (uc *ProductUseCase) CreateVariant(ctx context.Context, userID, productID, sku string, optionIDs []string) (*domain.ProductVariant, []domain.VariantOptionDetail, error) {
+func (uc *ProductUseCase) createVariant(ctx context.Context, userID, productID, sku string, optionIDs []string) (*domain.ProductVariant, []domain.VariantOptionDetail, error) {
+	sku = strings.TrimSpace(sku)
 	p, err := uc.ownedByUser(ctx, userID, productID)
 	if err != nil {
+		return nil, nil, err
+	}
+	if err := uc.revise(ctx, p, userID); err != nil {
 		return nil, nil, err
 	}
 	if err := domain.ValidateSKU(sku); err != nil {
@@ -1159,4 +1266,104 @@ func (uc *ProductUseCase) findForDecision(ctx context.Context, productID string)
 		return nil, apperror.Internal(err)
 	}
 	return p, nil
+}
+
+func (uc *ProductUseCase) Create(ctx context.Context, userID, vendorID, categoryID, name, description string, priceAmount int64, submittedAttributes []AttributeValueInput) (*domain.Product, error) {
+	var value *domain.Product
+	err := uc.transact(ctx, func(ctx context.Context) error {
+		var err error
+		value, err = uc.create(ctx, userID, vendorID, categoryID, name, description, priceAmount, submittedAttributes)
+		if err == nil {
+			value, err = uc.products.FindByID(ctx, value.ID)
+		}
+		return err
+	})
+	return value, err
+}
+
+func (uc *ProductUseCase) SubmitForReview(ctx context.Context, userID, productID string) (*domain.Product, error) {
+	var value *domain.Product
+	err := uc.transact(ctx, func(ctx context.Context) error {
+		var err error
+		value, err = uc.submitForReview(ctx, userID, productID)
+		if err == nil {
+			value, err = uc.products.FindByID(ctx, value.ID)
+		}
+		return err
+	})
+	return value, err
+}
+
+func (uc *ProductUseCase) SetActive(ctx context.Context, userID, productID string, isActive bool) (*domain.Product, error) {
+	var value *domain.Product
+	err := uc.transact(ctx, func(ctx context.Context) error {
+		var err error
+		value, err = uc.setActive(ctx, userID, productID, isActive)
+		if err == nil {
+			value, err = uc.products.FindByID(ctx, value.ID)
+		}
+		return err
+	})
+	return value, err
+}
+
+func (uc *ProductUseCase) Approve(ctx context.Context, productID, adminUserID string) (*domain.Product, error) {
+	var value *domain.Product
+	err := uc.transact(ctx, func(ctx context.Context) error {
+		var err error
+		value, err = uc.approve(ctx, productID, adminUserID)
+		if err == nil {
+			value, err = uc.products.FindByID(ctx, value.ID)
+		}
+		return err
+	})
+	return value, err
+}
+
+func (uc *ProductUseCase) Reject(ctx context.Context, productID, adminUserID, reason string) (*domain.Product, error) {
+	var value *domain.Product
+	err := uc.transact(ctx, func(ctx context.Context) error {
+		var err error
+		value, err = uc.reject(ctx, productID, adminUserID, reason)
+		if err == nil {
+			value, err = uc.products.FindByID(ctx, value.ID)
+		}
+		return err
+	})
+	return value, err
+}
+
+func (uc *ProductUseCase) UploadImage(ctx context.Context, userID, productID, contentType string, data []byte) (*domain.ProductImage, error) {
+	var value *domain.ProductImage
+	err := uc.transact(ctx, func(ctx context.Context) error {
+		var err error
+		value, err = uc.uploadImage(ctx, userID, productID, contentType, data)
+		return err
+	})
+	return value, err
+}
+
+func (uc *ProductUseCase) UploadMedia(ctx context.Context, userID, productID, contentType string, data []byte) (*domain.ProductMedia, error) {
+	var value *domain.ProductMedia
+	err := uc.transact(ctx, func(ctx context.Context) error {
+		var err error
+		value, err = uc.uploadMedia(ctx, userID, productID, contentType, data)
+		return err
+	})
+	return value, err
+}
+
+func (uc *ProductUseCase) DeleteImage(ctx context.Context, userID, productID string) error {
+	return uc.transact(ctx, func(ctx context.Context) error { return uc.deleteImage(ctx, userID, productID) })
+}
+
+func (uc *ProductUseCase) CreateVariant(ctx context.Context, userID, productID, sku string, optionIDs []string) (*domain.ProductVariant, []domain.VariantOptionDetail, error) {
+	var value *domain.ProductVariant
+	var details []domain.VariantOptionDetail
+	err := uc.transact(ctx, func(ctx context.Context) error {
+		var err error
+		value, details, err = uc.createVariant(ctx, userID, productID, sku, optionIDs)
+		return err
+	})
+	return value, details, err
 }

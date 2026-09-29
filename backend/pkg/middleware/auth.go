@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"errors"
 	"slices"
 	"strings"
 
@@ -30,7 +31,15 @@ func RequireAuth(manager *authjwt.Manager) gin.HandlerFunc {
 		}
 
 		claims, err := manager.Parse(tokenString)
+		if err == nil {
+			err = manager.VerifySession(c.Request.Context(), claims)
+		}
 		if err != nil {
+			if errors.Is(err, authjwt.ErrVerificationUnavailable) {
+				httpresponse.Error(c, 503, "service_unavailable", "Session verification temporarily unavailable")
+				c.Abort()
+				return
+			}
 			httpresponse.Error(c, 401, "unauthorized", "Invalid or expired token")
 			c.Abort()
 			return
@@ -58,6 +67,9 @@ func OptionalAuth(manager *authjwt.Manager) gin.HandlerFunc {
 		}
 
 		claims, err := manager.Parse(tokenString)
+		if err == nil {
+			err = manager.VerifySession(c.Request.Context(), claims)
+		}
 		if err != nil {
 			c.Next()
 			return

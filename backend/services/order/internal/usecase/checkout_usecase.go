@@ -40,6 +40,14 @@ type OrderUseCase struct {
 	log             zerolog.Logger
 }
 
+func (uc *OrderUseCase) ListReviewEligibility(ctx context.Context, buyerID, productID string) ([]*domain.ReviewEligibility, error) {
+	items, err := uc.orders.ListReviewEligibility(ctx, buyerID, productID)
+	if err != nil {
+		return nil, apperror.Internal(err)
+	}
+	return items, nil
+}
+
 func NewOrderUseCase(
 	orders OrderRepositoryPort,
 	vendorOrders VendorOrderRepositoryPort,
@@ -111,6 +119,7 @@ func (uc *OrderUseCase) Checkout(ctx context.Context, buyerID, bearerToken, addr
 
 	checkoutLines := make([]domain.CheckoutLine, 0, len(cartLines))
 	weightByVendor := map[string]int64{}
+	productVersions := map[string]int64{}
 	for _, line := range cartLines {
 		product, err := uc.catalog.GetProduct(ctx, line.ProductID)
 		if err != nil {
@@ -127,6 +136,7 @@ func (uc *OrderUseCase) Checkout(ctx context.Context, buyerID, bearerToken, addr
 			return nil, apperror.Validation("\"" + product.Name + "\" requires selecting an option; please update your cart")
 		}
 
+		productVersions[product.ID] = product.Version
 		checkoutLine := domain.CheckoutLine{
 			ProductID:   product.ID,
 			VendorID:    product.VendorID,
@@ -165,12 +175,25 @@ func (uc *OrderUseCase) Checkout(ctx context.Context, buyerID, bearerToken, addr
 	if err != nil {
 		return nil, err
 	}
+	plan.ProductVersions = productVersions
 	plan.Order.RecipientName, plan.Order.Phone = address.RecipientName, address.Phone
 	plan.Order.Province, plan.Order.District, plan.Order.Ward, plan.Order.StreetAddress =
 		address.Province, address.District, address.Ward, address.StreetAddress
 
+	ids := make([]string, 0, len(plan.VendorOrders))
+	for _, vo := range plan.VendorOrders {
+		ids = append(ids, vo.VendorID)
+	}
+	plan.VendorVersions, err = uc.vendors.Approved(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
 	order, err := uc.orders.CreateFromPlan(ctx, plan)
 	if err != nil {
+		var app *apperror.Error
+		if errors.As(err, &app) {
+			return nil, err
+		}
 		return nil, apperror.Internal(err)
 	}
 

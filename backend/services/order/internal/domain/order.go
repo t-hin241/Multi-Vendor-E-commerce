@@ -198,6 +198,18 @@ type OrderItem struct {
 	CreatedAt      time.Time
 }
 
+// ReviewEligibility is the deliberately narrow internal contract consumed by
+// Review. It contains purchase proof only, never address, payment or totals.
+type ReviewEligibility struct {
+	OrderItemID   string
+	VendorOrderID string
+	ProductID     string
+	VendorID      string
+	ProductName   string
+	VariantLabel  *string
+	CompletedAt   time.Time
+}
+
 // CheckoutLine is one line of a checkout request after Order has resolved
 // it against Catalog: an authoritative price snapshot plus which vendor it
 // belongs to, ready to be grouped into vendor sub-orders. VariantSKU/Label

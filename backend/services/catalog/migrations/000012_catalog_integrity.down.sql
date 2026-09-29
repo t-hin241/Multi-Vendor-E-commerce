@@ -1,0 +1,12 @@
+ALTER TABLE product_variants DROP CONSTRAINT variant_sku_nonempty;
+ALTER TABLE product_attribute_values DROP CONSTRAINT value_exactly_one;
+ALTER TABLE product_attribute_values DROP CONSTRAINT value_option_attribute_fk;
+ALTER TABLE product_variant_options DROP CONSTRAINT variant_option_attribute_fk;
+ALTER TABLE attribute_options DROP CONSTRAINT attribute_options_id_attribute_unique;
+DROP TABLE catalog_object_cleanup;
+DROP TRIGGER catalog_product_outbox ON products;
+DROP TRIGGER catalog_product_version ON products;
+DROP FUNCTION catalog_enqueue_product();
+DROP FUNCTION catalog_product_changed();
+DROP TABLE product_status_outbox;
+ALTER TABLE products DROP COLUMN enforced_version, DROP COLUMN version;

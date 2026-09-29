@@ -17,6 +17,7 @@ type OrderRepositoryPort interface {
 	// vendor sub-order's fee at checkout time.
 	UpdateTotalAmount(ctx context.Context, id string, totalAmount int64) error
 	ListItemsByOrder(ctx context.Context, orderID string) ([]*domain.OrderItem, error)
+	ListReviewEligibility(ctx context.Context, buyerID, productID string) ([]*domain.ReviewEligibility, error)
 }
 
 type VendorOrderRepositoryPort interface {
@@ -75,6 +76,7 @@ type CatalogGateway interface {
 
 // VendorGateway lets a vendor user see their own sub-orders.
 type VendorGateway interface {
+	Approved(context.Context, []string) (map[string]int64, error)
 	GetApprovedVendorID(ctx context.Context, userID, vendorID string) (string, error)
 }
 

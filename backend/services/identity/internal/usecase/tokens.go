@@ -7,8 +7,7 @@ import (
 	"encoding/hex"
 )
 
-// generateOpaqueToken produces a random, URL-safe token for refresh tokens
-// and password reset links. Only its hash is ever persisted.
+// generateOpaqueToken encodes 32 random bytes as unpadded URL-safe Base64.
 func generateOpaqueToken() (string, error) {
 	buf := make([]byte, 32)
 	if _, err := rand.Read(buf); err != nil {

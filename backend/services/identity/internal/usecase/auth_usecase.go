@@ -1,7 +1,4 @@
-// Package usecase orchestrates Identity's auth workflows: registration,
-// login, refresh/rotation, logout and password reset. It owns the
-// transaction boundary and never lets a repository or transport concern
-// leak into the domain rules.
+// Package usecase orchestrates Identity's account and session workflows.
 package usecase
 
 import (
@@ -31,7 +28,8 @@ type AuthUseCase struct {
 	passwordResets PasswordResetRepository
 	jwtManager     *authjwt.Manager
 	log            zerolog.Logger
-	isDevelopment  bool
+	tx             Transactions
+	cipher         *TokenCipher
 }
 
 func NewAuthUseCase(
@@ -40,7 +38,7 @@ func NewAuthUseCase(
 	passwordResets PasswordResetRepository,
 	jwtManager *authjwt.Manager,
 	log zerolog.Logger,
-	env string,
+	tx Transactions, tokenCipher *TokenCipher,
 ) *AuthUseCase {
 	return &AuthUseCase{
 		users:          users,
@@ -48,7 +46,7 @@ func NewAuthUseCase(
 		passwordResets: passwordResets,
 		jwtManager:     jwtManager,
 		log:            log,
-		isDevelopment:  env != "production",
+		tx:             tx, cipher: tokenCipher,
 	}
 }
 
@@ -60,7 +58,7 @@ type AuthResult struct {
 	RefreshTokenExpiresAt time.Time
 }
 
-func (uc *AuthUseCase) Register(ctx context.Context, email, password, fullName, roleInput string) (*AuthResult, error) {
+func (uc *AuthUseCase) register(ctx context.Context, email, password, fullName, roleInput string) (*AuthResult, error) {
 	email = domain.NormalizeEmail(email)
 	role := domain.Role(roleInput)
 
@@ -90,7 +88,7 @@ func (uc *AuthUseCase) Register(ctx context.Context, email, password, fullName, 
 	return uc.issueTokens(ctx, user)
 }
 
-func (uc *AuthUseCase) Login(ctx context.Context, email, password string) (*AuthResult, error) {
+func (uc *AuthUseCase) login(ctx context.Context, email, password string) (*AuthResult, error) {
 	email = domain.NormalizeEmail(email)
 
 	user, err := uc.users.FindByEmail(ctx, email)
@@ -112,7 +110,7 @@ func (uc *AuthUseCase) Login(ctx context.Context, email, password string) (*Auth
 	return uc.issueTokens(ctx, user)
 }
 
-func (uc *AuthUseCase) RefreshToken(ctx context.Context, refreshTokenPlain string) (*AuthResult, error) {
+func (uc *AuthUseCase) refreshToken(ctx context.Context, refreshTokenPlain string) (*AuthResult, error) {
 	tokenHash := hashToken(refreshTokenPlain)
 
 	stored, err := uc.refreshTokens.FindActiveByHash(ctx, tokenHash)
@@ -124,29 +122,46 @@ func (uc *AuthUseCase) RefreshToken(ctx context.Context, refreshTokenPlain strin
 	}
 
 	user, err := uc.users.FindByID(ctx, stored.UserID)
-	if err != nil || !user.IsActive {
+	if err != nil {
+		return nil, apperror.Internal(err)
+	}
+	if !user.IsActive || stored.FamilyID == "" {
 		return nil, apperror.Unauthorized("Invalid refresh token")
 	}
 
 	// Rotate: the presented token is single-use.
 	if err := uc.refreshTokens.Revoke(ctx, stored.ID); err != nil {
+		if errors.Is(err, repository.ErrRefreshTokenNotFound) {
+			return nil, apperror.Unauthorized("Invalid refresh token")
+		}
 		return nil, apperror.Internal(err)
 	}
 
-	return uc.issueTokens(ctx, user)
+	return uc.issueTokensForFamily(ctx, user, stored.FamilyID)
 }
 
-func (uc *AuthUseCase) Logout(ctx context.Context, refreshTokenPlain string) error {
-	if err := uc.refreshTokens.RevokeByHash(ctx, hashToken(refreshTokenPlain)); err != nil {
-		return apperror.Internal(err)
-	}
-	return nil
+func (uc *AuthUseCase) Logout(ctx context.Context, token string) error {
+	return uc.transaction(ctx, func(ctx context.Context) error {
+		id, err := uc.refreshTokens.OwnerByHash(ctx, hashToken(token))
+		if errors.Is(err, repository.ErrRefreshTokenNotFound) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		if _, err = uc.users.FindByID(ctx, id); err != nil {
+			return err
+		}
+		if err = uc.refreshTokens.RevokeByHash(ctx, hashToken(token)); err != nil {
+			return err
+		}
+		return uc.users.Audit(ctx, id, id, "session_logout", "User logout")
+	})
 }
 
-// RequestPasswordReset always succeeds from the caller's perspective,
-// whether or not the email is registered, so the endpoint can't be used to
-// enumerate accounts.
-func (uc *AuthUseCase) RequestPasswordReset(ctx context.Context, email string) error {
+// requestPasswordReset queues delivery for active users and returns nil for
+// unknown or inactive accounts. Infrastructure errors are returned to the caller.
+func (uc *AuthUseCase) requestPasswordReset(ctx context.Context, email string) error {
 	email = domain.NormalizeEmail(email)
 
 	user, err := uc.users.FindByEmail(ctx, email)
@@ -157,6 +172,12 @@ func (uc *AuthUseCase) RequestPasswordReset(ctx context.Context, email string) e
 		return apperror.Internal(err)
 	}
 
+	if !user.IsActive {
+		return nil
+	}
+	if err := uc.passwordResets.InvalidateForUser(ctx, user.ID); err != nil {
+		return apperror.Internal(err)
+	}
 	token, err := generateOpaqueToken()
 	if err != nil {
 		return apperror.Internal(err)
@@ -166,19 +187,21 @@ func (uc *AuthUseCase) RequestPasswordReset(ctx context.Context, email string) e
 		return apperror.Internal(err)
 	}
 
-	// Delivery goes through the Notification service once it consumes a
-	// PasswordResetRequested event; until then, surface the token in dev
-	// logs only so the flow is testable locally without a mailer.
-	if uc.isDevelopment {
-		uc.log.Info().Str("user_id", user.ID).Str("reset_token", token).Msg("password_reset_requested_dev_only")
+	encrypted, err := uc.cipher.Encrypt(token, user.ID)
+	if err != nil {
+		return apperror.Internal(err)
 	}
+	if err := uc.passwordResets.QueueDelivery(ctx, user.ID, hashToken(token), encrypted, time.Now().Add(passwordResetTTL)); err != nil {
+		return apperror.Internal(err)
+	}
+	uc.log.Info().Str("event", "password_reset_queued").Msg("identity_security_event")
 
 	return nil
 }
 
-func (uc *AuthUseCase) ResetPassword(ctx context.Context, tokenPlain, newPassword string) error {
-	if len(newPassword) < 8 {
-		return apperror.Validation("Password must be at least 8 characters")
+func (uc *AuthUseCase) resetPassword(ctx context.Context, tokenPlain, newPassword string) error {
+	if len(newPassword) < 8 || len(newPassword) > 72 {
+		return apperror.Validation("Password must be 8 to 72 bytes")
 	}
 
 	stored, err := uc.passwordResets.FindUsableByHash(ctx, hashToken(tokenPlain))
@@ -194,15 +217,31 @@ func (uc *AuthUseCase) ResetPassword(ctx context.Context, tokenPlain, newPasswor
 		return apperror.Internal(err)
 	}
 
+	resetUser, err := uc.users.FindByID(ctx, stored.UserID)
+	if err != nil {
+		return apperror.Internal(err)
+	}
+	if !resetUser.IsActive {
+		return apperror.Unauthorized("Invalid or expired reset token")
+	}
+	if err := uc.passwordResets.MarkUsed(ctx, stored.ID); err != nil {
+		if errors.Is(err, repository.ErrPasswordResetTokenNotFound) {
+			return apperror.Unauthorized("Invalid or expired reset token")
+		}
+		return apperror.Internal(err)
+	}
 	if err := uc.users.UpdatePasswordHash(ctx, stored.UserID, string(passwordHash)); err != nil {
 		return apperror.Internal(err)
 	}
 
-	if err := uc.passwordResets.MarkUsed(ctx, stored.ID); err != nil {
+	if err := uc.passwordResets.InvalidateForUser(ctx, stored.UserID); err != nil {
 		return apperror.Internal(err)
 	}
 
 	if err := uc.refreshTokens.RevokeAllForUser(ctx, stored.UserID); err != nil {
+		return apperror.Internal(err)
+	}
+	if err := uc.users.Audit(ctx, stored.UserID, stored.UserID, "password_reset", "Password reset completed"); err != nil {
 		return apperror.Internal(err)
 	}
 
@@ -221,7 +260,14 @@ func (uc *AuthUseCase) Me(ctx context.Context, userID string) (*domain.User, err
 }
 
 func (uc *AuthUseCase) issueTokens(ctx context.Context, user *domain.User) (*AuthResult, error) {
-	accessToken, accessExpiresAt, err := uc.jwtManager.IssueAccessToken(user.ID, string(user.Role), accessTokenTTL)
+	familyID, err := generateOpaqueToken()
+	if err != nil {
+		return nil, apperror.Internal(err)
+	}
+	return uc.issueTokensForFamily(ctx, user, familyID)
+}
+func (uc *AuthUseCase) issueTokensForFamily(ctx context.Context, user *domain.User, familyID string) (*AuthResult, error) {
+	accessToken, accessExpiresAt, err := uc.jwtManager.IssueSessionToken(user.ID, string(user.Role), familyID, accessTokenTTL)
 	if err != nil {
 		return nil, apperror.Internal(err)
 	}
@@ -232,7 +278,7 @@ func (uc *AuthUseCase) issueTokens(ctx context.Context, user *domain.User) (*Aut
 	}
 	refreshExpiresAt := time.Now().Add(refreshTokenTTL)
 
-	if err := uc.refreshTokens.Create(ctx, user.ID, hashToken(refreshToken), refreshExpiresAt); err != nil {
+	if err := uc.refreshTokens.Create(ctx, user.ID, hashToken(refreshToken), refreshExpiresAt, familyID); err != nil {
 		return nil, apperror.Internal(err)
 	}
 
@@ -243,4 +289,35 @@ func (uc *AuthUseCase) issueTokens(ctx context.Context, user *domain.User) (*Aut
 		RefreshToken:          refreshToken,
 		RefreshTokenExpiresAt: refreshExpiresAt,
 	}, nil
+}
+
+func (uc *AuthUseCase) Register(ctx context.Context, email, password, fullName, roleInput string) (result *AuthResult, err error) {
+	err = uc.transaction(ctx, func(ctx context.Context) error {
+		var e error
+		result, e = uc.register(ctx, email, password, fullName, roleInput)
+		return e
+	})
+	return
+}
+
+func (uc *AuthUseCase) Login(ctx context.Context, email, password string) (result *AuthResult, err error) {
+	err = uc.transaction(ctx, func(ctx context.Context) error { var e error; result, e = uc.login(ctx, email, password); return e })
+	return
+}
+
+func (uc *AuthUseCase) RefreshToken(ctx context.Context, refreshTokenPlain string) (result *AuthResult, err error) {
+	err = uc.transaction(ctx, func(ctx context.Context) error {
+		var e error
+		result, e = uc.refreshToken(ctx, refreshTokenPlain)
+		return e
+	})
+	return
+}
+
+func (uc *AuthUseCase) RequestPasswordReset(ctx context.Context, email string) error {
+	return uc.transaction(ctx, func(ctx context.Context) error { return uc.requestPasswordReset(ctx, email) })
+}
+
+func (uc *AuthUseCase) ResetPassword(ctx context.Context, tokenPlain, newPassword string) error {
+	return uc.transaction(ctx, func(ctx context.Context) error { return uc.resetPassword(ctx, tokenPlain, newPassword) })
 }

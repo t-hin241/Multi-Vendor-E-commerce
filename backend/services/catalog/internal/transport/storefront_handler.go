@@ -27,7 +27,7 @@ func (h *StorefrontHandler) List(c *gin.Context) {
 	limit, offset := paginationParams(c)
 
 	products, total, images, vendorNames, quantitySold, vendorInfoDegraded, salesInfoDegraded, err :=
-		h.products.ListStorefront(c.Request.Context(), c.Query("category_id"), c.Query("vendor_id"), c.Query("q"), limit, offset)
+		h.products.ListStorefront(c.Request.Context(), c.Query("category_id"), c.Query("vendor_id"), c.Query("q"), limit, offset,c.Query("sort"))
 	if err != nil {
 		httpresponse.HandleError(c, h.log, err)
 		return

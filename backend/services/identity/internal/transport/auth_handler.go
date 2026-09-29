@@ -2,6 +2,7 @@ package transport
 
 import (
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/rs/zerolog"
@@ -12,12 +13,13 @@ import (
 )
 
 type AuthHandler struct {
-	auth *usecase.AuthUseCase
-	log  zerolog.Logger
+	auth   *usecase.AuthUseCase
+	log    zerolog.Logger
+	secure bool
 }
 
-func NewAuthHandler(auth *usecase.AuthUseCase, log zerolog.Logger) *AuthHandler {
-	return &AuthHandler{auth: auth, log: log}
+func NewAuthHandler(auth *usecase.AuthUseCase, log zerolog.Logger, secure bool) *AuthHandler {
+	return &AuthHandler{auth: auth, log: log, secure: secure}
 }
 
 func (h *AuthHandler) Register(c *gin.Context) {
@@ -33,6 +35,7 @@ func (h *AuthHandler) Register(c *gin.Context) {
 		return
 	}
 
+	h.setSession(c, result)
 	httpresponse.OK(c, http.StatusCreated, toAuthResponse(result))
 }
 
@@ -49,37 +52,40 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		return
 	}
 
+	h.setSession(c, result)
 	httpresponse.OK(c, http.StatusOK, toAuthResponse(result))
 }
 
 func (h *AuthHandler) Refresh(c *gin.Context) {
-	var req refreshRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		httpresponse.Error(c, http.StatusBadRequest, "validation_error", err.Error())
+	token, err := c.Cookie("shopee_refresh")
+	if err != nil || token == "" {
+		httpresponse.Error(c, 401, "unauthorized", "Session expired. Please sign in again.")
 		return
 	}
 
-	result, err := h.auth.RefreshToken(c.Request.Context(), req.RefreshToken)
+	result, err := h.auth.RefreshToken(c.Request.Context(), token)
 	if err != nil {
 		httpresponse.HandleError(c, h.log, err)
 		return
 	}
 
+	h.setSession(c, result)
 	httpresponse.OK(c, http.StatusOK, toAuthResponse(result))
 }
 
 func (h *AuthHandler) Logout(c *gin.Context) {
-	var req logoutRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		httpresponse.Error(c, http.StatusBadRequest, "validation_error", err.Error())
+	token, err := c.Cookie("shopee_refresh")
+	if err != nil || token == "" {
+		httpresponse.Error(c, 401, "unauthorized", "Session expired. Please sign in again.")
 		return
 	}
 
-	if err := h.auth.Logout(c.Request.Context(), req.RefreshToken); err != nil {
+	if err := h.auth.Logout(c.Request.Context(), token); err != nil {
 		httpresponse.HandleError(c, h.log, err)
 		return
 	}
 
+	h.clearSession(c)
 	httpresponse.OK(c, http.StatusOK, gin.H{"logged_out": true})
 }
 
@@ -123,4 +129,14 @@ func (h *AuthHandler) Me(c *gin.Context) {
 	}
 
 	httpresponse.OK(c, http.StatusOK, toUserResponse(user))
+}
+
+func (h *AuthHandler) setSession(c *gin.Context, result *usecase.AuthResult) {
+	c.SetSameSite(http.SameSiteStrictMode)
+	c.SetCookie("shopee_refresh", result.RefreshToken, int(time.Until(result.RefreshTokenExpiresAt).Seconds()), "/api/auth", "", h.secure, true)
+	c.Header("Cache-Control", "no-store")
+}
+func (h *AuthHandler) clearSession(c *gin.Context) {
+	c.SetSameSite(http.SameSiteStrictMode)
+	c.SetCookie("shopee_refresh", "", -1, "/api/auth", "", h.secure, true)
 }

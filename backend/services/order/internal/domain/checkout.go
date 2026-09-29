@@ -13,9 +13,11 @@ import (
 // rule that keeps a multi-vendor cart from becoming a single order that
 // spans bounded contexts.
 type Plan struct {
-	Order        Order
-	VendorOrders []VendorOrder
-	Items        []OrderItem // VendorOrderID left as the vendor's index into VendorOrders; the repository resolves it to a real id after insert.
+	VendorVersions  map[string]int64
+	ProductVersions map[string]int64
+	Order           Order
+	VendorOrders    []VendorOrder
+	Items           []OrderItem // VendorOrderID left as the vendor's index into VendorOrders; the repository resolves it to a real id after insert.
 }
 
 // BuildCheckoutPlan groups checkout lines by vendor and computes every

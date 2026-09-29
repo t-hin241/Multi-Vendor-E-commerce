@@ -25,13 +25,16 @@ func NewRouter(cfg config.Config, log zerolog.Logger) (*gin.Engine, error) {
 	}
 
 	r := gin.New()
+	if err := r.SetTrustedProxies(cfg.TrustedProxies); err != nil {
+		return nil, err
+	}
 	r.Use(middleware.RequestID())
 	r.Use(middleware.StructuredLogging(log))
 	r.Use(middleware.Recovery(log))
 	r.Use(cors.New(cors.Config{
 		AllowOrigins:     cfg.AllowedOrigins,
 		AllowMethods:     []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
-		AllowHeaders:     []string{"Origin", "Content-Type", "Authorization", middleware.RequestIDHeader},
+		AllowHeaders:     []string{"Origin", "Content-Type", "Authorization", "X-CSRF-Protection", middleware.RequestIDHeader},
 		ExposeHeaders:    []string{middleware.RequestIDHeader},
 		AllowCredentials: true,
 		MaxAge:           12 * time.Hour,

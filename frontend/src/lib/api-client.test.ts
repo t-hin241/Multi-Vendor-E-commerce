@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { fetchGatewayHealth } from "./api-client";
+import { fetchGatewayHealth, refreshSession } from "./api-client";
 
 describe("fetchGatewayHealth", () => {
   afterEach(() => {
@@ -30,5 +30,26 @@ describe("fetchGatewayHealth", () => {
     );
 
     await expect(fetchGatewayHealth()).rejects.toThrow("503");
+  });
+});
+
+describe("cookie refresh contract", () => {
+  afterEach(() => vi.unstubAllGlobals());
+  it("sends credentials and CSRF protection without a token in the body", async () => {
+    const fetcher = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ data: { access_token: "synthetic-access" } }),
+    });
+    vi.stubGlobal("fetch", fetcher);
+    await refreshSession();
+    expect(fetcher).toHaveBeenCalledWith(
+      expect.stringContaining("/api/auth/refresh"),
+      expect.objectContaining({
+        credentials: "include",
+        method: "POST",
+        headers: { "X-CSRF-Protection": "1" },
+        body: undefined,
+      }),
+    );
   });
 });

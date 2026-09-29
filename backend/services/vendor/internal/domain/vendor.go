@@ -12,45 +12,55 @@ import (
 type Status string
 
 const (
-	StatusPending  Status = "pending"
-	StatusApproved Status = "approved"
-	StatusRejected Status = "rejected"
+	StatusPending   Status = "pending"
+	StatusApproved  Status = "approved"
+	StatusRejected  Status = "rejected"
+	StatusSuspended Status = "suspended"
 )
 
 type Vendor struct {
-	ID              string
-	UserID          string
-	ShopName        string
-	Description     string
-	Status          Status
-	RejectionReason *string
-	ApprovedBy      *string
-	ApprovedAt      *time.Time
-	LogoURL         *string
-	LogoObjectKey   *string
-	BannerURL       *string
-	BannerObjectKey *string
-	PolicyText      string
-	CreatedAt       time.Time
-	UpdatedAt       time.Time
+	Version          int64
+	EnforcedVersion  int64
+	SuspensionReason *string
+	ID               string
+	UserID           string
+	ShopName         string
+	Description      string
+	Status           Status
+	RejectionReason  *string
+	ApprovedBy       *string
+	ApprovedAt       *time.Time
+	LogoURL          *string
+	LogoObjectKey    *string
+	BannerURL        *string
+	BannerObjectKey  *string
+	PolicyText       string
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
 }
 
 func (v *Vendor) IsApproved() bool {
 	return v.Status == StatusApproved
 }
 
-// CanTransition enforces that only a pending application can be decided;
-// an already-decided application can't be silently re-decided.
+// CanTransition validates onboarding, resubmission, suspension and restoration.
 func CanTransition(from Status, to Status) bool {
-	if from != StatusPending {
-		return false
+	switch from {
+	case StatusPending:
+		return to == StatusApproved || to == StatusRejected
+	case StatusRejected:
+		return to == StatusPending
+	case StatusApproved:
+		return to == StatusSuspended
+	case StatusSuspended:
+		return to == StatusApproved
 	}
-	return to == StatusApproved || to == StatusRejected
+	return false
 }
 
 func ValidateApplication(shopName string) error {
-	if strings.TrimSpace(shopName) == "" {
-		return apperror.Validation("Shop name is required")
+	if len(strings.TrimSpace(shopName)) < 2 || len(strings.TrimSpace(shopName)) > 160 {
+		return apperror.Validation("Shop name must contain 2 to 160 bytes")
 	}
 	return nil
 }
@@ -81,6 +91,7 @@ func ValidateImageUpload(contentType string, size int64) (extension string, err 
 // at Approve/Reject time and never edited, so this is also the full
 // decision history a later admin can review.
 type AuditLog struct {
+	Version     int64
 	ActorUserID string
 	Action      string
 	Reason      *string

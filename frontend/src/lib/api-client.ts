@@ -34,15 +34,17 @@ function buildQuery(query?: Record<string, string | number | undefined>): string
   return qs ? `?${qs}` : "";
 }
 
-async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
+export async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
   const { method = "GET", token, json, form, query } = options;
 
   const headers: Record<string, string> = {};
   if (token) headers.Authorization = `Bearer ${token}`;
   if (json !== undefined) headers["Content-Type"] = "application/json";
+  if (method !== "GET" && method !== "HEAD") headers["X-CSRF-Protection"] = "1";
 
   const res = await fetch(`${API_BASE_URL}${path}${buildQuery(query)}`, {
     method,
+    credentials: "include",
     headers,
     body: form ?? (json !== undefined ? JSON.stringify(json) : undefined),
     cache: "no-store",
@@ -91,7 +93,6 @@ export type AuthResult = {
   user: User;
   access_token: string;
   access_token_expires_at: string;
-  refresh_token: string;
   refresh_token_expires_at: string;
 };
 
@@ -111,15 +112,26 @@ export function login(email: string, password: string): Promise<AuthResult> {
   return request<AuthResult>("/api/auth/login", { method: "POST", json: { email, password } });
 }
 
-export function refreshSession(refreshToken: string): Promise<AuthResult> {
-  return request<AuthResult>("/api/auth/refresh", {
-    method: "POST",
-    json: { refresh_token: refreshToken },
-  });
+export function refreshSession(): Promise<AuthResult> {
+  return request<AuthResult>("/api/auth/refresh", { method: "POST" });
 }
 
-export function logout(refreshToken: string): Promise<{ logged_out: boolean }> {
-  return request("/api/auth/logout", { method: "POST", json: { refresh_token: refreshToken } });
+export function logout(): Promise<{ logged_out: boolean }> {
+  return request("/api/auth/logout", { method: "POST" });
+}
+
+export function requestPasswordReset(email: string): Promise<{ message: string }> {
+  return request("/api/auth/password-reset/request", { method: "POST", json: { email } });
+}
+
+export function confirmPasswordReset(
+  token: string,
+  newPassword: string,
+): Promise<{ message: string }> {
+  return request("/api/auth/password-reset/confirm", {
+    method: "POST",
+    json: { token, new_password: newPassword },
+  });
 }
 
 // ---------- Admin: users ----------
@@ -515,7 +527,13 @@ export function createCategory(token: string, name: string, parentId?: string): 
 }
 
 export function listStorefrontProducts(
-  params: { categoryId?: string; vendorId?: string; q?: string; limit?: number; offset?: number } = {},
+  params: {
+    categoryId?: string;
+    vendorId?: string;
+    q?: string;
+    limit?: number;
+    offset?: number;
+  } = {},
 ): Promise<StorefrontListing> {
   return request<StorefrontListing>("/api/catalog/products", {
     query: {
@@ -692,9 +710,13 @@ export function getProductAuditLog(token: string, productId: string): Promise<Au
 
 // ---------- Vendor ----------
 
-export type VendorStatus = "pending" | "approved" | "rejected";
+export type VendorStatus = "pending" | "approved" | "rejected" | "suspended";
 
 export type Vendor = {
+  version: number;
+  enforced_version: number;
+  enforcement_pending: boolean;
+  suspension_reason?: string;
   id: string;
   user_id: string;
   shop_name: string;
@@ -739,8 +761,13 @@ export function applyAsVendor(
 // listMyVendors lists every shop (any status) the caller owns — a user may
 // own several (1:N), so this backs both the shop switcher and the "My
 // Shops" management page.
-export function listMyVendors(token: string): Promise<Vendor[]> {
-  return request<Vendor[]>("/api/vendor/mine", { token });
+export async function listMyVendors(token: string): Promise<Vendor[]> {
+  const shops: Vendor[] = [];
+  for (let offset = 0; ; offset += 100) {
+    const page = await request<Vendor[]>(`/api/vendor/mine?limit=100&offset=${offset}`, { token });
+    shops.push(...page);
+    if (page.length < 100) return shops;
+  }
 }
 
 export function getVendor(token: string, vendorId: string): Promise<Vendor> {
@@ -795,8 +822,17 @@ export function rejectVendor(token: string, vendorId: string, reason: string): P
   });
 }
 
-export function getVendorAuditLog(token: string, vendorId: string): Promise<AuditLogEntry[]> {
-  return request<AuditLogEntry[]>(`/api/vendor/admin/applications/${vendorId}/audit-log`, { token });
+export function getVendorAuditLog(
+  token: string,
+  vendorId: string,
+  offset = 0,
+): Promise<AuditLogEntry[]> {
+  return request<AuditLogEntry[]>(
+    `/api/vendor/admin/applications/${vendorId}/audit-log?limit=20&offset=${offset}`,
+    {
+      token,
+    },
+  );
 }
 
 // ---------- Cart ----------
@@ -869,6 +905,7 @@ export type OrderStatus =
   "pending_payment" | "paid" | "processing" | "shipped" | "completed" | "cancelled" | "refunded";
 
 export type OrderItem = {
+  id: string;
   product_id: string;
   product_name: string;
   variant_id?: string;
@@ -878,6 +915,35 @@ export type OrderItem = {
   quantity: number;
   subtotal_amount: number;
 };
+
+export type ReturnRequest = {
+  id: string;
+  order_id: string;
+  order_item_id: string;
+  reason: string;
+  status:
+    | "requested"
+    | "vendor_confirmed"
+    | "rejected"
+    | "approved_awaiting_provider_refund"
+    | "refunded";
+  decision_note?: string;
+  decided_at?: string;
+  created_at: string;
+};
+
+export function createReturnRequest(
+  token: string,
+  orderId: string,
+  orderItemId: string,
+  reason: string,
+): Promise<ReturnRequest> {
+  return request<ReturnRequest>(`/api/orders/${orderId}/return-requests`, {
+    method: "POST",
+    token,
+    json: { order_item_id: orderItemId, reason },
+  });
+}
 
 export type VendorOrder = {
   id: string;
@@ -1105,6 +1171,9 @@ export type PaymentIntent = {
   status: PaymentStatus;
   provider: string;
   provider_intent_id: string;
+  checkout_url?: string;
+  qr_code?: string;
+  expires_at?: string;
   failure_reason?: string;
   created_at: string;
   updated_at: string;
@@ -1306,8 +1375,19 @@ export function addVendorAddress(
   });
 }
 
-export function listVendorAddresses(token: string, vendorId: string): Promise<VendorAddress[]> {
-  return request<VendorAddress[]>(`/api/vendor/${vendorId}/addresses`, { token });
+export async function listVendorAddresses(
+  token: string,
+  vendorId: string,
+): Promise<VendorAddress[]> {
+  const addresses: VendorAddress[] = [];
+  for (let offset = 0; ; offset += 100) {
+    const page = await request<VendorAddress[]>(
+      `/api/vendor/${vendorId}/addresses?limit=100&offset=${offset}`,
+      { token },
+    );
+    addresses.push(...page);
+    if (page.length < 100) return addresses;
+  }
 }
 
 export function updateVendorAddress(
@@ -1440,4 +1520,203 @@ export function setFeeRule(
 
 export function listFeeRules(token: string): Promise<FeeRule[]> {
   return request<FeeRule[]>("/api/shipments/admin/fee-rules", { token });
+}
+
+// ---------- Reviews ----------
+
+export type ReviewImage = { id: string; url: string; position: number };
+export type ReviewReply = { vendor_id: string; message: string; updated_at: string };
+export type Review = {
+  id: string;
+  buyer_id?: string;
+  buyer_name?: string;
+  product_id: string;
+  vendor_id?: string;
+  order_item_id?: string;
+  rating: number;
+  comment: string;
+  status?: "published" | "hidden";
+  verified_purchase: boolean;
+  images: ReviewImage[];
+  reply?: ReviewReply;
+  created_at: string;
+};
+export type ReviewSummary = {
+  rating_average: number;
+  rating_count: number;
+  rating_distribution: [number, number, number, number, number];
+};
+export type ProductReviews = { reviews: Review[]; summary: ReviewSummary };
+export type ReviewEligibility = {
+  order_item_id: string;
+  vendor_order_id: string;
+  product_id: string;
+  vendor_id: string;
+  product_name: string;
+  variant_label?: string;
+  completed_at: string;
+};
+export type ModerationReason = {
+  id: string;
+  code: string;
+  label: string;
+  description?: string;
+  is_active: boolean;
+};
+export type ReviewReport = {
+  id: string;
+  review_id: string;
+  reporting_vendor_id: string;
+  reason_id: string;
+  reason_code: string;
+  reason_label: string;
+  note?: string;
+  status: "open" | "resolved";
+  decision?: "keep" | "hide";
+  created_at: string;
+};
+
+export function listProductReviews(productId: string, rating?: number): Promise<ProductReviews> {
+  return request<ProductReviews>(`/api/reviews/products/${productId}`, { query: { rating } });
+}
+export function listReviewEligibility(
+  token: string,
+  productId?: string,
+): Promise<ReviewEligibility[]> {
+  return request<ReviewEligibility[]>("/api/reviews/eligibility", {
+    token,
+    query: { product_id: productId },
+  });
+}
+export function createReview(
+  token: string,
+  input: { orderItemId: string; rating: number; comment: string },
+): Promise<Review> {
+  return request<Review>("/api/reviews", {
+    method: "POST",
+    token,
+    json: { order_item_id: input.orderItemId, rating: input.rating, comment: input.comment },
+  });
+}
+export function uploadReviewImage(
+  token: string,
+  reviewId: string,
+  file: File,
+): Promise<ReviewImage> {
+  const form = new FormData();
+  form.append("image", file);
+  return request<ReviewImage>(`/api/reviews/${reviewId}/images`, { method: "POST", token, form });
+}
+export function listMyReviews(token: string): Promise<Review[]> {
+  return request<Review[]>("/api/reviews/mine", { token });
+}
+export function listVendorReviews(
+  token: string,
+  params: { vendorId: string; productId?: string; rating?: number; replied?: boolean },
+): Promise<Review[]> {
+  return request<Review[]>("/api/reviews/vendor", {
+    token,
+    query: {
+      vendor_id: params.vendorId,
+      product_id: params.productId,
+      rating: params.rating,
+      replied: params.replied === undefined ? undefined : String(params.replied),
+    },
+  });
+}
+export function getVendorReviewSummary(token: string, vendorId: string): Promise<ReviewSummary> {
+  return request<ReviewSummary>("/api/reviews/vendor/summary", {
+    token,
+    query: { vendor_id: vendorId },
+  });
+}
+export function replyToReview(
+  token: string,
+  reviewId: string,
+  vendorId: string,
+  message: string,
+): Promise<ReviewReply> {
+  return request<ReviewReply>(`/api/reviews/vendor/${reviewId}/reply`, {
+    method: "PUT",
+    token,
+    json: { vendor_id: vendorId, message },
+  });
+}
+export function listVendorModerationReasons(token: string): Promise<ModerationReason[]> {
+  return request<ModerationReason[]>("/api/reviews/vendor/moderation-reasons", { token });
+}
+export function reportReview(
+  token: string,
+  reviewId: string,
+  vendorId: string,
+  reasonId: string,
+  note?: string,
+): Promise<ReviewReport> {
+  return request<ReviewReport>(`/api/reviews/vendor/${reviewId}/reports`, {
+    method: "POST",
+    token,
+    json: { vendor_id: vendorId, reason_id: reasonId, note },
+  });
+}
+export function listAdminReviews(
+  token: string,
+  params: {
+    buyerId?: string;
+    vendorId?: string;
+    productId?: string;
+    status?: string;
+    rating?: number;
+  } = {},
+): Promise<Review[]> {
+  return request<Review[]>("/api/reviews/admin", {
+    token,
+    query: {
+      buyer_id: params.buyerId,
+      vendor_id: params.vendorId,
+      product_id: params.productId,
+      status: params.status,
+      rating: params.rating,
+    },
+  });
+}
+export function listReviewReports(token: string, status?: string): Promise<ReviewReport[]> {
+  return request<ReviewReport[]>("/api/reviews/admin/reports", { token, query: { status } });
+}
+export function resolveReviewReport(
+  token: string,
+  reportId: string,
+  decision: "keep" | "hide",
+  reasonId?: string,
+  note?: string,
+): Promise<{ resolved: boolean }> {
+  return request(`/api/reviews/admin/reports/${reportId}/resolve`, {
+    method: "POST",
+    token,
+    json: { decision, reason_id: reasonId, note },
+  });
+}
+export function listModerationReasons(token: string): Promise<ModerationReason[]> {
+  return request<ModerationReason[]>("/api/reviews/admin/moderation-reasons", { token });
+}
+export function createModerationReason(
+  token: string,
+  code: string,
+  label: string,
+  description?: string,
+): Promise<ModerationReason> {
+  return request<ModerationReason>("/api/reviews/admin/moderation-reasons", {
+    method: "POST",
+    token,
+    json: { code, label, description },
+  });
+}
+export function updateModerationReason(
+  token: string,
+  reason: ModerationReason,
+): Promise<ModerationReason> {
+  return request<ModerationReason>(`/api/reviews/admin/moderation-reasons/${reason.id}`, {
+    method: "PATCH",
+    token,
+    json: reason,
+  });
 }

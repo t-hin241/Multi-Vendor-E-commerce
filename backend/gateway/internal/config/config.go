@@ -11,6 +11,7 @@ import (
 
 // Config holds the gateway's routing table and server settings.
 type Config struct {
+	TrustedProxies []string
 	Env            string
 	Port           string
 	LogLevel       string
@@ -36,6 +37,7 @@ var upstreamEnvByPrefix = map[string]string{
 	"/api/shipments":                 "SHIPMENT_SERVICE_URL",
 	"/api/admin":                     "ADMIN_SERVICE_URL",
 	"/api/notifications":             "NOTIFICATION_SERVICE_URL",
+	"/api/reviews":                   "REVIEW_SERVICE_URL",
 }
 
 // Load reads the gateway configuration from the environment. It fails fast
@@ -54,12 +56,23 @@ func Load() (Config, error) {
 	origins := strings.Split(getEnv("ALLOWED_ORIGINS", "http://localhost:3000"), ",")
 
 	return Config{
+		TrustedProxies: splitNonempty(os.Getenv("TRUSTED_PROXY_CIDRS")),
 		Env:            getEnv("ENV", "development"),
 		Port:           getEnv("PORT", "8080"),
 		LogLevel:       getEnv("LOG_LEVEL", "info"),
 		AllowedOrigins: origins,
 		Upstreams:      upstreams,
 	}, nil
+}
+
+func splitNonempty(raw string) []string {
+	var result []string
+	for _, value := range strings.Split(raw, ",") {
+		if value = strings.TrimSpace(value); value != "" {
+			result = append(result, value)
+		}
+	}
+	return result
 }
 
 func getEnv(key, fallback string) string {

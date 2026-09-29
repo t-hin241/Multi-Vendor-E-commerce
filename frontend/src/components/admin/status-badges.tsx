@@ -11,6 +11,7 @@ type Variant = VariantProps<typeof badgeVariants>["variant"];
 // section 16's "pick one language per area" guidance.
 
 const VENDOR_STATUS_VARIANT: Record<VendorStatus, Variant> = {
+  suspended: "destructive",
   pending: "warning",
   approved: "success",
   rejected: "destructive",

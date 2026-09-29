@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"time"
 )
@@ -38,5 +39,8 @@ func (c *HTTPNotificationClient) Notify(ctx context.Context, userID, notifType, 
 		return err
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("notification service returned %d", resp.StatusCode)
+	}
 	return nil
 }

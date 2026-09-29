@@ -10,11 +10,7 @@ import (
 	"shopee/backend/services/identity/internal/usecase"
 )
 
-// InternalHandler serves service-to-service lookups — today just Notification
-// resolving a user id to an email/name to address a message to. Like the
-// other services' internal handlers, it is not proxied by the gateway's
-// public route table, so it is reachable only from inside the compose
-// network in this MVP topology.
+// InternalHandler resolves account data only for authenticated service callers.
 type InternalHandler struct {
 	auth *usecase.AuthUseCase
 	log  zerolog.Logger
@@ -31,5 +27,5 @@ func (h *InternalHandler) GetUser(c *gin.Context) {
 		return
 	}
 
-	httpresponse.OK(c, http.StatusOK, toUserResponse(user))
+	httpresponse.OK(c, http.StatusOK, gin.H{"id": user.ID, "email": user.Email, "full_name": user.FullName, "role": user.Role, "is_active": user.IsActive})
 }

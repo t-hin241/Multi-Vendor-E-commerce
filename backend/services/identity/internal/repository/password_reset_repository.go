@@ -29,7 +29,7 @@ var ErrPasswordResetTokenNotFound = errors.New("repository: password reset token
 
 func (r *PasswordResetRepository) Create(ctx context.Context, userID, tokenHash string, expiresAt time.Time) error {
 	const query = `INSERT INTO password_reset_tokens (user_id, token_hash, expires_at) VALUES ($1, $2, $3)`
-	_, err := r.pool.Exec(ctx, query, userID, tokenHash, expiresAt)
+	_, err := connection(ctx, r.pool).Exec(ctx, query, userID, tokenHash, expiresAt)
 	return err
 }
 
@@ -40,7 +40,7 @@ func (r *PasswordResetRepository) FindUsableByHash(ctx context.Context, tokenHas
 		WHERE token_hash = $1 AND used_at IS NULL AND expires_at > now()`
 
 	var t PasswordResetToken
-	err := r.pool.QueryRow(ctx, query, tokenHash).Scan(&t.ID, &t.UserID, &t.TokenHash, &t.ExpiresAt, &t.UsedAt)
+	err := connection(ctx, r.pool).QueryRow(ctx, query, tokenHash).Scan(&t.ID, &t.UserID, &t.TokenHash, &t.ExpiresAt, &t.UsedAt)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrPasswordResetTokenNotFound
@@ -51,7 +51,10 @@ func (r *PasswordResetRepository) FindUsableByHash(ctx context.Context, tokenHas
 }
 
 func (r *PasswordResetRepository) MarkUsed(ctx context.Context, id string) error {
-	const query = `UPDATE password_reset_tokens SET used_at = now() WHERE id = $1 AND used_at IS NULL`
-	_, err := r.pool.Exec(ctx, query, id)
+	const query = `UPDATE password_reset_tokens SET used_at = now() WHERE id = $1 AND used_at IS NULL AND expires_at > now()`
+	tag, err := connection(ctx, r.pool).Exec(ctx, query, id)
+	if err == nil && tag.RowsAffected() != 1 {
+		return ErrPasswordResetTokenNotFound
+	}
 	return err
 }

@@ -14,13 +14,14 @@ type CategoryRepositoryPort interface {
 }
 
 type ProductRepositoryPort interface {
+	UpdateContent(context.Context, *domain.Product) error
 	Create(ctx context.Context, p *domain.Product) error
 	SlugExists(ctx context.Context, slug string) (bool, error)
 	FindByID(ctx context.Context, id string) (*domain.Product, error)
 	FindBySlug(ctx context.Context, slug string) (*domain.Product, error)
 	ListByVendor(ctx context.Context, vendorID string, limit, offset int) ([]*domain.Product, error)
 	ListByStatus(ctx context.Context, status string, limit, offset int) ([]*domain.Product, error)
-	ListStorefront(ctx context.Context, categoryID, vendorID, search string, limit, offset int) ([]*domain.Product, error)
+	ListStorefront(ctx context.Context, categoryID, vendorID, search string, limit, offset int, sortBy ...string) ([]*domain.Product, error)
 	CountStorefront(ctx context.Context, categoryID, vendorID, search string) (int, error)
 	UpdateStatus(ctx context.Context, id string, status domain.Status, rejectionReason *string) error
 	UpdateActive(ctx context.Context, id string, isActive bool) error
@@ -67,6 +68,7 @@ type ObjectStore interface {
 // the HTTP implementation. A user may own several shops (1:N), so callers
 // always name which one they're acting as — this only validates that name.
 type VendorGateway interface {
+	Approved(context.Context, []string) (map[string]int64, error)
 	GetApprovedVendorID(ctx context.Context, userID, vendorID string) (string, error)
 }
 

@@ -12,7 +12,7 @@ import (
 
 var ErrPaymentIntentNotFound = errors.New("repository: payment intent not found")
 
-const paymentIntentColumns = `id, order_id, buyer_id, amount, currency, status, provider, provider_intent_id, failure_reason, created_at, updated_at`
+const paymentIntentColumns = `id, order_id, buyer_id, amount, currency, status, provider, provider_intent_id, checkout_url, qr_code, expires_at, failure_reason, created_at, updated_at`
 
 type PaymentIntentRepository struct {
 	pool *pgxpool.Pool
@@ -24,18 +24,18 @@ func NewPaymentIntentRepository(pool *pgxpool.Pool) *PaymentIntentRepository {
 
 func (r *PaymentIntentRepository) Create(ctx context.Context, intent *domain.PaymentIntent) error {
 	const query = `
-		INSERT INTO payment_intents (order_id, buyer_id, amount, currency, status, provider, provider_intent_id)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)
+		INSERT INTO payment_intents (order_id, buyer_id, amount, currency, status, provider, provider_intent_id, checkout_url, qr_code, expires_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 		RETURNING id, created_at, updated_at`
 
 	return r.pool.QueryRow(ctx, query,
-		intent.OrderID, intent.BuyerID, intent.Amount, intent.Currency, intent.Status, intent.Provider, intent.ProviderIntentID,
+		intent.OrderID, intent.BuyerID, intent.Amount, intent.Currency, intent.Status, intent.Provider, intent.ProviderIntentID, intent.CheckoutURL, intent.QRCode, intent.ExpiresAt,
 	).Scan(&intent.ID, &intent.CreatedAt, &intent.UpdatedAt)
 }
 
 func scanPaymentIntent(row pgx.Row) (*domain.PaymentIntent, error) {
 	var i domain.PaymentIntent
-	err := row.Scan(&i.ID, &i.OrderID, &i.BuyerID, &i.Amount, &i.Currency, &i.Status, &i.Provider, &i.ProviderIntentID, &i.FailureReason, &i.CreatedAt, &i.UpdatedAt)
+	err := row.Scan(&i.ID, &i.OrderID, &i.BuyerID, &i.Amount, &i.Currency, &i.Status, &i.Provider, &i.ProviderIntentID, &i.CheckoutURL, &i.QRCode, &i.ExpiresAt, &i.FailureReason, &i.CreatedAt, &i.UpdatedAt)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrPaymentIntentNotFound

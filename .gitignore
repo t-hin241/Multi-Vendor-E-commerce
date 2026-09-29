@@ -27,6 +27,9 @@ npm-debug.log*
 # Docker
 docker-compose.override.yml
 
+# Local database backups contain private application data
+.local-backups/
+
 # Others
 AGENTS.md 
 CLAUDE.md 

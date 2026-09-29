@@ -13,14 +13,14 @@ import (
 
 func newTestVendorUseCase() (*usecase.VendorUseCase, *fakeAuditLogRepository) {
 	audit := newFakeAuditLogRepository()
-	return usecase.NewVendorUseCase(newFakeVendorRepository(), audit, newFakeNotificationGateway(), newFakeObjectStore(), zerolog.Nop()), audit
+	return usecase.NewVendorUseCase(newFakeVendorRepository(), audit, newFakeNotificationGateway(), newFakeObjectStore(), zerolog.Nop(), testOps()), audit
 }
 
 // newTestVendorUseCaseWithStore is for tests that need to assert against the
 // object store itself (upload/delete side effects), not just the usecase.
 func newTestVendorUseCaseWithStore() (*usecase.VendorUseCase, *fakeObjectStore) {
 	store := newFakeObjectStore()
-	return usecase.NewVendorUseCase(newFakeVendorRepository(), newFakeAuditLogRepository(), newFakeNotificationGateway(), store, zerolog.Nop()), store
+	return usecase.NewVendorUseCase(newFakeVendorRepository(), newFakeAuditLogRepository(), newFakeNotificationGateway(), store, zerolog.Nop(), testOps()), store
 }
 
 func mustAppError(t *testing.T, err error) *apperror.Error {
@@ -51,12 +51,12 @@ func TestApply_AllowsMultipleShopsFromTheSameUser(t *testing.T) {
 	uc, _ := newTestVendorUseCase()
 	ctx := t.Context()
 
-	first, err := uc.Apply(ctx, "user-1", "Alice's Shop", "")
+	first, err := uc.Apply(ctx, "user-1", "Alice's Shop", "Test shop description")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	second, err := uc.Apply(ctx, "user-1", "Alice's Second Shop", "")
+	second, err := uc.Apply(ctx, "user-1", "Alice's Second Shop", "Test shop description")
 	if err != nil {
 		t.Fatalf("unexpected error applying for a second shop: %v", err)
 	}
@@ -64,7 +64,7 @@ func TestApply_AllowsMultipleShopsFromTheSameUser(t *testing.T) {
 		t.Fatal("expected two distinct shops")
 	}
 
-	shops, err := uc.ListByUserID(ctx, "user-1")
+	shops, err := uc.ListByUserID(ctx, "user-1", 100, 0)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -79,8 +79,8 @@ func TestApprove_IsIndependentPerShop(t *testing.T) {
 	uc, _ := newTestVendorUseCase()
 	ctx := t.Context()
 
-	shopA, _ := uc.Apply(ctx, "user-1", "Shop A", "")
-	shopB, _ := uc.Apply(ctx, "user-1", "Shop B", "")
+	shopA, _ := uc.Apply(ctx, "user-1", "Shop A", "Test shop description")
+	shopB, _ := uc.Apply(ctx, "user-1", "Shop B", "Test shop description")
 
 	if _, err := uc.Approve(ctx, shopA.ID, "admin-1"); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -99,7 +99,7 @@ func TestApprove_OnlyPendingCanBeApproved(t *testing.T) {
 	uc, audit := newTestVendorUseCase()
 	ctx := t.Context()
 
-	v, err := uc.Apply(ctx, "user-1", "Alice's Shop", "")
+	v, err := uc.Apply(ctx, "user-1", "Alice's Shop", "Test shop description")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -128,7 +128,7 @@ func TestReject_RequiresReasonAndOnlyPending(t *testing.T) {
 	uc, audit := newTestVendorUseCase()
 	ctx := t.Context()
 
-	v, err := uc.Apply(ctx, "user-1", "Alice's Shop", "")
+	v, err := uc.Apply(ctx, "user-1", "Alice's Shop", "Test shop description")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -161,7 +161,7 @@ func TestListAuditLog_ReturnsEntriesInOrder(t *testing.T) {
 	uc, _ := newTestVendorUseCase()
 	ctx := t.Context()
 
-	v, err := uc.Apply(ctx, "user-1", "Alice's Shop", "")
+	v, err := uc.Apply(ctx, "user-1", "Alice's Shop", "Test shop description")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -169,7 +169,7 @@ func TestListAuditLog_ReturnsEntriesInOrder(t *testing.T) {
 		t.Fatalf("unexpected error rejecting: %v", err)
 	}
 
-	entries, err := uc.ListAuditLog(ctx, v.ID)
+	entries, err := uc.ListAuditLog(ctx, "admin-1", v.ID, 20, 0)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -201,7 +201,7 @@ func TestGetOwned_RejectsAnotherUsersShop(t *testing.T) {
 	uc, _ := newTestVendorUseCase()
 	ctx := t.Context()
 
-	v, err := uc.Apply(ctx, "user-1", "Alice's Shop", "")
+	v, err := uc.Apply(ctx, "user-1", "Alice's Shop", "Test shop description")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -217,7 +217,7 @@ func TestUploadLogo_ReplacesAndDeletesTheOldObject(t *testing.T) {
 	uc, store := newTestVendorUseCaseWithStore()
 	ctx := t.Context()
 
-	v, err := uc.Apply(ctx, "user-1", "Alice's Shop", "")
+	v, err := uc.Apply(ctx, "user-1", "Alice's Shop", "Test shop description")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -252,7 +252,7 @@ func TestUploadLogo_RejectsNonOwner(t *testing.T) {
 	uc, _ := newTestVendorUseCase()
 	ctx := t.Context()
 
-	v, err := uc.Apply(ctx, "user-1", "Alice's Shop", "")
+	v, err := uc.Apply(ctx, "user-1", "Alice's Shop", "Test shop description")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -268,7 +268,7 @@ func TestUploadBanner_RejectsBadContentType(t *testing.T) {
 	uc, _ := newTestVendorUseCase()
 	ctx := t.Context()
 
-	v, err := uc.Apply(ctx, "user-1", "Alice's Shop", "")
+	v, err := uc.Apply(ctx, "user-1", "Alice's Shop", "Test shop description")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -284,7 +284,7 @@ func TestGetPublicProfile_HidesAPendingShop(t *testing.T) {
 	uc, _ := newTestVendorUseCase()
 	ctx := t.Context()
 
-	v, err := uc.Apply(ctx, "user-1", "Alice's Shop", "")
+	v, err := uc.Apply(ctx, "user-1", "Alice's Shop", "Test shop description")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -300,7 +300,7 @@ func TestGetPublicProfile_ShowsAnApprovedShop(t *testing.T) {
 	uc, _ := newTestVendorUseCase()
 	ctx := t.Context()
 
-	v, err := uc.Apply(ctx, "user-1", "Alice's Shop", "")
+	v, err := uc.Apply(ctx, "user-1", "Alice's Shop", "Test shop description")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

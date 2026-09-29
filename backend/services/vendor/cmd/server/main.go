@@ -8,14 +8,16 @@ import (
 	"os"
 
 	"shopee/backend/pkg/authjwt"
+	sessionconfig "shopee/backend/pkg/config"
 	"shopee/backend/pkg/health"
+	"shopee/backend/pkg/identityclient"
 	"shopee/backend/pkg/logger"
+	"shopee/backend/pkg/middleware"
 	"shopee/backend/pkg/platform/natsclient"
 	"shopee/backend/pkg/platform/objectstorage"
 	"shopee/backend/pkg/platform/postgres"
 	"shopee/backend/pkg/platform/redisclient"
 	"shopee/backend/pkg/shutdown"
-
 	"shopee/backend/services/vendorsvc/internal/adapter"
 	"shopee/backend/services/vendorsvc/internal/config"
 	"shopee/backend/services/vendorsvc/internal/repository"
@@ -54,6 +56,11 @@ func main() {
 	defer natsConn.Close()
 
 	jwtManager := authjwt.NewManager(cfg.JWTSecret)
+	verifier, err := sessionconfig.LoadSessionVerifier()
+	if err != nil {
+		log.Fatal().Err(err).Msg("session verifier configuration invalid")
+	}
+	jwtManager.SetVerifier(verifier)
 	notificationClient := adapter.NewHTTPNotificationClient(cfg.NotificationServiceURL)
 
 	objectStore, err := objectstorage.NewClient(ctx, cfg.ObjectStorage)
@@ -64,15 +71,20 @@ func main() {
 	vendorRepo := repository.NewVendorRepository(dbPool)
 	auditLogRepo := repository.NewAuditLogRepository(dbPool)
 	addressRepo := repository.NewVendorAddressRepository(dbPool)
-	vendorUseCase := usecase.NewVendorUseCase(vendorRepo, auditLogRepo, notificationClient, objectStore, log)
-	addressUseCase := usecase.NewVendorAddressUseCase(addressRepo, vendorRepo)
+	outbox := repository.Outbox{Pool: dbPool}
+	ops := usecase.Operations{Tx: repository.Transactions{Pool: dbPool}, Actors: identityclient.Client{URL: cfg.Internal.IdentityURL, Key: cfg.Internal.Key}, Addresses: addressRepo, Events: outbox}
+	workerCtx, stopWorkers := context.WithCancel(ctx)
+	defer stopWorkers()
+	go adapter.DispatchStatus(workerCtx, outbox, []string{cfg.CatalogURL, cfg.OrderURL}, cfg.Internal.Key, log)
+	vendorUseCase := usecase.NewVendorUseCase(vendorRepo, auditLogRepo, notificationClient, objectStore, log, ops)
+	addressUseCase := usecase.NewVendorAddressUseCase(addressRepo, vendorRepo, ops)
 
 	vendorHandler := transport.NewVendorHandler(vendorUseCase, log)
 	addressHandler := transport.NewVendorAddressHandler(addressUseCase, log)
 	adminHandler := transport.NewAdminHandler(vendorUseCase, log)
 	internalHandler := transport.NewInternalHandler(vendorUseCase, log)
 
-	router := transport.NewRouter(cfg.Base.Env, log, jwtManager, vendorHandler, addressHandler, adminHandler, internalHandler,
+	router := transport.NewRouter(cfg.Base.Env, log, jwtManager, vendorHandler, addressHandler, adminHandler, internalHandler, cfg.Internal.Key,
 		health.Checker{Name: "postgres", Ping: func(ctx context.Context) error { return dbPool.Ping(ctx) }},
 		health.Checker{Name: "redis", Ping: func(ctx context.Context) error { return redisClient.Ping(ctx).Err() }},
 		health.Checker{Name: "object_storage", Ping: objectStore.Ping},
@@ -83,6 +95,16 @@ func main() {
 			return nil
 		}},
 	)
+
+	cipher, err := adapter.NewPayoutCipher(cfg.PayoutKey)
+	if err != nil {
+		log.Fatal().Msg("payout encryption configuration invalid")
+	}
+	payoutUC := &usecase.PayoutUseCase{Accounts: repository.PayoutRepository{Pool: dbPool}, Vendors: vendorRepo, Audit: auditLogRepo, Ops: ops, Cipher: cipher}
+	(transport.PayoutHandler{UseCase: payoutUC, Log: log}).Register(router, middleware.RequireAuth(jwtManager), cfg.PayoutServiceKey)
+
+	dashboard := usecase.Dashboard{Vendors: vendorUseCase, Orders: adapter.ReportClient{URL: cfg.OrderURL, Key: cfg.Internal.Key}, Payments: adapter.ReportClient{URL: cfg.PaymentURL, Key: cfg.Internal.Key}}
+	router.GET("/api/vendor/:vendorId/dashboard", middleware.RequireAuth(jwtManager), middleware.RequireRole("vendor"), transport.DashboardHandler(dashboard, log))
 
 	srv := &http.Server{
 		Addr:              ":" + cfg.Base.Port,

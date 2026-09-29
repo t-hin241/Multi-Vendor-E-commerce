@@ -1,6 +1,7 @@
 "use client";
 
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { VendorOperations } from "@/components/admin/vendor-operations";
 import { useState } from "react";
 
 import { SectionHeader } from "@/components/section-header";
@@ -21,17 +22,21 @@ import {
 import * as api from "@/lib/api-client";
 import { useAuth } from "@/lib/auth-context";
 
-const VENDOR_STATUS_OPTIONS = ["pending", "approved", "rejected", ""] as const;
+const VENDOR_STATUS_OPTIONS = ["pending", "approved", "rejected", "suspended", ""] as const;
 
 export function VendorModeration() {
   const { callWithAuth } = useAuth();
   const queryClient = useQueryClient();
+  const [offset, setOffset] = useState(0);
   const [status, setStatus] = useState("pending");
 
   const vendorsQuery = useQuery({
-    queryKey: ["admin-vendor-applications", status],
+    queryKey: ["admin-vendor-applications", status, offset],
+    refetchInterval: 10000,
     queryFn: () =>
-      callWithAuth((token) => api.listVendorApplications(token, { status: status || undefined })),
+      callWithAuth((token) =>
+        api.listVendorApplications(token, { status: status || undefined, limit: 20, offset }),
+      ),
   });
 
   // Errors are left to propagate -- ConfirmDialog/ReasonDialog catch them
@@ -51,13 +56,24 @@ export function VendorModeration() {
     <div className="flex flex-col gap-4">
       <SectionHeader
         title="Vendor applications"
-        action={<StatusFilter status={status} onChange={setStatus} options={VENDOR_STATUS_OPTIONS} />}
+        action={
+          <StatusFilter
+            status={status}
+            onChange={(value) => {
+              setStatus(value);
+              setOffset(0);
+            }}
+            options={VENDOR_STATUS_OPTIONS}
+          />
+        }
       />
 
       {vendorsQuery.error && (
         <p className="text-sm text-destructive">
           Could not load vendor applications:{" "}
-          {vendorsQuery.error instanceof api.ApiError ? vendorsQuery.error.message : "unknown error"}
+          {vendorsQuery.error instanceof api.ApiError
+            ? vendorsQuery.error.message
+            : "unknown error"}
         </p>
       )}
 
@@ -86,7 +102,8 @@ export function VendorModeration() {
                     )}
                     <AuditLogPanel
                       targetId={v.id}
-                      fetchLog={(token) => api.getVendorAuditLog(token, v.id)}
+                      paginated
+                      fetchLog={(token, offset) => api.getVendorAuditLog(token, v.id, offset)}
                     />
                   </TableCell>
                   <TableCell className="text-right">
@@ -99,7 +116,7 @@ export function VendorModeration() {
                             </Button>
                           }
                           title={`Approve "${v.shop_name}"?`}
-                          description="This shop becomes able to list products on the storefront immediately."
+                          description="A complete profile and default pickup address are required. Selling visibility follows status synchronization."
                           confirmLabel="Approve"
                           onConfirm={() => handleApprove(v.id)}
                         />
@@ -116,6 +133,7 @@ export function VendorModeration() {
                         />
                       </div>
                     )}
+                    <VendorOperations vendor={v} />
                   </TableCell>
                 </TableRow>
               ))}
@@ -128,6 +146,22 @@ export function VendorModeration() {
           )}
         </CardContent>
       </Card>
+      <div className="flex gap-2">
+        <Button
+          variant="outline"
+          disabled={offset === 0 || vendorsQuery.isFetching}
+          onClick={() => setOffset(Math.max(0, offset - 20))}
+        >
+          Previous
+        </Button>
+        <Button
+          variant="outline"
+          disabled={vendorsQuery.data?.length !== 20 || vendorsQuery.isFetching}
+          onClick={() => setOffset(offset + 20)}
+        >
+          Next
+        </Button>
+      </div>
     </div>
   );
 }

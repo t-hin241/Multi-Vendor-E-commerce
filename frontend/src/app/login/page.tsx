@@ -97,6 +97,9 @@ export default function LoginPage() {
             </form>
           </Form>
 
+          <Link href="/forgot-password" className="mt-4 block text-sm text-primary underline">
+            Quên mật khẩu?
+          </Link>
           <p className="mt-4 text-sm text-muted-foreground">
             Chưa có tài khoản?{" "}
             <Link href="/register" className="text-primary underline">

@@ -24,10 +24,11 @@ type VendorUseCase struct {
 	notifications NotificationGateway
 	store         ObjectStore
 	log           zerolog.Logger
+	ops           Operations
 }
 
-func NewVendorUseCase(vendors VendorRepositoryPort, auditLogs AuditLogRepositoryPort, notifications NotificationGateway, store ObjectStore, log zerolog.Logger) *VendorUseCase {
-	return &VendorUseCase{vendors: vendors, auditLogs: auditLogs, notifications: notifications, store: store, log: log}
+func NewVendorUseCase(vendors VendorRepositoryPort, auditLogs AuditLogRepositoryPort, notifications NotificationGateway, store ObjectStore, log zerolog.Logger, ops Operations) *VendorUseCase {
+	return &VendorUseCase{vendors: vendors, auditLogs: auditLogs, notifications: notifications, store: store, log: log, ops: ops}
 }
 
 // notify is fire-and-forget from every caller's point of view: a
@@ -44,7 +45,10 @@ func (uc *VendorUseCase) notify(ctx context.Context, userID, notifType, referenc
 // additional one get created, each going through its own pending →
 // approved/rejected review independently of any other shop the same user
 // owns.
-func (uc *VendorUseCase) Apply(ctx context.Context, userID, shopName, description string) (*domain.Vendor, error) {
+func (uc *VendorUseCase) apply(ctx context.Context, userID, shopName, description string) (*domain.Vendor, error) {
+	if len(description) > 4000 {
+		return nil, apperror.Validation("Shop description must not exceed 4000 bytes")
+	}
 	if err := domain.ValidateApplication(shopName); err != nil {
 		return nil, err
 	}
@@ -59,8 +63,14 @@ func (uc *VendorUseCase) Apply(ctx context.Context, userID, shopName, descriptio
 // ListByUserID returns every shop (any status) userID owns — backs the
 // "my shops" list the frontend's shop switcher and management page read
 // from.
-func (uc *VendorUseCase) ListByUserID(ctx context.Context, userID string) ([]*domain.Vendor, error) {
-	vendors, err := uc.vendors.ListByUserID(ctx, userID)
+func (uc *VendorUseCase) ListByUserID(ctx context.Context, userID string, limit, offset int) ([]*domain.Vendor, error) {
+	if err := uc.ops.Actors.RequireRole(ctx, userID, "vendor"); err != nil {
+		return nil, err
+	}
+	if limit < 1 || limit > 100 || offset < 0 {
+		return nil, apperror.Validation("Invalid pagination")
+	}
+	vendors, err := uc.vendors.ListByUserID(ctx, userID, limit, offset)
 	if err != nil {
 		return nil, apperror.Internal(err)
 	}
@@ -75,6 +85,9 @@ func (uc *VendorUseCase) ListByUserID(ctx context.Context, userID string) ([]*do
 // VendorAddressUseCase so the two usecases stay peers rather than one
 // depending on the other.
 func (uc *VendorUseCase) GetOwned(ctx context.Context, userID, vendorID string) (*domain.Vendor, error) {
+	if err := uc.ops.Actors.RequireRole(ctx, userID, "vendor"); err != nil {
+		return nil, err
+	}
 	return getOwnedVendor(ctx, uc.vendors, userID, vendorID)
 }
 
@@ -92,7 +105,7 @@ func getOwnedVendor(ctx context.Context, vendors VendorRepositoryPort, userID, v
 	return v, nil
 }
 
-func (uc *VendorUseCase) UpdateProfile(ctx context.Context, userID, vendorID, shopName, description, policyText string) (*domain.Vendor, error) {
+func (uc *VendorUseCase) updateProfile(ctx context.Context, userID, vendorID, shopName, description, policyText string) (*domain.Vendor, error) {
 	if err := domain.ValidateApplication(shopName); err != nil {
 		return nil, err
 	}
@@ -100,6 +113,9 @@ func (uc *VendorUseCase) UpdateProfile(ctx context.Context, userID, vendorID, sh
 	v, err := uc.GetOwned(ctx, userID, vendorID)
 	if err != nil {
 		return nil, err
+	}
+	if len(description) > 4000 || len(policyText) > 10000 || (v.IsApproved() && strings.TrimSpace(description) == "") {
+		return nil, apperror.Validation("Invalid shop description or policy length")
 	}
 
 	if err := uc.vendors.UpdateProfile(ctx, v.ID, strings.TrimSpace(shopName), strings.TrimSpace(description), strings.TrimSpace(policyText)); err != nil {
@@ -143,7 +159,9 @@ func (uc *VendorUseCase) UploadLogo(ctx context.Context, userID, vendorID, conte
 		return nil, apperror.Internal(err)
 	}
 	if oldKey != nil {
-		_ = uc.store.Delete(ctx, *oldKey)
+		if e := uc.store.Delete(ctx, *oldKey); e != nil {
+			uc.log.Warn().Str("vendor_id", v.ID).Msg("vendor_media_cleanup_failed")
+		}
 	}
 
 	v.LogoURL, v.LogoObjectKey = &url, &objectKey
@@ -178,7 +196,9 @@ func (uc *VendorUseCase) UploadBanner(ctx context.Context, userID, vendorID, con
 		return nil, apperror.Internal(err)
 	}
 	if oldKey != nil {
-		_ = uc.store.Delete(ctx, *oldKey)
+		if e := uc.store.Delete(ctx, *oldKey); e != nil {
+			uc.log.Warn().Str("vendor_id", v.ID).Msg("vendor_media_cleanup_failed")
+		}
 	}
 
 	v.BannerURL, v.BannerObjectKey = &url, &objectKey
@@ -210,7 +230,13 @@ func randomHex(n int) (string, error) {
 	return hex.EncodeToString(buf), nil
 }
 
-func (uc *VendorUseCase) ListApplications(ctx context.Context, status string, limit, offset int) ([]*domain.Vendor, error) {
+func (uc *VendorUseCase) ListApplications(ctx context.Context, actorID, status string, limit, offset int) ([]*domain.Vendor, error) {
+	if err := uc.ops.Actors.RequireRole(ctx, actorID, "admin"); err != nil {
+		return nil, err
+	}
+	if !validStatus(status) || limit < 1 || limit > 100 || offset < 0 {
+		return nil, apperror.Validation("Invalid list filters")
+	}
 	vendors, err := uc.vendors.ListByStatus(ctx, status, limit, offset)
 	if err != nil {
 		return nil, apperror.Internal(err)
@@ -229,73 +255,34 @@ func (uc *VendorUseCase) ListByIDs(ctx context.Context, ids []string) ([]*domain
 	return vendors, nil
 }
 
-func (uc *VendorUseCase) Approve(ctx context.Context, vendorID, adminUserID string) (*domain.Vendor, error) {
-	v, err := uc.findForDecision(ctx, vendorID)
-	if err != nil {
+func (uc *VendorUseCase) Approve(ctx context.Context, vendorID, actorID string) (*domain.Vendor, error) {
+	return uc.decide(ctx, vendorID, actorID, domain.StatusApproved, "", false)
+}
+func (uc *VendorUseCase) Reject(ctx context.Context, vendorID, actorID, reason string) (*domain.Vendor, error) {
+	return uc.decide(ctx, vendorID, actorID, domain.StatusRejected, reason, false)
+}
+func (uc *VendorUseCase) Suspend(ctx context.Context, vendorID, actorID, reason string) (*domain.Vendor, error) {
+	return uc.decide(ctx, vendorID, actorID, domain.StatusSuspended, reason, false)
+}
+func (uc *VendorUseCase) Restore(ctx context.Context, vendorID, actorID, reason string) (*domain.Vendor, error) {
+	return uc.decide(ctx, vendorID, actorID, domain.StatusApproved, reason, true)
+}
+func (uc *VendorUseCase) ListAuditLog(ctx context.Context, actorID, vendorID string, limit, offset int) ([]*domain.AuditLog, error) {
+	if err := uc.ops.Actors.RequireRole(ctx, actorID, "admin"); err != nil {
 		return nil, err
 	}
-
-	if !domain.CanTransition(v.Status, domain.StatusApproved) {
-		return nil, apperror.Conflict("Only a pending application can be approved")
+	if limit < 1 || limit > 100 || offset < 0 {
+		return nil, apperror.Validation("Invalid pagination")
 	}
-
-	if err := uc.vendors.UpdateStatus(ctx, v.ID, domain.StatusApproved, adminUserID, nil); err != nil {
-		return nil, apperror.Internal(err)
-	}
-	if err := uc.auditLogs.Create(ctx, v.ID, adminUserID, "approved", nil); err != nil {
-		return nil, apperror.Internal(err)
-	}
-
-	v.Status = domain.StatusApproved
-	uc.notify(ctx, v.UserID, "vendor_approved", v.ID)
-	return v, nil
+	rows, err := uc.auditLogs.List(ctx, vendorID, limit, offset)
+	return rows, wrap(err)
 }
 
-func (uc *VendorUseCase) Reject(ctx context.Context, vendorID, adminUserID, reason string) (*domain.Vendor, error) {
-	if strings.TrimSpace(reason) == "" {
-		return nil, apperror.Validation("A rejection reason is required")
-	}
-
-	v, err := uc.findForDecision(ctx, vendorID)
-	if err != nil {
-		return nil, err
-	}
-
-	if !domain.CanTransition(v.Status, domain.StatusRejected) {
-		return nil, apperror.Conflict("Only a pending application can be rejected")
-	}
-
-	if err := uc.vendors.UpdateStatus(ctx, v.ID, domain.StatusRejected, adminUserID, &reason); err != nil {
-		return nil, apperror.Internal(err)
-	}
-	if err := uc.auditLogs.Create(ctx, v.ID, adminUserID, "rejected", &reason); err != nil {
-		return nil, apperror.Internal(err)
-	}
-
-	v.Status = domain.StatusRejected
-	v.RejectionReason = &reason
-	uc.notify(ctx, v.UserID, "vendor_rejected", v.ID)
-	return v, nil
-}
-
-// ListAuditLog returns the full moderation decision history for one
-// vendor. The route is already admin-gated (same as ListApplications), so
-// no extra ownership check is needed here.
-func (uc *VendorUseCase) ListAuditLog(ctx context.Context, vendorID string) ([]*domain.AuditLog, error) {
-	entries, err := uc.auditLogs.List(ctx, vendorID)
-	if err != nil {
-		return nil, apperror.Internal(err)
-	}
-	return entries, nil
-}
-
-func (uc *VendorUseCase) findForDecision(ctx context.Context, vendorID string) (*domain.Vendor, error) {
-	v, err := uc.vendors.FindByID(ctx, vendorID)
-	if err != nil {
-		if errors.Is(err, repository.ErrVendorNotFound) {
-			return nil, apperror.NotFound("Vendor application not found")
-		}
-		return nil, apperror.Internal(err)
-	}
-	return v, nil
+func (uc *VendorUseCase) UpdateProfile(ctx context.Context, userID, vendorID, name, description, policy string) (out *domain.Vendor, err error) {
+	err = uc.ops.Tx.Run(ctx, func(ctx context.Context) error {
+		var e error
+		out, e = uc.updateProfile(ctx, userID, vendorID, name, description, policy)
+		return e
+	})
+	return out, wrap(err)
 }

@@ -6,12 +6,14 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"shopee/backend/pkg/serviceauth"
 	"time"
 
 	"shopee/backend/pkg/apperror"
 )
 
 type ProductInfo struct {
+	Version     int64
 	ID          string
 	VendorID    string
 	Name        string
@@ -43,16 +45,18 @@ type VariantInfo struct {
 }
 
 type HTTPCatalogClient struct {
+	key     string
 	baseURL string
 	client  *http.Client
 }
 
-func NewHTTPCatalogClient(baseURL string) *HTTPCatalogClient {
-	return &HTTPCatalogClient{baseURL: baseURL, client: &http.Client{Timeout: 5 * time.Second}}
+func NewHTTPCatalogClient(baseURL, key string) *HTTPCatalogClient {
+	return &HTTPCatalogClient{key: key, baseURL: baseURL, client: &http.Client{Timeout: 5 * time.Second}}
 }
 
 type internalProductResponse struct {
 	Data struct {
+		Version            int64  `json:"version"`
 		ID                 string `json:"id"`
 		VendorID           string `json:"vendor_id"`
 		Name               string `json:"name"`
@@ -76,6 +80,7 @@ func (c *HTTPCatalogClient) GetProduct(ctx context.Context, productID string) (*
 		return nil, apperror.Internal(err)
 	}
 
+	serviceauth.SetRequestHeaders(req, c.key)
 	resp, err := c.client.Do(req)
 	if err != nil {
 		return nil, apperror.Internal(err)
@@ -95,6 +100,7 @@ func (c *HTTPCatalogClient) GetProduct(ctx context.Context, productID string) (*
 	}
 
 	return &ProductInfo{
+		Version:            body.Data.Version,
 		ID:                 body.Data.ID,
 		VendorID:           body.Data.VendorID,
 		Name:               body.Data.Name,
@@ -128,6 +134,7 @@ func (c *HTTPCatalogClient) GetVariant(ctx context.Context, variantID string) (*
 		return nil, apperror.Internal(err)
 	}
 
+	serviceauth.SetRequestHeaders(req, c.key)
 	resp, err := c.client.Do(req)
 	if err != nil {
 		return nil, apperror.Internal(err)

@@ -20,7 +20,7 @@ func NewProductAttributeValueRepository(pool *pgxpool.Pool) *ProductAttributeVal
 // deletes every existing row for the product and inserts the new set in one
 // transaction, mirroring ProductImageRepository.ReplaceForProduct.
 func (r *ProductAttributeValueRepository) ReplaceForProduct(ctx context.Context, productID string, values []*domain.ProductAttributeValue) error {
-	tx, err := r.pool.Begin(ctx)
+	tx, err := begin(ctx, r.pool)
 	if err != nil {
 		return err
 	}
@@ -50,7 +50,7 @@ func (r *ProductAttributeValueRepository) ListForProduct(ctx context.Context, pr
 	const query = `
 		SELECT id, product_id, attribute_id, rule_id, option_id, value_text, value_number, value_boolean, created_at
 		FROM product_attribute_values WHERE product_id = $1`
-	rows, err := r.pool.Query(ctx, query, productID)
+	rows, err := connection(ctx, r.pool).Query(ctx, query, productID)
 	if err != nil {
 		return nil, err
 	}

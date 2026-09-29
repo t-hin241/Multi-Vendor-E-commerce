@@ -7,13 +7,15 @@ import (
 )
 
 type VendorRepositoryPort interface {
+	Operations(context.Context) (*domain.OperationsSummary, error)
+	Snapshots(context.Context, string, int) ([]*domain.Vendor, error)
 	Create(ctx context.Context, v *domain.Vendor) error
-	ListByUserID(ctx context.Context, userID string) ([]*domain.Vendor, error)
+	ListByUserID(ctx context.Context, userID string, limit, offset int) ([]*domain.Vendor, error)
 	FindByID(ctx context.Context, id string) (*domain.Vendor, error)
 	ListByStatus(ctx context.Context, status string, limit, offset int) ([]*domain.Vendor, error)
 	ListByIDs(ctx context.Context, ids []string) ([]*domain.Vendor, error)
 	UpdateProfile(ctx context.Context, id, shopName, description, policyText string) error
-	UpdateStatus(ctx context.Context, id string, status domain.Status, approvedBy string, rejectionReason *string) error
+	UpdateStatus(ctx context.Context, id string, version int64, status domain.Status, approvedBy string, rejectionReason *string) error
 	SetLogo(ctx context.Context, id string, url, objectKey *string) error
 	SetBanner(ctx context.Context, id string, url, objectKey *string) error
 }
@@ -27,8 +29,8 @@ type ObjectStore interface {
 }
 
 type AuditLogRepositoryPort interface {
-	Create(ctx context.Context, vendorID, actorUserID, action string, reason *string) error
-	List(ctx context.Context, vendorID string) ([]*domain.AuditLog, error)
+	Create(ctx context.Context, vendorID, actorUserID, action string, reason *string, version int64) error
+	List(ctx context.Context, vendorID string, limit, offset int) ([]*domain.AuditLog, error)
 }
 
 // NotificationGateway lets Vendor tell an applicant about an approval
@@ -41,9 +43,26 @@ type NotificationGateway interface {
 type VendorAddressRepositoryPort interface {
 	Create(ctx context.Context, a *domain.VendorAddress) error
 	FindByID(ctx context.Context, id string) (*domain.VendorAddress, error)
-	ListForVendor(ctx context.Context, vendorID string) ([]*domain.VendorAddress, error)
+	ListForVendor(ctx context.Context, vendorID string, limit, offset int) ([]*domain.VendorAddress, error)
 	FindDefaultForVendor(ctx context.Context, vendorID string) (*domain.VendorAddress, error)
 	Update(ctx context.Context, id string, a *domain.VendorAddress) error
 	Delete(ctx context.Context, id string) error
 	SetDefault(ctx context.Context, vendorID, addressID string) error
+}
+
+type Transactions interface {
+	Run(context.Context, func(context.Context) error) error
+}
+type ActorAuthorizer interface {
+	RequireRole(context.Context, string, string) error
+}
+type EventStore interface {
+	Queue(context.Context, *domain.Vendor) error
+	Replay(context.Context, string) error
+}
+type Operations struct {
+	Tx        Transactions
+	Actors    ActorAuthorizer
+	Addresses VendorAddressRepositoryPort
+	Events    EventStore
 }

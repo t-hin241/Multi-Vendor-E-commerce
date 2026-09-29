@@ -39,17 +39,17 @@ func (r *VendorAddressRepository) Create(ctx context.Context, a *domain.VendorAd
 		INSERT INTO vendor_addresses (vendor_id, recipient_name, phone, province, district, ward, street_address, is_default)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 		RETURNING id, created_at, updated_at`
-	return r.pool.QueryRow(ctx, query, a.VendorID, a.RecipientName, a.Phone, a.Province, a.District, a.Ward, a.StreetAddress, a.IsDefault).
+	return connection(ctx, r.pool).QueryRow(ctx, query, a.VendorID, a.RecipientName, a.Phone, a.Province, a.District, a.Ward, a.StreetAddress, a.IsDefault).
 		Scan(&a.ID, &a.CreatedAt, &a.UpdatedAt)
 }
 
 func (r *VendorAddressRepository) FindByID(ctx context.Context, id string) (*domain.VendorAddress, error) {
-	row := r.pool.QueryRow(ctx, `SELECT `+vendorAddressColumns+` FROM vendor_addresses WHERE id = $1`, id)
+	row := connection(ctx, r.pool).QueryRow(ctx, `SELECT `+vendorAddressColumns+` FROM vendor_addresses WHERE id = $1`, id)
 	return scanVendorAddress(row)
 }
 
-func (r *VendorAddressRepository) ListForVendor(ctx context.Context, vendorID string) ([]*domain.VendorAddress, error) {
-	rows, err := r.pool.Query(ctx, `SELECT `+vendorAddressColumns+` FROM vendor_addresses WHERE vendor_id = $1 ORDER BY created_at ASC`, vendorID)
+func (r *VendorAddressRepository) ListForVendor(ctx context.Context, vendorID string, limit, offset int) ([]*domain.VendorAddress, error) {
+	rows, err := connection(ctx, r.pool).Query(ctx, `SELECT `+vendorAddressColumns+` FROM vendor_addresses WHERE vendor_id = $1 ORDER BY created_at ASC,id ASC LIMIT $2 OFFSET $3`, vendorID, limit, offset)
 	if err != nil {
 		return nil, err
 	}
@@ -67,7 +67,7 @@ func (r *VendorAddressRepository) ListForVendor(ctx context.Context, vendorID st
 }
 
 func (r *VendorAddressRepository) FindDefaultForVendor(ctx context.Context, vendorID string) (*domain.VendorAddress, error) {
-	row := r.pool.QueryRow(ctx, `SELECT `+vendorAddressColumns+` FROM vendor_addresses WHERE vendor_id = $1 AND is_default`, vendorID)
+	row := connection(ctx, r.pool).QueryRow(ctx, `SELECT `+vendorAddressColumns+` FROM vendor_addresses WHERE vendor_id = $1 AND is_default`, vendorID)
 	return scanVendorAddress(row)
 }
 
@@ -76,7 +76,7 @@ func (r *VendorAddressRepository) Update(ctx context.Context, id string, a *doma
 		UPDATE vendor_addresses
 		SET recipient_name = $1, phone = $2, province = $3, district = $4, ward = $5, street_address = $6, updated_at = now()
 		WHERE id = $7`
-	tag, err := r.pool.Exec(ctx, query, a.RecipientName, a.Phone, a.Province, a.District, a.Ward, a.StreetAddress, id)
+	tag, err := connection(ctx, r.pool).Exec(ctx, query, a.RecipientName, a.Phone, a.Province, a.District, a.Ward, a.StreetAddress, id)
 	if err != nil {
 		return err
 	}
@@ -87,7 +87,7 @@ func (r *VendorAddressRepository) Update(ctx context.Context, id string, a *doma
 }
 
 func (r *VendorAddressRepository) Delete(ctx context.Context, id string) error {
-	tag, err := r.pool.Exec(ctx, `DELETE FROM vendor_addresses WHERE id = $1`, id)
+	tag, err := connection(ctx, r.pool).Exec(ctx, `DELETE FROM vendor_addresses WHERE id = $1`, id)
 	if err != nil {
 		return err
 	}
@@ -101,21 +101,17 @@ func (r *VendorAddressRepository) Delete(ctx context.Context, id string) error {
 // given address as the new one inside a transaction, so there's never a
 // moment with zero or two defaults visible to a concurrent reader.
 func (r *VendorAddressRepository) SetDefault(ctx context.Context, vendorID, addressID string) error {
-	tx, err := r.pool.Begin(ctx)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback(ctx)
-
-	if _, err := tx.Exec(ctx, `UPDATE vendor_addresses SET is_default = FALSE WHERE vendor_id = $1`, vendorID); err != nil {
-		return err
-	}
-	tag, err := tx.Exec(ctx, `UPDATE vendor_addresses SET is_default = TRUE WHERE id = $1 AND vendor_id = $2`, addressID, vendorID)
-	if err != nil {
-		return err
-	}
-	if tag.RowsAffected() == 0 {
-		return ErrVendorAddressNotFound
-	}
-	return tx.Commit(ctx)
+	return (Transactions{Pool: r.pool}).Run(ctx, func(ctx context.Context) error {
+		if _, err := connection(ctx, r.pool).Exec(ctx, `UPDATE vendor_addresses SET is_default=false WHERE vendor_id=$1`, vendorID); err != nil {
+			return err
+		}
+		tag, err := connection(ctx, r.pool).Exec(ctx, `UPDATE vendor_addresses SET is_default=true WHERE id=$1 AND vendor_id=$2`, addressID, vendorID)
+		if err != nil {
+			return err
+		}
+		if tag.RowsAffected() != 1 {
+			return ErrVendorAddressNotFound
+		}
+		return nil
+	})
 }

@@ -8,13 +8,13 @@ import (
 	"os"
 
 	"shopee/backend/pkg/authjwt"
+	sessionconfig "shopee/backend/pkg/config"
 	"shopee/backend/pkg/health"
 	"shopee/backend/pkg/logger"
 	"shopee/backend/pkg/platform/natsclient"
 	"shopee/backend/pkg/platform/postgres"
 	"shopee/backend/pkg/platform/redisclient"
 	"shopee/backend/pkg/shutdown"
-
 	"shopee/backend/services/inventory/internal/adapter"
 	"shopee/backend/services/inventory/internal/config"
 	"shopee/backend/services/inventory/internal/repository"
@@ -28,6 +28,12 @@ func main() {
 	cfg, err := config.Load()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, serviceName+": config error:", err)
+		os.Exit(1)
+	}
+
+	internalServices, err := sessionconfig.LoadInternalServices()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "internal service configuration invalid")
 		os.Exit(1)
 	}
 
@@ -53,8 +59,13 @@ func main() {
 	defer natsConn.Close()
 
 	jwtManager := authjwt.NewManager(cfg.JWTSecret)
-	vendorClient := adapter.NewHTTPVendorClient(cfg.VendorServiceURL)
-	catalogClient := adapter.NewHTTPCatalogClient(cfg.CatalogServiceURL)
+	verifier, err := sessionconfig.LoadSessionVerifier()
+	if err != nil {
+		log.Fatal().Err(err).Msg("session verifier configuration invalid")
+	}
+	jwtManager.SetVerifier(verifier)
+	vendorClient := adapter.NewHTTPVendorClient(cfg.VendorServiceURL, internalServices.Key)
+	catalogClient := adapter.NewHTTPCatalogClient(cfg.CatalogServiceURL, internalServices.Key)
 
 	itemRepo := repository.NewInventoryItemRepository(dbPool)
 	reservationRepo := repository.NewReservationRepository(dbPool)

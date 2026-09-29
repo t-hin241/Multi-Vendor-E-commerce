@@ -51,3 +51,13 @@ export function useCancelOrder(orderId: string) {
     onError: (err) => toast.error(describeApiError(err, "Could not cancel order.")),
   });
 }
+
+export function useCreateReturnRequest(orderId: string) {
+  const { callWithAuth } = useAuth();
+  return useMutation({
+    mutationFn: (vars: { orderItemId: string; reason: string }) =>
+      callWithAuth((token) => api.createReturnRequest(token, orderId, vars.orderItemId, vars.reason)),
+    onSuccess: () => toast.success("Đã gửi yêu cầu trả hàng. Admin sẽ xem xét."),
+    onError: (err) => toast.error(describeApiError(err, "Không thể gửi yêu cầu trả hàng.")),
+  });
+}

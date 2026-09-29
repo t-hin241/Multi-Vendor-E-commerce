@@ -5,16 +5,24 @@
 // touching business logic.
 package provider
 
-import "context"
+import (
+	"context"
+	"time"
+)
 
 type CreateIntentInput struct {
-	OrderID  string
-	Amount   int64
-	Currency string
+	OrderID   string
+	Amount    int64
+	Currency  string
+	ReturnURL string
+	CancelURL string
 }
 
 type CreateIntentResult struct {
 	ProviderIntentID string
+	CheckoutURL      string
+	QRCode           string
+	ExpiresAt        *time.Time
 }
 
 // Provider creates a payment intent with an external payment processor.

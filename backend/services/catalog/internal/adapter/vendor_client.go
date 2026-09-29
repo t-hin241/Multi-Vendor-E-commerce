@@ -13,6 +13,8 @@ import (
 	"time"
 
 	"shopee/backend/pkg/apperror"
+	"shopee/backend/pkg/serviceauth"
+	"shopee/backend/pkg/vendorsales"
 )
 
 // VendorGateway lets the use case check whether a user owns a specific,
@@ -32,11 +34,12 @@ type VendorNameGateway interface {
 
 type HTTPVendorClient struct {
 	baseURL string
+	key     string
 	client  *http.Client
 }
 
-func NewHTTPVendorClient(baseURL string) *HTTPVendorClient {
-	return &HTTPVendorClient{baseURL: baseURL, client: &http.Client{Timeout: 5 * time.Second}}
+func NewHTTPVendorClient(baseURL, key string) *HTTPVendorClient {
+	return &HTTPVendorClient{baseURL: baseURL, key: key, client: &http.Client{Timeout: 5 * time.Second}}
 }
 
 type vendorStatusResponse struct {
@@ -58,13 +61,14 @@ func (c *HTTPVendorClient) GetApprovedVendorID(ctx context.Context, userID, vend
 		return "", apperror.Internal(err)
 	}
 
+	serviceauth.SetRequestHeaders(req, c.key)
 	resp, err := c.client.Do(req)
 	if err != nil {
 		return "", apperror.Internal(err)
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode == http.StatusNotFound {
+	if resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusForbidden {
 		return "", apperror.Forbidden("You must have an approved vendor account to sell products")
 	}
 	if resp.StatusCode != http.StatusOK {
@@ -106,6 +110,7 @@ func (c *HTTPVendorClient) GetShopNames(ctx context.Context, vendorIDs []string)
 		return nil, err
 	}
 
+	serviceauth.SetRequestHeaders(req, c.key)
 	resp, err := c.client.Do(req)
 	if err != nil {
 		return nil, err
@@ -126,4 +131,8 @@ func (c *HTTPVendorClient) GetShopNames(ctx context.Context, vendorIDs []string)
 		out[v.VendorID] = v.ShopName
 	}
 	return out, nil
+}
+
+func (c *HTTPVendorClient) Approved(ctx context.Context, ids []string) (map[string]int64, error) {
+	return (vendorsales.Client{URL: c.baseURL, Key: c.key}).Approved(ctx, ids)
 }

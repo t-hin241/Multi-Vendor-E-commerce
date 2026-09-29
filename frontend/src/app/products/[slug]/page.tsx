@@ -3,11 +3,12 @@
 import DOMPurify from "dompurify";
 import { Store } from "lucide-react";
 import Link from "next/link";
-import { useParams } from "next/navigation";
+import { useParams, useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { PageShell } from "@/components/page-shell";
 import { ProductGallery, type GalleryItem } from "@/components/product-gallery";
+import { ProductReviews } from "@/components/product-reviews";
 import { QuantityStepper } from "@/components/quantity-stepper";
 import { ReadMore } from "@/components/read-more";
 import { EmptyState, ErrorState, LoadingState } from "@/components/states/query-state";
@@ -44,6 +45,7 @@ function looksLikeHtml(value: string): boolean {
 export default function ProductDetailPage() {
   const params = useParams<{ slug: string }>();
   const { user } = useAuth();
+  const router = useRouter();
   const [quantity, setQuantity] = useState(1);
   const [selectedVariantId, setSelectedVariantId] = useState<string>("");
   const [variantError, setVariantError] = useState<string | null>(null);
@@ -96,6 +98,25 @@ export default function ProductDetailPage() {
       quantity,
       variantId: hasVariants ? selectedVariantId : undefined,
     });
+  }
+
+  async function handleBuyNow() {
+    if (!productQuery.data) return;
+    if (hasVariants && !selectedVariantId) {
+      setVariantError("Vui lòng chọn một tùy chọn trước khi mua.");
+      return;
+    }
+    setVariantError(null);
+    try {
+      await addToCart.mutateAsync({
+        productId: productQuery.data.id,
+        quantity,
+        variantId: hasVariants ? selectedVariantId : undefined,
+      });
+      router.push("/checkout");
+    } catch {
+      // The cart mutation shows the API error toast.
+    }
   }
 
   if (productQuery.isPending) {
@@ -173,7 +194,9 @@ export default function ProductDetailPage() {
           {!hasVariants && product.stock_quantity !== undefined && (
             <p className="mt-1 text-sm text-muted-foreground">
               Tồn kho:{" "}
-              <span className={cn("font-medium", product.stock_quantity === 0 && "text-destructive")}>
+              <span
+                className={cn("font-medium", product.stock_quantity === 0 && "text-destructive")}
+              >
                 {product.stock_quantity === 0 ? "Hết hàng" : product.stock_quantity}
               </span>
             </p>
@@ -219,14 +242,28 @@ export default function ProductDetailPage() {
 
           {canBuy && (
             <div ref={buyBoxRef} className="flex items-center gap-3">
-              <QuantityStepper value={quantity} min={1} onChange={setQuantity} ariaLabel="số lượng" />
+              <QuantityStepper
+                value={quantity}
+                min={1}
+                onChange={setQuantity}
+                ariaLabel="số lượng"
+              />
               <Button
                 size="lg"
+                variant="outline"
                 onClick={handleAddToCart}
                 disabled={addToCart.isPending}
                 className="flex-1"
               >
-                {addToCart.isPending ? "Đang thêm…" : "Thêm vào giỏ"}
+                {addToCart.isPending ? "Đang thêm…" : "Thêm vào giỏ hàng"}
+              </Button>
+              <Button
+                size="lg"
+                onClick={handleBuyNow}
+                disabled={addToCart.isPending}
+                className="flex-1"
+              >
+                {addToCart.isPending ? "Đang chuẩn bị…" : "Mua"}
               </Button>
             </div>
           )}
@@ -237,9 +274,9 @@ export default function ProductDetailPage() {
         </div>
       </div>
 
-      {/* Description */}
-      <div className="mt-6">
-        <h2 className="text-lg font-medium">Mô tả sản phẩm</h2>
+      <div className="mt-6 grid gap-8 lg:grid-cols-2">
+        <div>
+          <h2 className="text-lg font-medium">Mô tả sản phẩm</h2>
         {isHtmlDescription ? (
           <Card className="mt-3">
             <ReadMore fadeFrom="card" className="px-(--card-spacing)">
@@ -258,6 +295,9 @@ export default function ProductDetailPage() {
             </p>
           </ReadMore>
         )}
+        </div>
+
+        <ProductReviews productId={product.id} className="mt-0" />
       </div>
 
       {user === null && (
@@ -276,8 +316,11 @@ export default function ProductDetailPage() {
           <span className="flex-1 text-lg font-semibold text-primary">
             {formatMoney(product.price_amount, product.currency)}
           </span>
-          <Button onClick={handleAddToCart} disabled={addToCart.isPending}>
-            {addToCart.isPending ? "Đang thêm…" : "Thêm vào giỏ"}
+          <Button variant="outline" onClick={handleAddToCart} disabled={addToCart.isPending}>
+            Thêm vào giỏ
+          </Button>
+          <Button onClick={handleBuyNow} disabled={addToCart.isPending}>
+            {addToCart.isPending ? "Đang chuẩn bị…" : "Mua"}
           </Button>
         </div>
       )}

@@ -17,16 +17,20 @@ import { useAuth } from "@/lib/auth-context";
 export function AuditLogPanel({
   targetId,
   fetchLog,
+  paginated = false,
 }: {
   targetId: string;
-  fetchLog: (token: string) => Promise<AuditLogEntry[]>;
+  fetchLog: (token: string, offset?: number) => Promise<AuditLogEntry[]>;
+  paginated?: boolean;
 }) {
   const { callWithAuth } = useAuth();
   const [open, setOpen] = useState(false);
+  const [offset, setOffset] = useState(0);
   const logQuery = useQuery({
-    queryKey: ["audit-log", targetId],
-    queryFn: () => callWithAuth(fetchLog),
+    queryKey: ["audit-log", targetId, offset],
+    queryFn: () => callWithAuth((token) => fetchLog(token, offset)),
     enabled: open,
+    refetchInterval: open ? 10000 : false,
   });
 
   return (
@@ -44,9 +48,7 @@ export function AuditLogPanel({
       {open && (
         <div className="mt-1">
           {logQuery.isPending && <p className="text-xs text-muted-foreground">Loading…</p>}
-          {logQuery.error && (
-            <p className="text-xs text-destructive">Could not load history.</p>
-          )}
+          {logQuery.error && <p className="text-xs text-destructive">Could not load history.</p>}
           {logQuery.data && logQuery.data.length === 0 && (
             <p className="text-xs text-muted-foreground">No history yet.</p>
           )}
@@ -56,15 +58,33 @@ export function AuditLogPanel({
                 <li key={`${entry.created_at}-${i}`} className="text-xs">
                   <span className="font-medium capitalize">{entry.action}</span>{" "}
                   <span className="text-muted-foreground">
-                    by admin {entry.actor_user_id.slice(0, 8)} ·{" "}
+                    by {entry.actor_user_id.slice(0, 8)} ·{" "}
                     {new Date(entry.created_at).toLocaleString()}
                   </span>
-                  {entry.reason && (
-                    <p className="text-muted-foreground">Reason: {entry.reason}</p>
-                  )}
+                  {entry.reason && <p className="text-muted-foreground">Reason: {entry.reason}</p>}
                 </li>
               ))}
             </ul>
+          )}
+          {paginated && (
+            <div className="mt-2 flex gap-2">
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={offset === 0 || logQuery.isFetching}
+                onClick={() => setOffset(Math.max(0, offset - 20))}
+              >
+                Previous
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={logQuery.data?.length !== 20 || logQuery.isFetching}
+                onClick={() => setOffset(offset + 20)}
+              >
+                Next
+              </Button>
+            </div>
           )}
         </div>
       )}

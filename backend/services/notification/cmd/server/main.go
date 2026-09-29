@@ -8,17 +8,18 @@ import (
 	"os"
 
 	"shopee/backend/pkg/authjwt"
+	sessionconfig "shopee/backend/pkg/config"
 	"shopee/backend/pkg/health"
 	"shopee/backend/pkg/logger"
 	"shopee/backend/pkg/platform/natsclient"
 	"shopee/backend/pkg/platform/postgres"
 	"shopee/backend/pkg/platform/redisclient"
 	"shopee/backend/pkg/shutdown"
-
 	"shopee/backend/services/notification/internal/adapter"
 	"shopee/backend/services/notification/internal/config"
 	"shopee/backend/services/notification/internal/repository"
 	"shopee/backend/services/notification/internal/sender/mock"
+	smtpsender "shopee/backend/services/notification/internal/sender/smtp"
 	"shopee/backend/services/notification/internal/transport"
 	"shopee/backend/services/notification/internal/usecase"
 )
@@ -54,7 +55,12 @@ func main() {
 	defer natsConn.Close()
 
 	jwtManager := authjwt.NewManager(cfg.JWTSecret)
-	identityClient := adapter.NewHTTPIdentityClient(cfg.IdentityServiceURL)
+	verifier, err := sessionconfig.LoadSessionVerifier()
+	if err != nil {
+		log.Fatal().Err(err).Msg("session verifier configuration invalid")
+	}
+	jwtManager.SetVerifier(verifier)
+	identityClient := adapter.NewHTTPIdentityClient(cfg.IdentityServiceURL, cfg.IdentityServiceKey)
 	emailSender := mock.New(log)
 
 	notificationRepo := repository.NewNotificationRepository(dbPool)
@@ -74,6 +80,8 @@ func main() {
 		}},
 	)
 
+	resetUseCase := &usecase.PasswordResetUseCase{Source: adapter.ResetSource{URL: cfg.IdentityServiceURL, Key: cfg.ResetDeliveryKey}, Sender: smtpsender.ResetSender{Host: cfg.SMTPHost, Port: cfg.SMTPPort, Username: cfg.SMTPUsername, Password: cfg.SMTPPassword, From: cfg.SMTPFrom, AllowPlaintext: cfg.SMTPAllowPlaintext}}
+	transport.RegisterPasswordReset(router, cfg.ResetDeliveryKey, resetUseCase)
 	srv := &http.Server{
 		Addr:              ":" + cfg.Base.Port,
 		Handler:           router,

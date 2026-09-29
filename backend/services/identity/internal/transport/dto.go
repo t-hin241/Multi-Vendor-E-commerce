@@ -9,7 +9,7 @@ import (
 
 type registerRequest struct {
 	Email    string `json:"email" binding:"required,email"`
-	Password string `json:"password" binding:"required,min=8"`
+	Password string `json:"password" binding:"required,min=8,max=72"`
 	FullName string `json:"full_name" binding:"required"`
 	Role     string `json:"role" binding:"required,oneof=buyer vendor"`
 }
@@ -19,21 +19,13 @@ type loginRequest struct {
 	Password string `json:"password" binding:"required"`
 }
 
-type refreshRequest struct {
-	RefreshToken string `json:"refresh_token" binding:"required"`
-}
-
-type logoutRequest struct {
-	RefreshToken string `json:"refresh_token" binding:"required"`
-}
-
 type passwordResetRequestBody struct {
 	Email string `json:"email" binding:"required,email"`
 }
 
 type passwordResetConfirmBody struct {
 	Token       string `json:"token" binding:"required"`
-	NewPassword string `json:"new_password" binding:"required,min=8"`
+	NewPassword string `json:"new_password" binding:"required,min=8,max=72"`
 }
 
 type userResponse struct {
@@ -47,7 +39,6 @@ type authResponse struct {
 	User                  userResponse `json:"user"`
 	AccessToken           string       `json:"access_token"`
 	AccessTokenExpiresAt  time.Time    `json:"access_token_expires_at"`
-	RefreshToken          string       `json:"refresh_token"`
 	RefreshTokenExpiresAt time.Time    `json:"refresh_token_expires_at"`
 }
 
@@ -55,9 +46,7 @@ func toUserResponse(u *domain.User) userResponse {
 	return userResponse{ID: u.ID, Email: u.Email, FullName: u.FullName, Role: string(u.Role)}
 }
 
-// adminUserResponse is deliberately separate from userResponse (used by
-// /me and auth): admin's user directory needs is_active/created_at, which
-// the self-service response never exposed and shouldn't start exposing.
+// adminUserResponse includes account status and creation time for admin listings.
 type adminUserResponse struct {
 	ID        string    `json:"id"`
 	Email     string    `json:"email"`
@@ -91,7 +80,6 @@ func toAuthResponse(r *usecase.AuthResult) authResponse {
 		User:                  toUserResponse(r.User),
 		AccessToken:           r.AccessToken,
 		AccessTokenExpiresAt:  r.AccessTokenExpiresAt,
-		RefreshToken:          r.RefreshToken,
 		RefreshTokenExpiresAt: r.RefreshTokenExpiresAt,
 	}
 }

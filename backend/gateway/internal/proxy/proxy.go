@@ -23,13 +23,13 @@ func NewReverseProxyHandler(upstreamBaseURL string, log zerolog.Logger) (gin.Han
 		return nil, err
 	}
 
-	rp := httputil.NewSingleHostReverseProxy(target)
-
-	originalDirector := rp.Director
-	rp.Director = func(req *http.Request) {
-		originalDirector(req)
-		req.Host = target.Host
-	}
+	rp := &httputil.ReverseProxy{Rewrite: func(req *httputil.ProxyRequest) {
+		req.SetURL(target)
+		req.Out.Host = target.Host
+		// The Gin handler resolves only explicitly trusted proxy chains. Never
+		// forward caller-supplied X-Forwarded-For as the rate-limit identity.
+		req.Out.Header.Set("X-Forwarded-For", req.In.Header.Get("X-Real-IP"))
+	}}
 
 	rp.ErrorHandler = func(w http.ResponseWriter, r *http.Request, err error) {
 		log.Error().
@@ -43,6 +43,7 @@ func NewReverseProxyHandler(upstreamBaseURL string, log zerolog.Logger) (gin.Han
 	}
 
 	return func(c *gin.Context) {
+		c.Request.Header.Set("X-Real-IP", c.ClientIP())
 		c.Request.Header.Set(middleware.RequestIDHeader, middleware.GetRequestID(c))
 		rp.ServeHTTP(c.Writer, c.Request)
 	}, nil

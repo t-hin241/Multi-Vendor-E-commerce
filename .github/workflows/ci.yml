@@ -27,6 +27,7 @@ jobs:
           - services/shipment
           - services/admin
           - services/notification
+          - services/review
     steps:
       - uses: actions/checkout@v4
 
@@ -61,6 +62,79 @@ jobs:
       - name: go test
         run: go test -race ./...
         working-directory: backend/${{ matrix.module }}
+
+  identity-integration:
+    name: Identity PostgreSQL and Redis integration
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: identity_test
+          POSTGRES_DB: identity_test
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports: ["5432:5432"]
+        options: --health-cmd "pg_isready -U identity_test -d identity_test" --health-interval 5s --health-timeout 3s --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+    env:
+      IDENTITY_TEST_DATABASE_URL: postgres://identity_test@localhost:5432/identity_test?sslmode=disable
+      IDENTITY_TEST_REDIS_URL: redis://localhost:6379/0
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache-dependency-path: backend/services/identity/go.sum
+      - run: go test -race -count=1 ./...
+        working-directory: backend/services/identity
+
+  vendor-integration:
+    name: Vendor transactions and selling permission integration
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: vendor_test
+          POSTGRES_DB: vendor_test
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports: ["5432:5432"]
+        options: --health-cmd "pg_isready -U vendor_test -d vendor_test" --health-interval 5s --health-timeout 3s --health-retries 10
+    env:
+      VENDOR_TEST_DATABASE_URL: postgres://vendor_test@localhost:5432/vendor_test?sslmode=disable
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache-dependency-path: backend/services/vendor/go.sum
+      - run: go test -race -count=1 ./...
+        working-directory: backend/services/vendor
+
+  review-integration:
+    name: Review PostgreSQL integration
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: review_test
+          POSTGRES_DB: review_test
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports: ["5432:5432"]
+        options: --health-cmd "pg_isready -U review_test -d review_test" --health-interval 5s --health-timeout 3s --health-retries 10
+    env:
+      REVIEW_TEST_DATABASE_URL: postgres://review_test@localhost:5432/review_test?sslmode=disable
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache-dependency-path: backend/services/review/go.sum
+      - run: go test -race -count=1 ./...
+        working-directory: backend/services/review
 
   frontend:
     name: Frontend (lint + test + build)

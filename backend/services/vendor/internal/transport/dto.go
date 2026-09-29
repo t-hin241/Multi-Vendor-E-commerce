@@ -22,22 +22,27 @@ type rejectRequest struct {
 }
 
 type vendorResponse struct {
-	ID              string     `json:"id"`
-	UserID          string     `json:"user_id"`
-	ShopName        string     `json:"shop_name"`
-	Description     string     `json:"description"`
-	Status          string     `json:"status"`
-	RejectionReason *string    `json:"rejection_reason,omitempty"`
-	ApprovedAt      *time.Time `json:"approved_at,omitempty"`
-	LogoURL         *string    `json:"logo_url,omitempty"`
-	BannerURL       *string    `json:"banner_url,omitempty"`
-	PolicyText      string     `json:"policy_text"`
-	CreatedAt       time.Time  `json:"created_at"`
-	UpdatedAt       time.Time  `json:"updated_at"`
+	Version            int64      `json:"version"`
+	EnforcedVersion    int64      `json:"enforced_version"`
+	EnforcementPending bool       `json:"enforcement_pending"`
+	SuspensionReason   *string    `json:"suspension_reason,omitempty"`
+	ID                 string     `json:"id"`
+	UserID             string     `json:"user_id"`
+	ShopName           string     `json:"shop_name"`
+	Description        string     `json:"description"`
+	Status             string     `json:"status"`
+	RejectionReason    *string    `json:"rejection_reason,omitempty"`
+	ApprovedAt         *time.Time `json:"approved_at,omitempty"`
+	LogoURL            *string    `json:"logo_url,omitempty"`
+	BannerURL          *string    `json:"banner_url,omitempty"`
+	PolicyText         string     `json:"policy_text"`
+	CreatedAt          time.Time  `json:"created_at"`
+	UpdatedAt          time.Time  `json:"updated_at"`
 }
 
 func toVendorResponse(v *domain.Vendor) vendorResponse {
 	return vendorResponse{
+		Version: v.Version, EnforcedVersion: v.EnforcedVersion, EnforcementPending: v.Version > v.EnforcedVersion, SuspensionReason: v.SuspensionReason,
 		ID:              v.ID,
 		UserID:          v.UserID,
 		ShopName:        v.ShopName,
@@ -81,6 +86,7 @@ func toVendorResponseList(vendors []*domain.Vendor) []vendorResponse {
 }
 
 type auditLogEntryResponse struct {
+	Version     int64     `json:"version"`
 	ActorUserID string    `json:"actor_user_id"`
 	Action      string    `json:"action"`
 	Reason      *string   `json:"reason,omitempty"`
@@ -91,6 +97,7 @@ func toAuditLogEntryResponseList(entries []*domain.AuditLog) []auditLogEntryResp
 	out := make([]auditLogEntryResponse, 0, len(entries))
 	for _, e := range entries {
 		out = append(out, auditLogEntryResponse{
+			Version:     e.Version,
 			ActorUserID: e.ActorUserID, Action: e.Action, Reason: e.Reason, CreatedAt: e.CreatedAt,
 		})
 	}

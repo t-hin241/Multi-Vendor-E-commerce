@@ -7,6 +7,7 @@ import (
 )
 
 type orderItemResponse struct {
+	ID             string  `json:"id"`
 	ProductID      string  `json:"product_id"`
 	ProductName    string  `json:"product_name"`
 	VariantID      *string `json:"variant_id,omitempty"`
@@ -19,6 +20,7 @@ type orderItemResponse struct {
 
 func toOrderItemResponse(i *domain.OrderItem) orderItemResponse {
 	return orderItemResponse{
+		ID:        i.ID,
 		ProductID: i.ProductID, ProductName: i.ProductName,
 		VariantID: i.VariantID, VariantSKU: i.VariantSKU, VariantLabel: i.VariantLabel,
 		PriceAmount: i.PriceAmount, Quantity: i.Quantity, SubtotalAmount: i.SubtotalAmount,

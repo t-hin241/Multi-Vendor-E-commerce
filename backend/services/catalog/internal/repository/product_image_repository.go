@@ -22,7 +22,7 @@ func NewProductImageRepository(pool *pgxpool.Pool) *ProductImageRepository {
 // returns the object keys of whatever was deleted, so the caller can clean
 // up the now-orphaned files in object storage.
 func (r *ProductImageRepository) ReplaceForProduct(ctx context.Context, img *domain.ProductImage) ([]string, error) {
-	tx, err := r.pool.Begin(ctx)
+	tx, err := begin(ctx, r.pool)
 	if err != nil {
 		return nil, err
 	}
@@ -64,7 +64,7 @@ func (r *ProductImageRepository) ReplaceForProduct(ctx context.Context, img *dom
 // DeleteForProduct removes a product's main image entirely, with no
 // replacement — the delete half of ReplaceForProduct, on its own.
 func (r *ProductImageRepository) DeleteForProduct(ctx context.Context, productID string) ([]string, error) {
-	rows, err := r.pool.Query(ctx, `DELETE FROM product_images WHERE product_id = $1 RETURNING object_key`, productID)
+	rows, err := connection(ctx, r.pool).Query(ctx, `DELETE FROM product_images WHERE product_id = $1 RETURNING object_key`, productID)
 	if err != nil {
 		return nil, err
 	}
@@ -89,7 +89,7 @@ func (r *ProductImageRepository) ListForProducts(ctx context.Context, productIDs
 		return map[string]*domain.ProductImage{}, nil
 	}
 	const query = `SELECT id, product_id, object_key, url, position, created_at FROM product_images WHERE product_id = ANY($1)`
-	rows, err := r.pool.Query(ctx, query, productIDs)
+	rows, err := connection(ctx, r.pool).Query(ctx, query, productIDs)
 	if err != nil {
 		return nil, err
 	}
@@ -108,7 +108,7 @@ func (r *ProductImageRepository) ListForProducts(ctx context.Context, productIDs
 
 func (r *ProductImageRepository) ListForProduct(ctx context.Context, productID string) ([]*domain.ProductImage, error) {
 	const query = `SELECT id, product_id, object_key, url, position, created_at FROM product_images WHERE product_id = $1 ORDER BY position ASC`
-	rows, err := r.pool.Query(ctx, query, productID)
+	rows, err := connection(ctx, r.pool).Query(ctx, query, productID)
 	if err != nil {
 		return nil, err
 	}

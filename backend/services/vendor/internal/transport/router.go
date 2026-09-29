@@ -10,6 +10,7 @@ import (
 	"shopee/backend/pkg/authjwt"
 	"shopee/backend/pkg/health"
 	"shopee/backend/pkg/middleware"
+	"shopee/backend/pkg/serviceauth"
 )
 
 func NewRouter(
@@ -20,6 +21,7 @@ func NewRouter(
 	addressHandler *VendorAddressHandler,
 	adminHandler *AdminHandler,
 	internalHandler *InternalHandler,
+	internalKey string,
 	checkers ...health.Checker,
 ) *gin.Engine {
 	if env == "production" {
@@ -30,6 +32,7 @@ func NewRouter(
 	r.Use(middleware.RequestID())
 	r.Use(middleware.StructuredLogging(log))
 	r.Use(middleware.Recovery(log))
+	r.Use(requestBounds())
 
 	health.RegisterRoutes(r, checkers...)
 
@@ -44,6 +47,7 @@ func NewRouter(
 		vendorGroup.GET("/mine", middleware.RequireRole("vendor"), vendorHandler.Mine)
 		vendorGroup.GET("/:vendorId", middleware.RequireRole("vendor"), vendorHandler.Get)
 		vendorGroup.PATCH("/:vendorId", middleware.RequireRole("vendor"), vendorHandler.UpdateProfile)
+		vendorGroup.POST("/:vendorId/resubmit", middleware.RequireRole("vendor"), vendorHandler.Resubmit)
 		vendorGroup.POST("/:vendorId/logo", middleware.RequireRole("vendor"), vendorHandler.UploadLogo)
 		vendorGroup.POST("/:vendorId/banner", middleware.RequireRole("vendor"), vendorHandler.UploadBanner)
 
@@ -55,8 +59,12 @@ func NewRouter(
 
 		adminGroup := vendorGroup.Group("/admin", middleware.RequireRole("admin"))
 		{
+			adminGroup.GET("/operations", adminHandler.Operations)
 			adminGroup.GET("/applications", adminHandler.ListApplications)
 			adminGroup.GET("/applications/:id/audit-log", adminHandler.GetAuditLog)
+			adminGroup.PATCH("/applications/:id/suspend", adminHandler.Suspend)
+			adminGroup.PATCH("/applications/:id/restore", adminHandler.Restore)
+			adminGroup.POST("/applications/:id/replay", adminHandler.Replay)
 			adminGroup.PATCH("/applications/:id/approve", adminHandler.Approve)
 			adminGroup.PATCH("/applications/:id/reject", adminHandler.Reject)
 		}
@@ -69,9 +77,10 @@ func NewRouter(
 	// router already relies on working correctly.
 	r.GET("/api/vendor/public/:vendorId", vendorHandler.GetPublic)
 
-	internalGroup := r.Group("/internal/vendors")
+	internalGroup := r.Group("/internal/vendors", serviceauth.Require(internalKey, serviceauth.Header))
 	{
 		internalGroup.GET("", internalHandler.ListByIDs)
+		internalGroup.GET("/sale-status", internalHandler.SaleStatus)
 		internalGroup.GET("/:vendorId/owned-by/:userID", internalHandler.GetOwnedStatus)
 	}
 
