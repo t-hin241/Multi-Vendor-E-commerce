@@ -12,7 +12,7 @@ import (
 	"shopee/backend/pkg/health"
 	"shopee/backend/pkg/identityclient"
 	"shopee/backend/pkg/logger"
- "shopee/backend/pkg/middleware"
+	"shopee/backend/pkg/middleware"
 	"shopee/backend/pkg/platform/natsclient"
 	"shopee/backend/pkg/platform/objectstorage"
 	"shopee/backend/pkg/platform/postgres"
@@ -90,8 +90,8 @@ func main() {
 	productVariantRepo := repository.NewProductVariantRepository(dbPool)
 	productPackagingRepo := repository.NewProductPackagingRepository(dbPool)
 
-	categoryUseCase := usecase.NewCategoryUseCase(categoryRepo)
-	attributeUseCase := usecase.NewAttributeUseCase(attributeRepo, categoryAttributeRuleRepo, categoryRepo)
+	categoryUseCase := usecase.NewCategoryUseCase(categoryRepo, identityclient.Client{URL: internalServices.IdentityURL, Key: internalServices.Key})
+	attributeUseCase := usecase.NewAttributeUseCase(attributeRepo, categoryAttributeRuleRepo, categoryRepo, identityclient.Client{URL: internalServices.IdentityURL, Key: internalServices.Key})
 	productUseCase := usecase.NewProductUseCase(
 		productRepo, imageRepo, mediaRepo, categoryRepo, auditLogRepo, vendorClient, objectStore,
 		vendorClient, orderClient, storefrontCacheRepo, attributeUseCase, productAttributeValueRepo, productVariantRepo,
@@ -118,14 +118,14 @@ func main() {
 		}},
 	)
 
-	maintenance:=transport.MaintenanceHandler{Service:usecase.Maintenance{Repository:repository.Maintenance{Pool:dbPool},Identity:identityclient.Client{URL:internalServices.IdentityURL,Key:internalServices.Key}},Log:log}
- router.GET("/api/catalog/operations",middleware.RequireAuth(jwtManager),middleware.RequireRole("admin"),maintenance.Stats)
- router.POST("/api/catalog/operations/replay",middleware.RequireAuth(jwtManager),middleware.RequireRole("admin"),maintenance.Replay)
- salesStore := vendorsales.Store{Pool: dbPool}
+	maintenance := transport.MaintenanceHandler{Service: usecase.Maintenance{Repository: repository.Maintenance{Pool: dbPool}, Identity: identityclient.Client{URL: internalServices.IdentityURL, Key: internalServices.Key}}, Log: log}
+	router.GET("/api/catalog/operations", middleware.RequireAuth(jwtManager), middleware.RequireRole("admin"), maintenance.Stats)
+	router.POST("/api/catalog/operations/replay", middleware.RequireAuth(jwtManager), middleware.RequireRole("admin"), maintenance.Replay)
+	salesStore := vendorsales.Store{Pool: dbPool}
 	router.POST("/internal/vendor-status", serviceauth.Require(internalServices.Key, serviceauth.Header), salesStore.Handler(log))
 	reconcileCtx, stopReconcile := context.WithCancel(ctx)
 	defer stopReconcile()
- go productUseCase.ReconcileCache(reconcileCtx,storefrontCacheRepo)
+	go productUseCase.ReconcileCache(reconcileCtx, storefrontCacheRepo)
 	go (repository.ObjectCleanup{Pool: dbPool}).Run(reconcileCtx, objectStore, log)
 	go (repository.StatusOutbox{Pool: dbPool, Publish: (adapter.ProductStatusPublisher{URL: cfg.OrderServiceURL, Key: internalServices.Key}).Publish}).Run(reconcileCtx, log)
 	go (vendorsales.Client{URL: cfg.VendorServiceURL, Key: internalServices.Key}).Reconcile(reconcileCtx, salesStore, log)

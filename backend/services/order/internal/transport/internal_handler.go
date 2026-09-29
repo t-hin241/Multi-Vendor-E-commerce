@@ -1,7 +1,9 @@
 package transport
 
 import (
+	"github.com/google/uuid"
 	"net/http"
+	"shopee/backend/pkg/apperror"
 	"strings"
 	"time"
 
@@ -124,6 +126,17 @@ func (h *InternalHandler) QuantitySoldByProductIDs(c *gin.Context) {
 	for _, id := range strings.Split(c.Query("product_ids"), ",") {
 		if trimmed := strings.TrimSpace(id); trimmed != "" {
 			productIDs = append(productIDs, trimmed)
+		}
+	}
+
+	if len(productIDs) > 100 {
+		httpresponse.HandleError(c, h.log, apperror.Validation("Maximum 100 IDs"))
+		return
+	}
+	for _, id := range productIDs {
+		if _, err := uuid.Parse(id); err != nil {
+			httpresponse.HandleError(c, h.log, apperror.Validation("Invalid ID"))
+			return
 		}
 	}
 

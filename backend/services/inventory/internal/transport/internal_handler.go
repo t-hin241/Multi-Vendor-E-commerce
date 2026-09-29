@@ -1,7 +1,9 @@
 package transport
 
 import (
+	"github.com/google/uuid"
 	"net/http"
+	"shopee/backend/pkg/apperror"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -59,6 +61,17 @@ func (h *InternalHandler) GetVariantStock(c *gin.Context) {
 		}
 	}
 
+	if len(variantIDs) > 100 {
+		httpresponse.HandleError(c, h.log, apperror.Validation("Maximum 100 IDs"))
+		return
+	}
+	for _, id := range variantIDs {
+		if _, err := uuid.Parse(id); err != nil {
+			httpresponse.HandleError(c, h.log, apperror.Validation("Invalid ID"))
+			return
+		}
+	}
+
 	stock, err := h.inventory.GetStockForVariants(c.Request.Context(), variantIDs)
 	if err != nil {
 		httpresponse.HandleError(c, h.log, err)
@@ -73,10 +86,18 @@ func (h *InternalHandler) GetVariantStock(c *gin.Context) {
 // needs every listed variant stocked.
 func (h *InternalHandler) CheckStockReadiness(c *gin.Context) {
 	raw := strings.Split(c.Query("variant_ids"), ",")
+	if len(raw) > 100 {
+		httpresponse.Error(c, http.StatusBadRequest, "validation_error", "At most 100 variants are allowed")
+		return
+	}
 	variantIDs := make([]string, 0, len(raw))
 	for _, id := range raw {
 		id = strings.TrimSpace(id)
 		if id != "" {
+			if _, err := uuid.Parse(id); err != nil {
+				httpresponse.Error(c, http.StatusBadRequest, "validation_error", "Invalid variant ID")
+				return
+			}
 			variantIDs = append(variantIDs, id)
 		}
 	}

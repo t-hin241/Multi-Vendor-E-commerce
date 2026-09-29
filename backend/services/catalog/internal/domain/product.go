@@ -42,11 +42,7 @@ func (p *Product) IsPubliclyVisible() bool {
 	return p.Status == StatusApproved && p.IsActive
 }
 
-// CanTransition enforces the product lifecycle: a vendor submits a complete
-// draft for review (checked by the caller, not here — see
-// ProductUseCase.SubmitForReview), and only a pending_review product can be
-// decided by admin. Like Vendor's own application review, a decision is
-// terminal — no re-review path exists.
+// CanTransition allows draft/rejected submission and admin decisions on pending products.
 func CanTransition(from, to Status) bool {
 	switch from {
 	case StatusDraft, StatusRejected:

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"github.com/rs/zerolog"
 	"shopee/backend/pkg/apperror"
+	"shopee/backend/pkg/middleware"
 )
 
 type Transactions interface {
@@ -35,6 +36,6 @@ func (uc *ProductUseCase) transact(ctx context.Context, fn func(context.Context)
 
 func (uc *ProductUseCase) observe(ctx context.Context, operation string, err error) {
 	if err != nil {
-		uc.ops.Log.Warn().Err(err).Str("operation", operation).Msg("catalog_dependency_degraded")
+		uc.ops.Log.Warn().Err(err).Str("request_id", middleware.RequestIDFromContext(ctx)).Str("operation", operation).Msg("catalog_dependency_degraded")
 	}
 }

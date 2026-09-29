@@ -15,16 +15,20 @@ import (
 // its own use case rather than folded into ProductUseCase, mirroring
 // CategoryUseCase already being split out for the same reason.
 type AttributeUseCase struct {
+	identity   RoleVerifier
 	attributes AttributeRepositoryPort
 	rules      CategoryAttributeRuleRepositoryPort
 	categories CategoryRepositoryPort
 }
 
-func NewAttributeUseCase(attributes AttributeRepositoryPort, rules CategoryAttributeRuleRepositoryPort, categories CategoryRepositoryPort) *AttributeUseCase {
-	return &AttributeUseCase{attributes: attributes, rules: rules, categories: categories}
+func NewAttributeUseCase(attributes AttributeRepositoryPort, rules CategoryAttributeRuleRepositoryPort, categories CategoryRepositoryPort, identity RoleVerifier) *AttributeUseCase {
+	return &AttributeUseCase{identity: identity, attributes: attributes, rules: rules, categories: categories}
 }
 
-func (uc *AttributeUseCase) CreateAttribute(ctx context.Context, code, name string, dataType domain.DataType, unit *string, isVariantDefining bool) (*domain.Attribute, error) {
+func (uc *AttributeUseCase) CreateAttribute(ctx context.Context, actorUserID, code, name string, dataType domain.DataType, unit *string, isVariantDefining bool) (*domain.Attribute, error) {
+	if err := uc.identity.RequireRole(ctx, actorUserID, "admin"); err != nil {
+		return nil, err
+	}
 	if err := domain.ValidateAttributeCode(code); err != nil {
 		return nil, err
 	}
@@ -74,7 +78,10 @@ func (uc *AttributeUseCase) ListWithOptions(ctx context.Context) ([]*domain.Attr
 	return attributes, options, nil
 }
 
-func (uc *AttributeUseCase) AddOption(ctx context.Context, attributeID, value string) (*domain.AttributeOption, error) {
+func (uc *AttributeUseCase) AddOption(ctx context.Context, actorUserID, attributeID, value string) (*domain.AttributeOption, error) {
+	if err := uc.identity.RequireRole(ctx, actorUserID, "admin"); err != nil {
+		return nil, err
+	}
 	if err := domain.ValidateAttributeOptionValue(value); err != nil {
 		return nil, err
 	}
@@ -109,6 +116,9 @@ func (uc *AttributeUseCase) AddOption(ctx context.Context, attributeID, value st
 // pair — never updates or deletes an existing row, so any product that
 // already captured a value against an earlier version keeps its snapshot.
 func (uc *AttributeUseCase) SetCategoryRule(ctx context.Context, categoryID, attributeID string, isRequired, isExcluded bool, position int, actorUserID string) (*domain.CategoryAttributeRule, error) {
+	if err := uc.identity.RequireRole(ctx, actorUserID, "admin"); err != nil {
+		return nil, err
+	}
 	if _, err := uc.categories.FindByID(ctx, categoryID); err != nil {
 		if errors.Is(err, repository.ErrCategoryNotFound) {
 			return nil, apperror.Validation("Category does not exist")

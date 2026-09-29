@@ -76,7 +76,7 @@ func (h *ProductHandler) SetActive(c *gin.Context) {
 		return
 	}
 
-	p, err := h.products.SetActive(c.Request.Context(), middleware.GetUserID(c), c.Param("id"), req.IsActive)
+	p, err := h.products.SetActive(c.Request.Context(), middleware.GetUserID(c), c.Param("id"), *req.IsActive)
 	if err != nil {
 		httpresponse.HandleError(c, h.log, err)
 		return

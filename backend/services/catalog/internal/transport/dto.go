@@ -34,12 +34,12 @@ func toCategoryResponseList(categories []*domain.Category) []categoryResponse {
 }
 
 type createProductRequest struct {
-	VendorID    string                  `json:"vendor_id" binding:"required"`
-	CategoryID  string                  `json:"category_id" binding:"required"`
+	VendorID    string                  `json:"vendor_id" binding:"required,uuid"`
+	CategoryID  string                  `json:"category_id" binding:"required,uuid"`
 	Name        string                  `json:"name" binding:"required"`
 	Description string                  `json:"description"`
 	PriceAmount int64                   `json:"price_amount" binding:"required"`
-	Attributes  []attributeValueRequest `json:"attributes"`
+	Attributes  []attributeValueRequest `json:"attributes" binding:"max=100,dive"`
 }
 
 // attributeValueRequest is one submitted attribute value: Value carries a
@@ -47,7 +47,7 @@ type createProductRequest struct {
 // select (one) / multi_select (one or more) attributes — the same shape
 // buildAttributeValues (usecase.AttributeValueInput) expects.
 type attributeValueRequest struct {
-	AttributeID string   `json:"attribute_id" binding:"required"`
+	AttributeID string   `json:"attribute_id" binding:"required,uuid"`
 	Value       *string  `json:"value"`
 	OptionIDs   []string `json:"option_ids"`
 }
@@ -61,7 +61,7 @@ func toAttributeValueInputs(reqs []attributeValueRequest) []usecase.AttributeVal
 }
 
 type setActiveRequest struct {
-	IsActive bool `json:"is_active"`
+	IsActive *bool `json:"is_active" binding:"required"`
 }
 
 type rejectRequest struct {
@@ -279,7 +279,7 @@ type addAttributeOptionRequest struct {
 }
 
 type setCategoryAttributeRuleRequest struct {
-	AttributeID string `json:"attribute_id" binding:"required"`
+	AttributeID string `json:"attribute_id" binding:"required,uuid"`
 	IsRequired  bool   `json:"is_required"`
 	IsExcluded  bool   `json:"is_excluded"`
 	Position    int    `json:"position"`

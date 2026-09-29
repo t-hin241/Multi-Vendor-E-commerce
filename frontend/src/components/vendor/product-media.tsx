@@ -61,6 +61,7 @@ export function ProductImageEditor({ productId }: { productId: string }) {
     setIsBusy(true);
     try {
       await callWithAuth((token) => api.uploadProductImage(token, productId, picked));
+      await queryClient.invalidateQueries({ queryKey: ["vendor-products"] });
       await queryClient.invalidateQueries({ queryKey: ["product-image", productId] });
     } catch (err) {
       setError(err instanceof api.ApiError ? err.message : "Không thể tải ảnh lên.");
@@ -74,6 +75,7 @@ export function ProductImageEditor({ productId }: { productId: string }) {
     setIsBusy(true);
     try {
       await callWithAuth((token) => api.deleteProductImage(token, productId));
+      await queryClient.invalidateQueries({ queryKey: ["vendor-products"] });
       await queryClient.invalidateQueries({ queryKey: ["product-image", productId] });
     } catch (err) {
       setError(err instanceof api.ApiError ? err.message : "Không thể xóa ảnh.");
@@ -102,7 +104,7 @@ export function ProductImageEditor({ productId }: { productId: string }) {
         <label className="text-sm">
           <input
             type="file"
-            accept="image/*"
+            accept="image/jpeg,image/png,image/webp"
             className="hidden"
             onChange={handleSelect}
             disabled={isBusy}
@@ -153,10 +155,7 @@ export function ProductMediaUploader({ productId }: { productId: string }) {
     setIsSaving(true);
     setError(null);
     try {
-      // Sequential, not Promise.all: each upload's position comes from a
-      // count-then-insert check on the backend (see UploadMedia), so
-      // concurrent requests could race past the 5-item cap. Awaiting one
-      // at a time avoids that and keeps upload order predictable.
+      // Upload in selection order.
       for (const item of items) {
         await callWithAuth((token) => api.uploadProductMedia(token, productId, item.file));
         URL.revokeObjectURL(item.previewUrl);
@@ -165,6 +164,7 @@ export function ProductMediaUploader({ productId }: { productId: string }) {
     } catch (err) {
       setError(err instanceof api.ApiError ? err.message : "Không thể tải media lên.");
     } finally {
+      await queryClient.invalidateQueries({ queryKey: ["vendor-products"] });
       await queryClient.invalidateQueries({ queryKey: ["product-media", productId] });
       setIsSaving(false);
     }

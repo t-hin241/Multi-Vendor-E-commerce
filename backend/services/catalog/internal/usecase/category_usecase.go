@@ -13,14 +13,18 @@ import (
 )
 
 type CategoryUseCase struct {
+	identity   RoleVerifier
 	categories CategoryRepositoryPort
 }
 
-func NewCategoryUseCase(categories CategoryRepositoryPort) *CategoryUseCase {
-	return &CategoryUseCase{categories: categories}
+func NewCategoryUseCase(categories CategoryRepositoryPort, identity RoleVerifier) *CategoryUseCase {
+	return &CategoryUseCase{categories: categories, identity: identity}
 }
 
-func (uc *CategoryUseCase) Create(ctx context.Context, name string, parentID *string) (*domain.Category, error) {
+func (uc *CategoryUseCase) Create(ctx context.Context, actorUserID, name string, parentID *string) (*domain.Category, error) {
+	if err := uc.identity.RequireRole(ctx, actorUserID, "admin"); err != nil {
+		return nil, err
+	}
 	if err := domain.ValidateCategoryName(name); err != nil {
 		return nil, err
 	}

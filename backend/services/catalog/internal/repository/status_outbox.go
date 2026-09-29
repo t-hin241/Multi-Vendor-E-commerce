@@ -2,12 +2,15 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rs/zerolog"
 	"shopee/backend/pkg/productsales"
 	"time"
 )
+
+var ErrNoProductStatus = errors.New("no due product status")
 
 type StatusOutbox struct {
 	Pool    *pgxpool.Pool
@@ -16,6 +19,8 @@ type StatusOutbox struct {
 
 // Backfill resumes from products whose current version has not yet been acknowledged.
 func (r StatusOutbox) Backfill(ctx context.Context) error {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
 	_, err := r.Pool.Exec(ctx, `INSERT INTO product_status_outbox(product_id)
  SELECT p.id FROM products p WHERE p.enforced_version<p.version AND NOT EXISTS(SELECT 1 FROM product_status_outbox o WHERE o.product_id=p.id)
  ORDER BY p.id LIMIT 100 ON CONFLICT DO NOTHING`)
@@ -28,7 +33,7 @@ func (r StatusOutbox) Dispatch(ctx context.Context) error {
 		err := q.QueryRow(ctx, `SELECT p.id,p.version,p.status='approved' AND p.is_active FROM products p JOIN product_status_outbox o ON o.product_id=p.id
   WHERE o.next_attempt_at<=now() AND o.attempts<10 ORDER BY o.next_attempt_at,p.id LIMIT 1 FOR UPDATE OF p,o SKIP LOCKED`).Scan(&v.ProductID, &v.Version, &v.Visible)
 		if err == pgx.ErrNoRows {
-			return nil
+			return ErrNoProductStatus
 		}
 		if err != nil {
 			return err
@@ -54,6 +59,9 @@ func (r StatusOutbox) Run(ctx context.Context, log zerolog.Logger) {
 		}
 		for i := 0; i < 100 && ctx.Err() == nil; i++ {
 			if err := r.Dispatch(ctx); err != nil {
+				if errors.Is(err, ErrNoProductStatus) {
+					break
+				}
 				log.Error().Err(err).Msg("catalog_status_dispatch_failed")
 				break
 			}

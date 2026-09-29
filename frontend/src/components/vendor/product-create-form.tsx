@@ -33,7 +33,7 @@ function FieldGroup({ title, children }: { title: string; children: React.ReactN
 // of fields, their data types and whether they're required all come from
 // the category's attribute template, resolved server-side from its
 // inheritance chain.
-function AttributeField({
+export function AttributeField({
   field,
   value,
   onChange,
@@ -52,7 +52,11 @@ function AttributeField({
         {field.unit ? ` (${field.unit})` : ""}
       </span>
       {field.data_type === "text" && (
-        <Input value={(value as string) ?? ""} onChange={(e) => onChange(e.target.value)} required={field.required} />
+        <Input
+          value={(value as string) ?? ""}
+          onChange={(e) => onChange(e.target.value)}
+          required={field.required}
+        />
       )}
       {field.data_type === "number" && (
         <Input
@@ -64,7 +68,10 @@ function AttributeField({
         />
       )}
       {field.data_type === "boolean" && (
-        <Checkbox checked={value === "true"} onCheckedChange={(c) => onChange(c === true ? "true" : "")} />
+        <Checkbox
+          checked={value === "true"}
+          onCheckedChange={(c) => onChange(c === true ? "true" : "false")}
+        />
       )}
       {field.data_type === "select" && (
         <Select value={(value as string) ?? ""} onValueChange={onChange}>
@@ -123,7 +130,9 @@ export function ProductCreateForm({
   const [attrValues, setAttrValues] = useState<Record<string, string | string[]>>({});
 
   const mains = categories.filter((c) => c.level === 1);
-  const midOptions = mainId ? categories.filter((c) => c.level === 2 && c.parent_id === mainId) : [];
+  const midOptions = mainId
+    ? categories.filter((c) => c.level === 2 && c.parent_id === mainId)
+    : [];
   const subOptions = midId ? categories.filter((c) => c.level === 3 && c.parent_id === midId) : [];
   const categoryId = subId || midId || mainId;
 
@@ -132,7 +141,9 @@ export function ProductCreateForm({
     queryFn: () => api.getAttributeTemplate(categoryId),
     enabled: !!categoryId,
   });
-  const templateFields = templateQuery.data?.attributes ?? [];
+  const templateFields = (templateQuery.data?.attributes ?? []).filter(
+    (field) => !field.is_variant_defining,
+  );
 
   function setAttrValue(attributeId: string, value: string | string[]) {
     setAttrValues((prev) => ({ ...prev, [attributeId]: value }));
@@ -171,8 +182,10 @@ export function ProductCreateForm({
     const attributes = templateFields
       .map((field) => {
         const val = attrValues[field.attribute_id];
-        if (val === undefined || val === "" || (Array.isArray(val) && val.length === 0)) return null;
-        if (field.data_type === "select") return { attributeId: field.attribute_id, optionIds: [val as string] };
+        if (val === undefined || val === "" || (Array.isArray(val) && val.length === 0))
+          return null;
+        if (field.data_type === "select")
+          return { attributeId: field.attribute_id, optionIds: [val as string] };
         if (field.data_type === "multi_select")
           return { attributeId: field.attribute_id, optionIds: val as string[] };
         return { attributeId: field.attribute_id, value: val as string };
@@ -182,7 +195,14 @@ export function ProductCreateForm({
     setIsCreating(true);
     try {
       const created = await callWithAuth((token) =>
-        api.createProduct(token, { vendorId, categoryId, name, description, priceAmount, attributes }),
+        api.createProduct(token, {
+          vendorId,
+          categoryId,
+          name,
+          description,
+          priceAmount,
+          attributes,
+        }),
       );
       formEl.reset();
       setMainId("");

@@ -65,6 +65,20 @@ func mustAppError(t *testing.T, err error) *apperror.Error {
 
 const testToken = "buyer-1-token"
 
+func TestCheckout_RejectsMixedProductVersions(t *testing.T) {
+	f := newCheckoutFixture()
+	f.cart.byToken[testToken] = []adapter.CartLine{{ProductID: "p1", Quantity: 1}, {ProductID: "p1", Quantity: 2}}
+	var version int64
+	f.catalog.getProduct = func(id string) (*adapter.ProductInfo, error) {
+		version++
+		return &adapter.ProductInfo{ID: id, VendorID: "v1", Name: "Shoe", PriceAmount: 1000 * version, Currency: "VND", IsVisible: true, Version: version}, nil
+	}
+	_, err := f.uc.Checkout(t.Context(), "buyer-1", testToken, f.addressID)
+	if mustAppError(t, err).Code != apperror.CodeConflict {
+		t.Fatalf("mixed pricing versions accepted: %v", err)
+	}
+}
+
 func TestCheckout_RejectsEmptyCart(t *testing.T) {
 	f := newCheckoutFixture()
 

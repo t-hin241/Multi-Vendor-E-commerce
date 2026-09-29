@@ -2,7 +2,9 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rs/zerolog"
 	"strings"
@@ -62,7 +64,14 @@ func (r ObjectCleanup) Sweep(ctx context.Context, store ObjectDeleter) error {
 			q := connection(ctx, r.Pool)
 			// Writers lock the same product before attaching media, preventing deletion during an attachment.
 			var id string
-			if err := q.QueryRow(ctx, `SELECT id FROM products WHERE id=$1 FOR UPDATE`, item.product).Scan(&id); err != nil {
+			if err := q.QueryRow(ctx, `SELECT id FROM products WHERE id=$1 FOR NO KEY UPDATE`, item.product).Scan(&id); err != nil {
+				return err
+			}
+			var key string
+			if err := q.QueryRow(ctx, `SELECT object_key FROM catalog_object_cleanup WHERE object_key=$1 AND next_attempt_at<=now() AND attempts<10 FOR UPDATE`, item.key).Scan(&key); err != nil {
+				if errors.Is(err, pgx.ErrNoRows) {
+					return nil
+				}
 				return err
 			}
 			var referenced bool

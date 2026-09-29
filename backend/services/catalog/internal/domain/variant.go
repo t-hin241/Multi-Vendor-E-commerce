@@ -47,8 +47,8 @@ type VariantView struct {
 }
 
 func ValidateSKU(sku string) error {
-	if strings.TrimSpace(sku) == "" {
-		return apperror.Validation("SKU is required")
+	if strings.TrimSpace(sku) == "" || len(sku) > 100 {
+		return apperror.Validation("SKU is required and must not exceed 100 bytes")
 	}
 	return nil
 }

@@ -136,6 +136,9 @@ func (uc *OrderUseCase) Checkout(ctx context.Context, buyerID, bearerToken, addr
 			return nil, apperror.Validation("\"" + product.Name + "\" requires selecting an option; please update your cart")
 		}
 
+		if previous, exists := productVersions[product.ID]; exists && previous != product.Version {
+			return nil, apperror.Conflict("A product changed during checkout; please retry")
+		}
 		productVersions[product.ID] = product.Version
 		checkoutLine := domain.CheckoutLine{
 			ProductID:   product.ID,

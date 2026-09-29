@@ -1,4 +1,6 @@
 ALTER TABLE product_variants DROP CONSTRAINT variant_sku_nonempty;
+ALTER TABLE product_audit_logs DROP CONSTRAINT product_audit_logs_action_check;
+ALTER TABLE product_audit_logs ADD CONSTRAINT product_audit_logs_action_check CHECK(action IN ('approved','rejected')) NOT VALID;
 ALTER TABLE product_attribute_values DROP CONSTRAINT value_exactly_one;
 ALTER TABLE product_attribute_values DROP CONSTRAINT value_option_attribute_fk;
 ALTER TABLE product_variant_options DROP CONSTRAINT variant_option_attribute_fk;

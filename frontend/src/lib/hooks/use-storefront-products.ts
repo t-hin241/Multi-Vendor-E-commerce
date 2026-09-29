@@ -13,16 +13,25 @@ export const STOREFRONT_PAGE_SIZE = 20;
 export function useStorefrontProducts(
   page: number,
   categoryId?: string,
-  options: { enabled?: boolean; q?: string; vendorId?: string } = {},
+  options: {
+    enabled?: boolean;
+    q?: string;
+    vendorId?: string;
+    sort?: "newest" | "price_asc" | "price_desc";
+  } = {},
 ) {
-  const { enabled, q, vendorId } = options;
+  const { enabled, q, vendorId, sort } = options;
   return useQuery({
-    queryKey: queryKeys.storefrontProducts(categoryId ?? null, page, q, vendorId),
+    queryKey: [
+      ...queryKeys.storefrontProducts(categoryId ?? null, page, q, vendorId),
+      sort ?? "newest",
+    ],
     queryFn: () =>
       api.listStorefrontProducts({
         categoryId,
         vendorId,
         q,
+        sort,
         limit: STOREFRONT_PAGE_SIZE,
         offset: (page - 1) * STOREFRONT_PAGE_SIZE,
       }),

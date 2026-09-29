@@ -10,9 +10,7 @@ import (
 	"shopee/backend/services/catalog/internal/usecase"
 )
 
-// InternalHandler serves service-to-service lookups. Like Vendor's
-// equivalent, it is not proxied by the gateway's public route table, so it
-// is reachable only from inside the compose network in this MVP topology.
+// InternalHandler serves authenticated service-to-service product lookups.
 type InternalHandler struct {
 	products *usecase.ProductUseCase
 	log      zerolog.Logger

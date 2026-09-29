@@ -13,6 +13,7 @@ import {
   ProductMediaGallery,
   ProductMediaUploader,
 } from "@/components/vendor/product-media";
+import { ProductContentEditor } from "@/components/vendor/product-content-editor";
 import { ProductStockManager } from "@/components/vendor/product-stock";
 import { ProductStatusBadge } from "@/components/vendor/status-badges";
 import * as api from "@/lib/api-client";
@@ -76,7 +77,7 @@ export function ProductRow({
             Đang bán
           </Label>
 
-          {product.status === "draft" && (
+          {(product.status === "draft" || product.status === "rejected") && (
             <Button
               type="button"
               size="sm"
@@ -89,6 +90,15 @@ export function ProductRow({
         </div>
 
         <Separator className="my-4" />
+        {product.selling_sync_pending && (
+          <p role="status" className="mb-3 text-sm text-muted-foreground">
+            Đang đồng bộ thay đổi bán hàng…
+          </p>
+        )}
+        <ProductContentEditor product={product} />
+        <p className="my-3 text-sm text-muted-foreground">
+          Đổi ảnh, media hoặc biến thể sẽ đưa sản phẩm về nháp để duyệt lại.
+        </p>
 
         <div className="flex flex-wrap items-start gap-4">
           <ProductImageEditor productId={product.id} />
@@ -98,7 +108,11 @@ export function ProductRow({
           <ProductMediaGallery productId={product.id} />
         </div>
         <div className="mt-3">
-          <ProductStockManager vendorId={vendorId} productId={product.id} categoryId={product.category_id} />
+          <ProductStockManager
+            vendorId={vendorId}
+            productId={product.id}
+            categoryId={product.category_id}
+          />
         </div>
       </CardContent>
     </Card>
