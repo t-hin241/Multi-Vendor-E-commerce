@@ -8,16 +8,20 @@ import (
 	"os"
 
 	"shopee/backend/pkg/authjwt"
+	sessionconfig "shopee/backend/pkg/config"
 	"shopee/backend/pkg/health"
 	"shopee/backend/pkg/logger"
 	"shopee/backend/pkg/platform/natsclient"
 	"shopee/backend/pkg/platform/postgres"
 	"shopee/backend/pkg/platform/redisclient"
+	"shopee/backend/pkg/serviceauth"
 	"shopee/backend/pkg/shutdown"
-
+	"shopee/backend/pkg/vendorreport"
 	"shopee/backend/services/payment/internal/adapter"
 	"shopee/backend/services/payment/internal/config"
+	"shopee/backend/services/payment/internal/provider"
 	"shopee/backend/services/payment/internal/provider/mock"
+	"shopee/backend/services/payment/internal/provider/payos"
 	"shopee/backend/services/payment/internal/repository"
 	"shopee/backend/services/payment/internal/transport"
 	"shopee/backend/services/payment/internal/usecase"
@@ -54,17 +58,28 @@ func main() {
 	defer natsConn.Close()
 
 	jwtManager := authjwt.NewManager(cfg.JWTSecret)
+	sessionVerifier, err := sessionconfig.LoadSessionVerifier()
+	if err != nil {
+		log.Fatal().Err(err).Msg("session verifier configuration invalid")
+	}
+	jwtManager.SetVerifier(sessionVerifier)
 	orderClient := adapter.NewHTTPOrderClient(cfg.OrderServiceURL)
 
-	// PAYMENT_PROVIDER is validated in config.Load, so "mock" is the only
-	// value reaching here today; a real Stripe/PayPal adapter is wired in
-	// the same way once this deployment has real provider credentials.
-	mockProvider := mock.New(cfg.MockWebhookSecret)
+	var paymentProvider provider.Provider
+	var verifier provider.Verifier
+	var simulator usecase.Simulator
+	if cfg.Provider == "payos" {
+		p := payos.New(cfg.PayOSClientID, cfg.PayOSAPIKey, cfg.PayOSChecksumKey, cfg.PayOSBaseURL)
+		paymentProvider, verifier = p, p
+	} else {
+		p := mock.New(cfg.MockWebhookSecret)
+		paymentProvider, verifier, simulator = p, p, p
+	}
 
 	intentRepo := repository.NewPaymentIntentRepository(dbPool)
 	eventRepo := repository.NewPaymentEventRepository(dbPool)
 
-	paymentUseCase := usecase.NewPaymentUseCase(intentRepo, eventRepo, orderClient, mockProvider, mockProvider, mockProvider, cfg.Provider, log)
+	paymentUseCase := usecase.NewPaymentUseCase(intentRepo, eventRepo, orderClient, paymentProvider, verifier, simulator, cfg.Provider, cfg.PayOSReturnURL, cfg.PayOSCancelURL, log)
 	paymentHandler := transport.NewPaymentHandler(paymentUseCase, log)
 	webhookHandler := transport.NewWebhookHandler(paymentUseCase, log)
 
@@ -78,6 +93,12 @@ func main() {
 			return nil
 		}},
 	)
+
+	internalServices, err := sessionconfig.LoadInternalServices()
+	if err != nil {
+		log.Fatal().Msg("internal service configuration invalid")
+	}
+	router.GET("/internal/vendor-reports/:vendorId", serviceauth.Require(internalServices.Key, serviceauth.Header), vendorreport.Handler(vendorreport.Service{Repository: repository.VendorReport{Pool: dbPool}}, log))
 
 	srv := &http.Server{
 		Addr:              ":" + cfg.Base.Port,

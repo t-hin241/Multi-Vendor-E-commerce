@@ -1,28 +1,25 @@
 "use client";
 
-import { createContext, useCallback, useContext, useMemo, useSyncExternalStore } from "react";
-
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useSyncExternalStore,
+} from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
 import * as api from "@/lib/api-client";
+import { refreshOnce, withSessionLock } from "@/lib/session-refresh";
 
-const STORAGE_KEY = "shopee.auth";
-
-type StoredSession = {
-  user: api.User;
-  accessToken: string;
-  refreshToken: string;
-  // The shop a vendor user is currently acting as — a user may own several
-  // (1:N), so every vendor-scoped screen needs to know which one is active.
-  // Stored alongside the session (not a separate localStorage key) so it's
-  // cleared automatically on logout, like everything else here.
-  selectedVendorId?: string;
-};
-
+type Session = { user: api.User; accessToken: string; selectedVendorId?: string };
 type AuthContextValue = {
   user: api.User | null;
   accessToken: string | null;
   isReady: boolean;
   selectedVendorId: string | null;
-  setSelectedVendorId: (vendorId: string | null) => void;
+  setSelectedVendorId: (id: string | null) => void;
   login: (email: string, password: string) => Promise<void>;
   register: (
     email: string,
@@ -30,139 +27,164 @@ type AuthContextValue = {
     fullName: string,
     role: "buyer" | "vendor",
   ) => Promise<void>;
-  logout: () => void;
-  // Calls fn with the current access token; on a 401 it refreshes the
-  // session once (access tokens are short-lived, 15 minutes) and retries,
-  // so a session doesn't die mid-demo just from sitting idle.
+  logout: () => Promise<void>;
   callWithAuth: <T>(fn: (token: string) => Promise<T>) => Promise<T>;
 };
-
 const AuthContext = createContext<AuthContextValue | null>(null);
-
-// The session lives in localStorage, an external store React doesn't own.
-// useSyncExternalStore reads it without a hydration mismatch: the server
-// (and initial client render) sees the "not loaded yet" sentinel via
-// getServerSnapshot, then the real client snapshot takes over once mounted.
 const NOT_LOADED = Symbol("not-loaded");
-let cachedSnapshot: StoredSession | null | typeof NOT_LOADED = NOT_LOADED;
+let current: Session | null | typeof NOT_LOADED = NOT_LOADED;
+let generation = 0;
 const listeners = new Set<() => void>();
-
-function readFromStorage(): StoredSession | null {
-  try {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
-    return raw ? (JSON.parse(raw) as StoredSession) : null;
-  } catch {
-    return null;
-  }
+function subscribe(fn: () => void) {
+  listeners.add(fn);
+  return () => {
+    listeners.delete(fn);
+  };
 }
-
-function getSnapshot(): StoredSession | null | typeof NOT_LOADED {
-  if (cachedSnapshot === NOT_LOADED) {
-    cachedSnapshot = readFromStorage();
-  }
-  return cachedSnapshot;
+function publish(value: Session | null) {
+  current = value;
+  listeners.forEach((fn) => fn());
 }
-
-function getServerSnapshot(): typeof NOT_LOADED {
-  return NOT_LOADED;
-}
-
-function subscribe(listener: () => void): () => void {
-  listeners.add(listener);
-  return () => listeners.delete(listener);
-}
-
-function setStoredSession(next: StoredSession | null) {
-  cachedSnapshot = next;
-  try {
-    if (next) {
-      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
-    } else {
-      window.localStorage.removeItem(STORAGE_KEY);
-    }
-  } catch {
-    // Storage can be unavailable (private browsing, quota); the session
-    // just won't survive a reload, which is an acceptable degradation.
-  }
-  listeners.forEach((listener) => listener());
+function broadcast() {
+  if (typeof BroadcastChannel === "undefined") return;
+  const channel = new BroadcastChannel("shopee-session");
+  channel.postMessage("changed");
+  channel.close();
 }
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const snapshot = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
-  const isReady = snapshot !== NOT_LOADED;
-  const session = isReady ? (snapshot as StoredSession | null) : null;
-
-  const applyResult = useCallback((result: api.AuthResult) => {
-    setStoredSession({
-      user: result.user,
-      accessToken: result.access_token,
-      refreshToken: result.refresh_token,
-    });
-  }, []);
-
-  const login = useCallback(
-    async (email: string, password: string) => {
-      applyResult(await api.login(email, password));
-    },
-    [applyResult],
+  const queryClient = useQueryClient();
+  const snapshot = useSyncExternalStore<Session | null | typeof NOT_LOADED>(
+    subscribe,
+    () => current,
+    () => NOT_LOADED,
   );
-
-  const register = useCallback(
-    async (email: string, password: string, fullName: string, role: "buyer" | "vendor") => {
-      applyResult(await api.register(email, password, fullName, role));
-    },
-    [applyResult],
-  );
-
-  const setSelectedVendorId = useCallback(
-    (vendorId: string | null) => {
-      if (!session) return;
-      setStoredSession({ ...session, selectedVendorId: vendorId ?? undefined });
-    },
-    [session],
-  );
-
-  const logout = useCallback(() => {
-    const refreshToken = session?.refreshToken;
-    setStoredSession(null);
-    if (refreshToken) {
-      api.logout(refreshToken).catch(() => {
-        // Best-effort server-side revocation; the client session is already cleared.
+  const session = snapshot === NOT_LOADED ? null : snapshot;
+  const clearCache = useCallback(() => {
+    void queryClient.cancelQueries();
+    queryClient.clear();
+  }, [queryClient]);
+  const restore = useCallback(async () => {
+    const expected = generation;
+    try {
+      const result = await refreshOnce();
+      if (expected !== generation) return;
+      const previous = current === NOT_LOADED ? null : current;
+      if (previous?.user.id !== result.user.id) clearCache();
+      publish({
+        user: result.user,
+        accessToken: result.access_token,
+        selectedVendorId:
+          previous?.user.id === result.user.id ? previous.selectedVendorId : undefined,
       });
+    } catch (err) {
+      if (expected !== generation) return;
+      if (err instanceof api.ApiError && err.status === 401) {
+        clearCache();
+        publish(null);
+      } else {
+        if (current === NOT_LOADED) publish(null);
+        toast.error("Không thể kiểm tra phiên đăng nhập. Vui lòng thử lại.");
+      }
     }
-  }, [session]);
-
+  }, [clearCache]);
+  useEffect(() => {
+    try {
+      localStorage.removeItem("shopee.auth");
+    } catch {
+      /* Storage may be disabled. */
+    }
+    void restore();
+    const channel =
+      typeof BroadcastChannel === "undefined" ? null : new BroadcastChannel("shopee-session");
+    if (channel)
+      channel.onmessage = () => {
+        generation++;
+        clearCache();
+        publish(null);
+        void restore();
+      };
+    return () => channel?.close();
+  }, [restore, clearCache]);
+  const authenticate = useCallback(
+    async (action: () => Promise<api.AuthResult>) => {
+      await withSessionLock(async () => {
+        const result = await action();
+        generation++;
+        clearCache();
+        publish({ user: result.user, accessToken: result.access_token });
+        broadcast();
+      });
+    },
+    [clearCache],
+  );
+  const login = useCallback(
+    (email: string, password: string) => authenticate(() => api.login(email, password)),
+    [authenticate],
+  );
+  const register = useCallback(
+    (email: string, password: string, fullName: string, role: "buyer" | "vendor") =>
+      authenticate(() => api.register(email, password, fullName, role)),
+    [authenticate],
+  );
+  const logout = useCallback(async () => {
+    await withSessionLock(async () => {
+      try {
+        await api.logout();
+      } catch (err) {
+        if (!(err instanceof api.ApiError && err.status === 401)) throw err;
+      }
+      generation++;
+      clearCache();
+      publish(null);
+      broadcast();
+    });
+  }, [clearCache]);
+  const setSelectedVendorId = useCallback(
+    (id: string | null) => {
+      if (!current || current === NOT_LOADED) return;
+      clearCache();
+      publish({ ...current, selectedVendorId: id ?? undefined });
+    },
+    [clearCache],
+  );
   const callWithAuth = useCallback(
     async <T,>(fn: (token: string) => Promise<T>): Promise<T> => {
-      if (!session) throw new api.ApiError(401, "unauthorized", "You must be signed in.");
+      const before = current;
+      if (!before || before === NOT_LOADED)
+        throw new api.ApiError(401, "unauthorized", "You must be signed in.");
       try {
-        return await fn(session.accessToken);
+        return await fn(before.accessToken);
       } catch (err) {
-        if (err instanceof api.ApiError && err.status === 401) {
-          try {
-            const result = await api.refreshSession(session.refreshToken);
-            applyResult(result);
-            return await fn(result.access_token);
-          } catch (refreshErr) {
-            // The refresh token itself is dead (expired/revoked) — clear the
-            // stale session so the UI falls back to logged-out instead of
-            // staying stuck showing an authenticated shell that can never
-            // successfully call anything again.
-            setStoredSession(null);
-            throw refreshErr;
+        if (!(err instanceof api.ApiError && err.status === 401)) throw err;
+        const expected = generation;
+        let result: api.AuthResult;
+        try {
+          result = await refreshOnce();
+        } catch (refreshError) {
+          if (
+            generation === expected &&
+            refreshError instanceof api.ApiError &&
+            refreshError.status === 401
+          ) {
+            clearCache();
+            publish(null);
           }
+          throw refreshError;
         }
-        throw err;
+        if (generation !== expected || result.user.id !== before.user.id)
+          throw new api.ApiError(401, "session_changed", "Session changed. Please retry.");
+        publish({ ...before, user: result.user, accessToken: result.access_token });
+        return fn(result.access_token);
       }
     },
-    [session, applyResult],
+    [clearCache],
   );
-
   const value = useMemo<AuthContextValue>(
     () => ({
       user: session?.user ?? null,
       accessToken: session?.accessToken ?? null,
-      isReady,
+      isReady: snapshot !== NOT_LOADED,
       selectedVendorId: session?.selectedVendorId ?? null,
       setSelectedVendorId,
       login,
@@ -170,13 +192,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       logout,
       callWithAuth,
     }),
-    [session, isReady, setSelectedVendorId, login, register, logout, callWithAuth],
+    [session, snapshot, setSelectedVendorId, login, register, logout, callWithAuth],
   );
-
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
-
-export function useAuth(): AuthContextValue {
+export function useAuth() {
   const ctx = useContext(AuthContext);
   if (!ctx) throw new Error("useAuth must be used within an AuthProvider");
   return ctx;

@@ -12,15 +12,17 @@ import (
 	"time"
 
 	"shopee/backend/pkg/apperror"
+	"shopee/backend/pkg/serviceauth"
 )
 
 type HTTPVendorClient struct {
 	baseURL string
+	key     string
 	client  *http.Client
 }
 
-func NewHTTPVendorClient(baseURL string) *HTTPVendorClient {
-	return &HTTPVendorClient{baseURL: baseURL, client: &http.Client{Timeout: 5 * time.Second}}
+func NewHTTPVendorClient(baseURL, key string) *HTTPVendorClient {
+	return &HTTPVendorClient{baseURL: baseURL, key: key, client: &http.Client{Timeout: 5 * time.Second}}
 }
 
 type vendorStatusResponse struct {
@@ -41,13 +43,14 @@ func (c *HTTPVendorClient) GetApprovedVendorID(ctx context.Context, userID, vend
 		return "", apperror.Internal(err)
 	}
 
+	serviceauth.SetRequestHeaders(req, c.key)
 	resp, err := c.client.Do(req)
 	if err != nil {
 		return "", apperror.Internal(err)
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode == http.StatusNotFound {
+	if resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusForbidden {
 		return "", apperror.Forbidden("You must have an approved vendor account to manage stock")
 	}
 	if resp.StatusCode != http.StatusOK {

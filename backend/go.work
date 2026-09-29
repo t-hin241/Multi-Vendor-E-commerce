@@ -11,6 +11,7 @@ use (
 	./services/notification
 	./services/order
 	./services/payment
+	./services/review
 	./services/shipment
 	./services/vendor
 )

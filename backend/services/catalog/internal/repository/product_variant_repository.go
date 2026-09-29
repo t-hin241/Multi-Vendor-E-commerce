@@ -26,7 +26,7 @@ var ErrVariantAlreadyExists = errors.New("repository: a variant with this option
 // Create inserts the variant and its option selections in one transaction,
 // so a variant never exists with zero or partial options.
 func (r *ProductVariantRepository) Create(ctx context.Context, v *domain.ProductVariant, selections []domain.VariantOptionSelection) error {
-	tx, err := r.pool.Begin(ctx)
+	tx, err := begin(ctx, r.pool)
 	if err != nil {
 		return err
 	}
@@ -60,7 +60,7 @@ func (r *ProductVariantRepository) Create(ctx context.Context, v *domain.Product
 func (r *ProductVariantRepository) FindByID(ctx context.Context, id string) (*domain.ProductVariant, error) {
 	const query = `SELECT id, product_id, sku, variant_key, created_at FROM product_variants WHERE id = $1`
 	var v domain.ProductVariant
-	err := r.pool.QueryRow(ctx, query, id).Scan(&v.ID, &v.ProductID, &v.SKU, &v.VariantKey, &v.CreatedAt)
+	err := connection(ctx, r.pool).QueryRow(ctx, query, id).Scan(&v.ID, &v.ProductID, &v.SKU, &v.VariantKey, &v.CreatedAt)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrVariantNotFound
@@ -77,13 +77,13 @@ func (r *ProductVariantRepository) FindByID(ctx context.Context, id string) (*do
 func (r *ProductVariantRepository) HasVariantsForProduct(ctx context.Context, productID string) (bool, error) {
 	const query = `SELECT EXISTS(SELECT 1 FROM product_variants WHERE product_id = $1)`
 	var exists bool
-	err := r.pool.QueryRow(ctx, query, productID).Scan(&exists)
+	err := connection(ctx, r.pool).QueryRow(ctx, query, productID).Scan(&exists)
 	return exists, err
 }
 
 func (r *ProductVariantRepository) ListForProduct(ctx context.Context, productID string) ([]*domain.ProductVariant, error) {
 	const query = `SELECT id, product_id, sku, variant_key, created_at FROM product_variants WHERE product_id = $1 ORDER BY created_at ASC`
-	rows, err := r.pool.Query(ctx, query, productID)
+	rows, err := connection(ctx, r.pool).Query(ctx, query, productID)
 	if err != nil {
 		return nil, err
 	}
@@ -108,7 +108,7 @@ func (r *ProductVariantRepository) ListOptionsForVariants(ctx context.Context, v
 		return map[string][]domain.VariantOptionSelection{}, nil
 	}
 	const query = `SELECT variant_id, attribute_id, option_id FROM product_variant_options WHERE variant_id = ANY($1)`
-	rows, err := r.pool.Query(ctx, query, variantIDs)
+	rows, err := connection(ctx, r.pool).Query(ctx, query, variantIDs)
 	if err != nil {
 		return nil, err
 	}

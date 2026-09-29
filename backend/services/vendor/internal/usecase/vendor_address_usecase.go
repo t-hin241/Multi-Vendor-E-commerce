@@ -3,6 +3,7 @@ package usecase
 import (
 	"context"
 	"errors"
+	"strings"
 
 	"shopee/backend/pkg/apperror"
 	"shopee/backend/services/vendorsvc/internal/domain"
@@ -16,15 +17,17 @@ import (
 type VendorAddressUseCase struct {
 	addresses VendorAddressRepositoryPort
 	vendors   VendorRepositoryPort
+	ops       Operations
 }
 
-func NewVendorAddressUseCase(addresses VendorAddressRepositoryPort, vendors VendorRepositoryPort) *VendorAddressUseCase {
-	return &VendorAddressUseCase{addresses: addresses, vendors: vendors}
+func NewVendorAddressUseCase(addresses VendorAddressRepositoryPort, vendors VendorRepositoryPort, ops Operations) *VendorAddressUseCase {
+	return &VendorAddressUseCase{addresses: addresses, vendors: vendors, ops: ops}
 }
 
 // Add creates a new address for the given shop. The very first address a
 // shop adds automatically becomes its default.
-func (uc *VendorAddressUseCase) Add(ctx context.Context, userID, vendorID, recipientName, phone, province, district, ward, streetAddress string) (*domain.VendorAddress, error) {
+func (uc *VendorAddressUseCase) add(ctx context.Context, userID, vendorID, recipientName, phone, province, district, ward, streetAddress string) (*domain.VendorAddress, error) {
+	recipientName, phone, province, district, ward, streetAddress = strings.TrimSpace(recipientName), strings.TrimSpace(phone), strings.TrimSpace(province), strings.TrimSpace(district), strings.TrimSpace(ward), strings.TrimSpace(streetAddress)
 	if err := domain.ValidateAddress(recipientName, phone, province, district, ward, streetAddress); err != nil {
 		return nil, err
 	}
@@ -33,7 +36,7 @@ func (uc *VendorAddressUseCase) Add(ctx context.Context, userID, vendorID, recip
 		return nil, err
 	}
 
-	existing, err := uc.addresses.ListForVendor(ctx, vendor.ID)
+	existing, err := uc.addresses.ListForVendor(ctx, vendor.ID, 1, 0)
 	if err != nil {
 		return nil, apperror.Internal(err)
 	}
@@ -49,19 +52,26 @@ func (uc *VendorAddressUseCase) Add(ctx context.Context, userID, vendorID, recip
 	return address, nil
 }
 
-func (uc *VendorAddressUseCase) ListMine(ctx context.Context, userID, vendorID string) ([]*domain.VendorAddress, error) {
+func (uc *VendorAddressUseCase) ListMine(ctx context.Context, userID, vendorID string, limit, offset int) ([]*domain.VendorAddress, error) {
+	if err := uc.ops.Actors.RequireRole(ctx, userID, "vendor"); err != nil {
+		return nil, err
+	}
 	vendor, err := getOwnedVendor(ctx, uc.vendors, userID, vendorID)
 	if err != nil {
 		return nil, err
 	}
-	addresses, err := uc.addresses.ListForVendor(ctx, vendor.ID)
+	if limit < 1 || limit > 100 || offset < 0 {
+		return nil, apperror.Validation("Invalid pagination")
+	}
+	addresses, err := uc.addresses.ListForVendor(ctx, vendor.ID, limit, offset)
 	if err != nil {
 		return nil, apperror.Internal(err)
 	}
 	return addresses, nil
 }
 
-func (uc *VendorAddressUseCase) Update(ctx context.Context, userID, vendorID, addressID, recipientName, phone, province, district, ward, streetAddress string) (*domain.VendorAddress, error) {
+func (uc *VendorAddressUseCase) update(ctx context.Context, userID, vendorID, addressID, recipientName, phone, province, district, ward, streetAddress string) (*domain.VendorAddress, error) {
+	recipientName, phone, province, district, ward, streetAddress = strings.TrimSpace(recipientName), strings.TrimSpace(phone), strings.TrimSpace(province), strings.TrimSpace(district), strings.TrimSpace(ward), strings.TrimSpace(streetAddress)
 	if err := domain.ValidateAddress(recipientName, phone, province, district, ward, streetAddress); err != nil {
 		return nil, err
 	}
@@ -78,9 +88,13 @@ func (uc *VendorAddressUseCase) Update(ctx context.Context, userID, vendorID, ad
 	return address, nil
 }
 
-func (uc *VendorAddressUseCase) Delete(ctx context.Context, userID, vendorID, addressID string) error {
-	if _, err := uc.ownedByUser(ctx, userID, vendorID, addressID); err != nil {
+func (uc *VendorAddressUseCase) delete(ctx context.Context, userID, vendorID, addressID string) error {
+	address, err := uc.ownedByUser(ctx, userID, vendorID, addressID)
+	if err != nil {
 		return err
+	}
+	if address.IsDefault {
+		return apperror.Conflict("Choose another default pickup address before deleting this address")
 	}
 	if err := uc.addresses.Delete(ctx, addressID); err != nil {
 		return apperror.Internal(err)
@@ -88,7 +102,7 @@ func (uc *VendorAddressUseCase) Delete(ctx context.Context, userID, vendorID, ad
 	return nil
 }
 
-func (uc *VendorAddressUseCase) SetDefault(ctx context.Context, userID, vendorID, addressID string) error {
+func (uc *VendorAddressUseCase) setDefault(ctx context.Context, userID, vendorID, addressID string) error {
 	address, err := uc.ownedByUser(ctx, userID, vendorID, addressID)
 	if err != nil {
 		return err
@@ -115,4 +129,39 @@ func (uc *VendorAddressUseCase) ownedByUser(ctx context.Context, userID, vendorI
 		return nil, apperror.Forbidden("You do not have access to this address")
 	}
 	return address, nil
+}
+
+func (uc *VendorAddressUseCase) Add(ctx context.Context, userID, vendorID, name, phone, province, district, ward, street string) (out *domain.VendorAddress, err error) {
+	if err = uc.ops.Actors.RequireRole(ctx, userID, "vendor"); err != nil {
+		return
+	}
+	err = uc.ops.Tx.Run(ctx, func(ctx context.Context) error {
+		var e error
+		out, e = uc.add(ctx, userID, vendorID, name, phone, province, district, ward, street)
+		return e
+	})
+	return out, wrap(err)
+}
+func (uc *VendorAddressUseCase) Update(ctx context.Context, userID, vendorID, id, name, phone, province, district, ward, street string) (out *domain.VendorAddress, err error) {
+	if err = uc.ops.Actors.RequireRole(ctx, userID, "vendor"); err != nil {
+		return
+	}
+	err = uc.ops.Tx.Run(ctx, func(ctx context.Context) error {
+		var e error
+		out, e = uc.update(ctx, userID, vendorID, id, name, phone, province, district, ward, street)
+		return e
+	})
+	return out, wrap(err)
+}
+func (uc *VendorAddressUseCase) Delete(ctx context.Context, userID, vendorID, id string) error {
+	if err := uc.ops.Actors.RequireRole(ctx, userID, "vendor"); err != nil {
+		return err
+	}
+	return wrap(uc.ops.Tx.Run(ctx, func(ctx context.Context) error { return uc.delete(ctx, userID, vendorID, id) }))
+}
+func (uc *VendorAddressUseCase) SetDefault(ctx context.Context, userID, vendorID, id string) error {
+	if err := uc.ops.Actors.RequireRole(ctx, userID, "vendor"); err != nil {
+		return err
+	}
+	return wrap(uc.ops.Tx.Run(ctx, func(ctx context.Context) error { return uc.setDefault(ctx, userID, vendorID, id) }))
 }

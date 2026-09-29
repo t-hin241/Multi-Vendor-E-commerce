@@ -75,7 +75,7 @@ type productImageResponse struct {
 }
 
 func toProductImageResponse(img *domain.ProductImage) productImageResponse {
-	return productImageResponse{ID: img.ID, URL: img.URL, Position: img.Position}
+	return productImageResponse{ID: img.ID, URL: safeMediaURL(img.URL), Position: img.Position}
 }
 
 func toProductImageResponseList(images []*domain.ProductImage) []productImageResponse {
@@ -95,7 +95,7 @@ type productMediaResponse struct {
 }
 
 func toProductMediaResponse(m *domain.ProductMedia) productMediaResponse {
-	return productMediaResponse{ID: m.ID, Kind: string(m.Kind), URL: m.URL, ContentType: m.ContentType, Position: m.Position}
+	return productMediaResponse{ID: m.ID, Kind: string(m.Kind), URL: safeMediaURL(m.URL), ContentType: m.ContentType, Position: m.Position}
 }
 
 func toProductMediaResponseList(items []*domain.ProductMedia) []productMediaResponse {
@@ -107,21 +107,23 @@ func toProductMediaResponseList(items []*domain.ProductMedia) []productMediaResp
 }
 
 type productResponse struct {
-	ID              string                   `json:"id"`
-	VendorID        string                   `json:"vendor_id"`
-	CategoryID      string                   `json:"category_id"`
-	Name            string                   `json:"name"`
-	Slug            string                   `json:"slug"`
-	Description     string                   `json:"description"`
-	PriceAmount     int64                    `json:"price_amount"`
-	Currency        string                   `json:"currency"`
-	Status          string                   `json:"status"`
-	RejectionReason *string                  `json:"rejection_reason,omitempty"`
-	IsActive        bool                     `json:"is_active"`
-	Images          []productImageResponse   `json:"images,omitempty"`
-	Media           []productMediaResponse   `json:"media,omitempty"`
-	Attributes      []attributeValueResponse `json:"attributes,omitempty"`
-	Variants        []variantResponse        `json:"variants,omitempty"`
+	Version            int64                    `json:"version"`
+	SellingSyncPending bool                     `json:"selling_sync_pending"`
+	ID                 string                   `json:"id"`
+	VendorID           string                   `json:"vendor_id"`
+	CategoryID         string                   `json:"category_id"`
+	Name               string                   `json:"name"`
+	Slug               string                   `json:"slug"`
+	Description        string                   `json:"description"`
+	PriceAmount        int64                    `json:"price_amount"`
+	Currency           string                   `json:"currency"`
+	Status             string                   `json:"status"`
+	RejectionReason    *string                  `json:"rejection_reason,omitempty"`
+	IsActive           bool                     `json:"is_active"`
+	Images             []productImageResponse   `json:"images,omitempty"`
+	Media              []productMediaResponse   `json:"media,omitempty"`
+	Attributes         []attributeValueResponse `json:"attributes,omitempty"`
+	Variants           []variantResponse        `json:"variants,omitempty"`
 	// StockQuantity is populated by the admin moderation detail view, and by
 	// the public product-detail view when the caller is recognized as an
 	// admin or the product's own vendor (see GetPublicBySlug) — never for an
@@ -164,12 +166,13 @@ func toAttributeValueResponseList(values []*domain.ProductAttributeValue) []attr
 
 func toProductResponse(p *domain.Product) productResponse {
 	return productResponse{
-		ID:              p.ID,
-		VendorID:        p.VendorID,
-		CategoryID:      p.CategoryID,
-		Name:            p.Name,
-		Slug:            p.Slug,
-		Description:     p.Description,
+		ID:          p.ID,
+		VendorID:    p.VendorID,
+		CategoryID:  p.CategoryID,
+		Name:        p.Name,
+		Slug:        p.Slug,
+		Description: domain.SanitizeDescription(p.Description),
+		Version:     p.Version, SellingSyncPending: p.EnforcedVersion < p.Version,
 		PriceAmount:     p.PriceAmount,
 		Currency:        p.Currency,
 		Status:          string(p.Status),
@@ -480,4 +483,11 @@ func toStorefrontListResponse(
 		VendorInfoDegraded: vendorInfoDegraded,
 		SalesInfoDegraded:  salesInfoDegraded,
 	}
+}
+
+func safeMediaURL(raw string) string {
+	if domain.SafeMediaURL(raw) {
+		return raw
+	}
+	return ""
 }

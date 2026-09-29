@@ -3,6 +3,7 @@ package transport
 import (
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/rs/zerolog"
@@ -86,6 +87,34 @@ func (h *InternalHandler) MarkPaid(c *gin.Context) {
 type quantitySoldResponse struct {
 	ProductID    string `json:"product_id"`
 	QuantitySold int64  `json:"quantity_sold"`
+}
+
+type reviewEligibilityResponse struct {
+	OrderItemID   string  `json:"order_item_id"`
+	VendorOrderID string  `json:"vendor_order_id"`
+	ProductID     string  `json:"product_id"`
+	VendorID      string  `json:"vendor_id"`
+	ProductName   string  `json:"product_name"`
+	VariantLabel  *string `json:"variant_label,omitempty"`
+	CompletedAt   string  `json:"completed_at"`
+}
+
+func (h *InternalHandler) ListReviewEligibility(c *gin.Context) {
+	buyerID := strings.TrimSpace(c.Query("buyer_id"))
+	if buyerID == "" {
+		httpresponse.Error(c, http.StatusBadRequest, "validation_error", "buyer_id is required")
+		return
+	}
+	items, err := h.orders.ListReviewEligibility(c.Request.Context(), buyerID, c.Query("product_id"))
+	if err != nil {
+		httpresponse.HandleError(c, h.log, err)
+		return
+	}
+	out := make([]reviewEligibilityResponse, 0, len(items))
+	for _, item := range items {
+		out = append(out, reviewEligibilityResponse{OrderItemID: item.OrderItemID, VendorOrderID: item.VendorOrderID, ProductID: item.ProductID, VendorID: item.VendorID, ProductName: item.ProductName, VariantLabel: item.VariantLabel, CompletedAt: item.CompletedAt.UTC().Format(time.RFC3339)})
+	}
+	httpresponse.OK(c, http.StatusOK, out)
 }
 
 // QuantitySoldByProductIDs lets Catalog resolve units-sold for a batch of

@@ -7,6 +7,7 @@ package usecase
 import (
 	"context"
 	"errors"
+	"net/url"
 
 	"github.com/rs/zerolog"
 
@@ -24,6 +25,8 @@ type PaymentUseCase struct {
 	verifier        provider.Verifier
 	simulator       Simulator
 	providerName    string
+	returnURL       string
+	cancelURL       string
 	log             zerolog.Logger
 }
 
@@ -35,12 +38,13 @@ func NewPaymentUseCase(
 	verifier provider.Verifier,
 	simulator Simulator,
 	providerName string,
+	returnURL, cancelURL string,
 	log zerolog.Logger,
 ) *PaymentUseCase {
 	return &PaymentUseCase{
 		intents: intents, events: events, orders: orders,
 		paymentProvider: paymentProvider, verifier: verifier, simulator: simulator,
-		providerName: providerName, log: log,
+		providerName: providerName, returnURL: returnURL, cancelURL: cancelURL, log: log,
 	}
 }
 
@@ -73,7 +77,7 @@ func (uc *PaymentUseCase) CreateIntent(ctx context.Context, buyerID, orderID str
 	}
 
 	result, err := uc.paymentProvider.CreateIntent(ctx, provider.CreateIntentInput{
-		OrderID: orderID, Amount: order.TotalAmount, Currency: order.Currency,
+		OrderID: orderID, Amount: order.TotalAmount, Currency: order.Currency, ReturnURL: paymentReturnURL(uc.returnURL, orderID), CancelURL: paymentReturnURL(uc.cancelURL, orderID),
 	})
 	if err != nil {
 		return nil, apperror.Internal(err)
@@ -82,11 +86,26 @@ func (uc *PaymentUseCase) CreateIntent(ctx context.Context, buyerID, orderID str
 	intent := &domain.PaymentIntent{
 		OrderID: orderID, BuyerID: buyerID, Amount: order.TotalAmount, Currency: order.Currency,
 		Status: domain.StatusPending, Provider: uc.providerName, ProviderIntentID: result.ProviderIntentID,
+		CheckoutURL: result.CheckoutURL, QRCode: result.QRCode, ExpiresAt: result.ExpiresAt,
 	}
 	if err := uc.intents.Create(ctx, intent); err != nil {
 		return nil, apperror.Internal(err)
 	}
 	return intent, nil
+}
+
+// paymentReturnURL adds a non-authoritative navigation hint. The page reached
+// after redirect must still read the Order/Payment API; it must never trust
+// provider query parameters to mark an order paid.
+func paymentReturnURL(base, orderID string) string {
+	u, err := url.Parse(base)
+	if err != nil {
+		return base
+	}
+	q := u.Query()
+	q.Set("order_id", orderID)
+	u.RawQuery = q.Encode()
+	return u.String()
 }
 
 func (uc *PaymentUseCase) GetOwned(ctx context.Context, buyerID, intentID string) (*domain.PaymentIntent, error) {

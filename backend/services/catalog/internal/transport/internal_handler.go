@@ -23,6 +23,7 @@ func NewInternalHandler(products *usecase.ProductUseCase, log zerolog.Logger) *I
 }
 
 type internalProductResponse struct {
+	Version            int64  `json:"version"`
 	ID                 string `json:"id"`
 	VendorID           string `json:"vendor_id"`
 	Name               string `json:"name"`
@@ -52,12 +53,13 @@ func (h *InternalHandler) GetByID(c *gin.Context) {
 
 	httpresponse.OK(c, http.StatusOK, internalProductResponse{
 		ID:                 p.ID,
+		Version:            p.Version,
 		VendorID:           p.VendorID,
 		Name:               p.Name,
 		PriceAmount:        p.PriceAmount,
 		Currency:           p.Currency,
 		Status:             string(p.Status),
-		IsVisible:          p.IsPubliclyVisible(),
+		IsVisible:          p.IsPubliclyVisible() && p.EnforcedVersion == p.Version,
 		HasVariants:        hasVariants,
 		PackageWeightGrams: packageWeightGrams,
 	})

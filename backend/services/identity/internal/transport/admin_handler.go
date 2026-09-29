@@ -8,6 +8,7 @@ import (
 	"github.com/rs/zerolog"
 
 	"shopee/backend/pkg/httpresponse"
+	"shopee/backend/pkg/middleware"
 	"shopee/backend/services/identity/internal/usecase"
 )
 
@@ -24,7 +25,7 @@ func (h *AdminHandler) ListUsers(c *gin.Context) {
 	limit := parseIntDefault(c.Query("limit"), 20, 1, 100)
 	offset := parseIntDefault(c.Query("offset"), 0, 0, 1_000_000)
 
-	users, err := h.admin.ListUsers(c.Request.Context(), c.Query("role"), c.Query("q"), limit, offset)
+	users, err := h.admin.ListUsers(c.Request.Context(), middleware.GetUserID(c), c.Query("role"), c.Query("q"), limit, offset)
 	if err != nil {
 		httpresponse.HandleError(c, h.log, err)
 		return
@@ -40,7 +41,7 @@ func (h *AdminHandler) SetActive(c *gin.Context) {
 		return
 	}
 
-	user, err := h.admin.SetActive(c.Request.Context(), c.Param("id"), req.IsActive)
+	user, err := h.admin.SetActive(c.Request.Context(), middleware.GetUserID(c), c.Param("id"), req.IsActive)
 	if err != nil {
 		httpresponse.HandleError(c, h.log, err)
 		return
@@ -58,4 +59,12 @@ func parseIntDefault(raw string, fallback, min, max int) int {
 		return fallback
 	}
 	return v
+}
+
+func (h *AdminHandler) RevokeSession(c *gin.Context) {
+	if err := h.admin.RevokeSession(c.Request.Context(), middleware.GetUserID(c), c.Param("id"), c.Param("sessionID")); err != nil {
+		httpresponse.HandleError(c, h.log, err)
+		return
+	}
+	c.Status(204)
 }

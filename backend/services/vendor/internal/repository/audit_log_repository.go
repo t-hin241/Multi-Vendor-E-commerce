@@ -16,23 +16,21 @@ func NewAuditLogRepository(pool *pgxpool.Pool) *AuditLogRepository {
 	return &AuditLogRepository{pool: pool}
 }
 
-func (r *AuditLogRepository) Create(ctx context.Context, vendorID, actorUserID, action string, reason *string) error {
-	const query = `INSERT INTO vendor_audit_logs (vendor_id, actor_user_id, action, reason) VALUES ($1, $2, $3, $4)`
-	_, err := r.pool.Exec(ctx, query, vendorID, actorUserID, action, reason)
+func (r *AuditLogRepository) Create(ctx context.Context, vendorID, actorUserID, action string, reason *string, version int64) error {
+	const query = `INSERT INTO vendor_audit_logs (vendor_id, actor_user_id, action, reason, version) VALUES ($1, $2, $3, $4, $5)`
+	_, err := connection(ctx, r.pool).Exec(ctx, query, vendorID, actorUserID, action, reason, version)
 	return err
 }
 
-// List returns every recorded decision for one vendor, newest first — the
-// full moderation history admin currently has no way to see beyond the
-// single rejection_reason on the vendor row itself.
-func (r *AuditLogRepository) List(ctx context.Context, vendorID string) ([]*domain.AuditLog, error) {
+// List returns a page of recorded decisions, newest first.
+func (r *AuditLogRepository) List(ctx context.Context, vendorID string, limit, offset int) ([]*domain.AuditLog, error) {
 	const query = `
-		SELECT actor_user_id, action, reason, created_at
+		SELECT actor_user_id, action, reason, created_at, COALESCE(version,0)
 		FROM vendor_audit_logs
 		WHERE vendor_id = $1
-		ORDER BY created_at DESC`
+		ORDER BY created_at DESC, id DESC LIMIT $2 OFFSET $3`
 
-	rows, err := r.pool.Query(ctx, query, vendorID)
+	rows, err := connection(ctx, r.pool).Query(ctx, query, vendorID, limit, offset)
 	if err != nil {
 		return nil, err
 	}
@@ -41,7 +39,7 @@ func (r *AuditLogRepository) List(ctx context.Context, vendorID string) ([]*doma
 	var entries []*domain.AuditLog
 	for rows.Next() {
 		var e domain.AuditLog
-		if err := rows.Scan(&e.ActorUserID, &e.Action, &e.Reason, &e.CreatedAt); err != nil {
+		if err := rows.Scan(&e.ActorUserID, &e.Action, &e.Reason, &e.CreatedAt, &e.Version); err != nil {
 			return nil, err
 		}
 		entries = append(entries, &e)

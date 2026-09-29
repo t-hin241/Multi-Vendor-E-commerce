@@ -9,6 +9,7 @@ import (
 
 	"shopee/backend/services/identity/internal/domain"
 	"shopee/backend/services/identity/internal/repository"
+	"shopee/backend/services/identity/internal/usecase"
 )
 
 type fakeUserRepository struct {
@@ -131,13 +132,13 @@ func newFakeRefreshTokenRepository() *fakeRefreshTokenRepository {
 	return &fakeRefreshTokenRepository{byHash: make(map[string]*storedRefreshToken)}
 }
 
-func (f *fakeRefreshTokenRepository) Create(_ context.Context, userID, tokenHash string, expiresAt time.Time) error {
+func (f *fakeRefreshTokenRepository) Create(_ context.Context, userID, tokenHash string, expiresAt time.Time, familyID string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
 	f.nextID++
 	f.byHash[tokenHash] = &storedRefreshToken{repository.RefreshToken{
-		ID: itoa(f.nextID), UserID: userID, TokenHash: tokenHash, ExpiresAt: expiresAt,
+		ID: itoa(f.nextID), UserID: userID, TokenHash: tokenHash, ExpiresAt: expiresAt, FamilyID: familyID,
 	}}
 	return nil
 }
@@ -159,7 +160,7 @@ func (f *fakeRefreshTokenRepository) Revoke(_ context.Context, id string) error 
 	defer f.mu.Unlock()
 
 	for _, rt := range f.byHash {
-		if rt.ID == id {
+		if rt.ID == id && rt.RevokedAt == nil {
 			now := time.Now()
 			rt.RevokedAt = &now
 		}
@@ -192,9 +193,11 @@ func (f *fakeRefreshTokenRepository) RevokeByHash(_ context.Context, tokenHash s
 }
 
 type fakePasswordResetRepository struct {
-	mu     sync.Mutex
-	byHash map[string]*repository.PasswordResetToken
-	nextID int
+	capturedToken string
+	cipher        *usecase.TokenCipher
+	mu            sync.Mutex
+	byHash        map[string]*repository.PasswordResetToken
+	nextID        int
 }
 
 func newFakePasswordResetRepository() *fakePasswordResetRepository {
@@ -229,7 +232,7 @@ func (f *fakePasswordResetRepository) MarkUsed(_ context.Context, id string) err
 	defer f.mu.Unlock()
 
 	for _, t := range f.byHash {
-		if t.ID == id {
+		if t.ID == id && t.UsedAt == nil {
 			now := time.Now()
 			t.UsedAt = &now
 		}
@@ -248,4 +251,59 @@ func itoa(n int) string {
 		n /= 10
 	}
 	return "user-" + string(buf)
+}
+
+func (f *fakeUserRepository) Audit(context.Context, string, string, string, string) error { return nil }
+func (f *fakeRefreshTokenRepository) SessionActive(_ context.Context, user, role, family string) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, t := range f.byHash {
+		if t.UserID == user && t.FamilyID == family && t.RevokedAt == nil && t.ExpiresAt.After(time.Now()) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+func (f *fakeRefreshTokenRepository) OwnerByHash(_ context.Context, hash string) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if t, ok := f.byHash[hash]; ok {
+		return t.UserID, nil
+	}
+	return "", repository.ErrRefreshTokenNotFound
+}
+func (f *fakeRefreshTokenRepository) RevokeSession(_ context.Context, user, family string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, t := range f.byHash {
+		if t.UserID == user && t.FamilyID == family {
+			now := time.Now()
+			t.RevokedAt = &now
+		}
+	}
+	return nil
+}
+func (f *fakePasswordResetRepository) QueueDelivery(_ context.Context, user, hash string, data []byte, expires time.Time) error {
+	var err error
+	f.capturedToken, err = f.cipher.Decrypt(data, user)
+	return err
+}
+func (f *fakePasswordResetRepository) InvalidateForUser(_ context.Context, id string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, t := range f.byHash {
+		if t.UserID == id {
+			now := time.Now()
+			t.UsedAt = &now
+		}
+	}
+	return nil
+}
+
+type fakeTransactions struct{ mu sync.Mutex }
+
+func (f *fakeTransactions) Run(ctx context.Context, fn func(context.Context) error) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return fn(ctx)
 }

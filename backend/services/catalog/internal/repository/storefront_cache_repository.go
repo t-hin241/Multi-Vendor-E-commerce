@@ -30,7 +30,7 @@ func (r *StorefrontCacheRepository) UpsertVendorNames(ctx context.Context, entri
 		VALUES ($1, $2, now())
 		ON CONFLICT (vendor_id) DO UPDATE SET shop_name = excluded.shop_name, updated_at = excluded.updated_at`
 	for vendorID, shopName := range entries {
-		if _, err := r.pool.Exec(ctx, query, vendorID, shopName); err != nil {
+		if _, err := connection(ctx, r.pool).Exec(ctx, query, vendorID, shopName); err != nil {
 			return err
 		}
 	}
@@ -41,8 +41,8 @@ func (r *StorefrontCacheRepository) GetVendorNames(ctx context.Context, vendorID
 	if len(vendorIDs) == 0 {
 		return map[string]string{}, nil
 	}
-	const query = `SELECT vendor_id, shop_name FROM vendor_name_cache WHERE vendor_id = ANY($1)`
-	rows, err := r.pool.Query(ctx, query, vendorIDs)
+	const query = `SELECT vendor_id, shop_name FROM vendor_name_cache WHERE vendor_id = ANY($1) AND updated_at>now()-interval '15 minutes'`
+	rows, err := connection(ctx, r.pool).Query(ctx, query, vendorIDs)
 	if err != nil {
 		return nil, err
 	}
@@ -68,7 +68,7 @@ func (r *StorefrontCacheRepository) UpsertQuantitySold(ctx context.Context, entr
 		VALUES ($1, $2, now())
 		ON CONFLICT (product_id) DO UPDATE SET quantity_sold = excluded.quantity_sold, updated_at = excluded.updated_at`
 	for productID, quantity := range entries {
-		if _, err := r.pool.Exec(ctx, query, productID, quantity); err != nil {
+		if _, err := connection(ctx, r.pool).Exec(ctx, query, productID, quantity); err != nil {
 			return err
 		}
 	}
@@ -79,8 +79,8 @@ func (r *StorefrontCacheRepository) GetQuantitySold(ctx context.Context, product
 	if len(productIDs) == 0 {
 		return map[string]int64{}, nil
 	}
-	const query = `SELECT product_id, quantity_sold FROM product_sales_cache WHERE product_id = ANY($1)`
-	rows, err := r.pool.Query(ctx, query, productIDs)
+	const query = `SELECT product_id, quantity_sold FROM product_sales_cache WHERE product_id = ANY($1) AND updated_at>now()-interval '15 minutes'`
+	rows, err := connection(ctx, r.pool).Query(ctx, query, productIDs)
 	if err != nil {
 		return nil, err
 	}
@@ -107,7 +107,7 @@ func (r *StorefrontCacheRepository) UpsertVariantStock(ctx context.Context, entr
 		VALUES ($1, $2, now())
 		ON CONFLICT (variant_id) DO UPDATE SET available_quantity = excluded.available_quantity, updated_at = excluded.updated_at`
 	for variantID, qty := range entries {
-		if _, err := r.pool.Exec(ctx, query, variantID, qty); err != nil {
+		if _, err := connection(ctx, r.pool).Exec(ctx, query, variantID, qty); err != nil {
 			return err
 		}
 	}
@@ -118,8 +118,8 @@ func (r *StorefrontCacheRepository) GetVariantStock(ctx context.Context, variant
 	if len(variantIDs) == 0 {
 		return map[string]int64{}, nil
 	}
-	const query = `SELECT variant_id, available_quantity FROM variant_stock_cache WHERE variant_id = ANY($1)`
-	rows, err := r.pool.Query(ctx, query, variantIDs)
+	const query = `SELECT variant_id, available_quantity FROM variant_stock_cache WHERE variant_id = ANY($1) AND updated_at>now()-interval '60 seconds'`
+	rows, err := connection(ctx, r.pool).Query(ctx, query, variantIDs)
 	if err != nil {
 		return nil, err
 	}

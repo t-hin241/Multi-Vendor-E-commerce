@@ -4,6 +4,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ImageOff } from "lucide-react";
 import { useState } from "react";
 
+import { ShopReadiness } from "@/components/vendor/shop-readiness";
 import { SectionHeader } from "@/components/section-header";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -52,7 +53,13 @@ export default function VendorShopsPage() {
     setIsSubmitting(true);
     try {
       await callWithAuth((token) =>
-        api.updateVendor(token, editingId, editForm.shopName, editForm.description, editForm.policyText),
+        api.updateVendor(
+          token,
+          editingId,
+          editForm.shopName,
+          editForm.description,
+          editForm.policyText,
+        ),
       );
       setEditingId(null);
       await refresh();
@@ -144,7 +151,9 @@ export default function VendorShopsPage() {
                           <VendorStatusBadge status={v.status} />
                         </div>
                         {v.status === "rejected" && v.rejection_reason && (
-                          <p className="mt-1 text-sm text-destructive">Lý do: {v.rejection_reason}</p>
+                          <p className="mt-1 text-sm text-destructive">
+                            Lý do: {v.rejection_reason}
+                          </p>
                         )}
                         {v.description && (
                           <p className="mt-1 text-sm text-muted-foreground">{v.description}</p>
@@ -152,16 +161,27 @@ export default function VendorShopsPage() {
                       </div>
                       <div className="flex flex-col items-end gap-1 text-sm">
                         {!isActive && (
-                          <Button variant="link" size="sm" className="h-auto p-0" onClick={() => setSelectedVendorId(v.id)}>
+                          <Button
+                            variant="link"
+                            size="sm"
+                            className="h-auto p-0"
+                            onClick={() => setSelectedVendorId(v.id)}
+                          >
                             Chuyển sang cửa hàng này
                           </Button>
                         )}
-                        <Button variant="link" size="sm" className="h-auto p-0" onClick={() => startEdit(v)}>
+                        <Button
+                          variant="link"
+                          size="sm"
+                          className="h-auto p-0"
+                          onClick={() => startEdit(v)}
+                        >
                           Sửa
                         </Button>
                       </div>
                     </div>
                   )}
+                  <ShopReadiness vendor={v} />
                   <VendorBrandingUploader vendor={v} onChanged={refresh} />
                 </CardContent>
               </Card>

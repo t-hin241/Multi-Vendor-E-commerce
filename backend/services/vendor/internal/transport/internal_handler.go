@@ -5,15 +5,15 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"github.com/rs/zerolog"
 
+	"shopee/backend/pkg/apperror"
 	"shopee/backend/pkg/httpresponse"
 	"shopee/backend/services/vendorsvc/internal/usecase"
 )
 
-// InternalHandler serves service-to-service lookups. It is not proxied by
-// the gateway's public route table (only /api/vendor/* is), so it is
-// reachable only from inside the compose network in this MVP topology.
+// InternalHandler serves authenticated ownership and selling-status lookups.
 type InternalHandler struct {
 	vendors *usecase.VendorUseCase
 	log     zerolog.Logger
@@ -26,22 +26,18 @@ func NewInternalHandler(vendors *usecase.VendorUseCase, log zerolog.Logger) *Int
 type vendorStatusResponse struct {
 	VendorID string `json:"vendor_id"`
 	Status   string `json:"status"`
+	Version  int64  `json:"version"`
 }
 
-// GetOwnedStatus lets any other service verify that a specific vendor id
-// both belongs to the calling user and is approved, before letting them act
-// as that shop — a user may own several shops (1:N), so "the vendor for
-// this user" is no longer well-defined; callers now always name which one.
-// Ownership mismatches and unknown ids are both reported as 404: an
-// internal caller only needs a yes/no.
+// GetOwnedStatus verifies an active owner and returns the named shop status/version.
 func (h *InternalHandler) GetOwnedStatus(c *gin.Context) {
 	v, err := h.vendors.GetOwned(c.Request.Context(), c.Param("userID"), c.Param("vendorId"))
 	if err != nil {
-		httpresponse.Error(c, http.StatusNotFound, "not_found", "Shop not found for this user")
+		httpresponse.HandleError(c, h.log, err)
 		return
 	}
 
-	httpresponse.OK(c, http.StatusOK, vendorStatusResponse{VendorID: v.ID, Status: string(v.Status)})
+	httpresponse.OK(c, http.StatusOK, vendorStatusResponse{VendorID: v.ID, Status: string(v.Status), Version: v.Version})
 }
 
 type vendorNameResponse struct {
@@ -59,6 +55,16 @@ func (h *InternalHandler) ListByIDs(c *gin.Context) {
 		}
 	}
 
+	if len(ids) > 100 {
+		httpresponse.HandleError(c, h.log, apperror.Validation("Maximum 100 shop IDs"))
+		return
+	}
+	for _, id := range ids {
+		if _, err := uuid.Parse(id); err != nil {
+			httpresponse.HandleError(c, h.log, apperror.Validation("Invalid shop ID"))
+			return
+		}
+	}
 	vendors, err := h.vendors.ListByIDs(c.Request.Context(), ids)
 	if err != nil {
 		httpresponse.HandleError(c, h.log, err)

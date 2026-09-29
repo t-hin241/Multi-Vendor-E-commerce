@@ -8,12 +8,17 @@ import (
 
 	"shopee/backend/services/vendorsvc/internal/domain"
 	"shopee/backend/services/vendorsvc/internal/repository"
+	"shopee/backend/services/vendorsvc/internal/usecase"
 )
 
 type fakeVendorRepository struct {
 	mu     sync.Mutex
 	byID   map[string]*domain.Vendor
 	nextID int
+}
+
+func (f *fakeVendorRepository) Operations(context.Context) (*domain.OperationsSummary, error) {
+	return &domain.OperationsSummary{}, nil
 }
 
 func newFakeVendorRepository() *fakeVendorRepository {
@@ -26,6 +31,7 @@ func (f *fakeVendorRepository) Create(_ context.Context, v *domain.Vendor) error
 
 	f.nextID++
 	v.ID = "vendor-" + strconv.Itoa(f.nextID)
+	v.Version = 1
 	v.Status = domain.StatusPending
 	v.CreatedAt = time.Now()
 	v.UpdatedAt = time.Now()
@@ -36,7 +42,7 @@ func (f *fakeVendorRepository) Create(_ context.Context, v *domain.Vendor) error
 
 // ListByUserID returns every shop a user owns (0, 1, or many) — a user may
 // own several under the 1:N vendor<->user relationship.
-func (f *fakeVendorRepository) ListByUserID(_ context.Context, userID string) ([]*domain.Vendor, error) {
+func (f *fakeVendorRepository) ListByUserID(_ context.Context, userID string, limit, offset int) ([]*domain.Vendor, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
@@ -133,7 +139,7 @@ func (f *fakeVendorRepository) SetBanner(_ context.Context, id string, url, obje
 	return nil
 }
 
-func (f *fakeVendorRepository) UpdateStatus(_ context.Context, id string, status domain.Status, approvedBy string, rejectionReason *string) error {
+func (f *fakeVendorRepository) UpdateStatus(_ context.Context, id string, version int64, status domain.Status, approvedBy string, rejectionReason *string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
@@ -141,6 +147,10 @@ func (f *fakeVendorRepository) UpdateStatus(_ context.Context, id string, status
 	if !ok {
 		return repository.ErrVendorNotFound
 	}
+	if v.Version != version {
+		return repository.ErrStaleVendor
+	}
+	v.Version++
 	v.Status = status
 	v.ApprovedBy = &approvedBy
 	v.RejectionReason = rejectionReason
@@ -163,7 +173,7 @@ func newFakeAuditLogRepository() *fakeAuditLogRepository {
 	return &fakeAuditLogRepository{}
 }
 
-func (f *fakeAuditLogRepository) Create(_ context.Context, vendorID, actorUserID, action string, reason *string) error {
+func (f *fakeAuditLogRepository) Create(_ context.Context, vendorID, actorUserID, action string, reason *string, version int64) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.entries = append(f.entries, auditEntry{VendorID: vendorID, ActorUserID: actorUserID, Action: action, Reason: reason})
@@ -173,7 +183,7 @@ func (f *fakeAuditLogRepository) Create(_ context.Context, vendorID, actorUserID
 // List returns entries newest-first, matching the real repository's
 // ORDER BY created_at DESC -- entries carry no timestamp here, so append
 // order stands in for creation order (reversed).
-func (f *fakeAuditLogRepository) List(_ context.Context, vendorID string) ([]*domain.AuditLog, error) {
+func (f *fakeAuditLogRepository) List(_ context.Context, vendorID string, limit, offset int) ([]*domain.AuditLog, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
@@ -269,7 +279,7 @@ func (f *fakeVendorAddressRepository) FindByID(_ context.Context, id string) (*d
 	return &cp, nil
 }
 
-func (f *fakeVendorAddressRepository) ListForVendor(_ context.Context, vendorID string) ([]*domain.VendorAddress, error) {
+func (f *fakeVendorAddressRepository) ListForVendor(_ context.Context, vendorID string, limit, offset int) ([]*domain.VendorAddress, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	var out []*domain.VendorAddress
@@ -334,4 +344,30 @@ func (f *fakeVendorAddressRepository) SetDefault(_ context.Context, vendorID, ad
 		}
 	}
 	return nil
+}
+
+func (f *fakeVendorRepository) Snapshots(ctx context.Context, after string, limit int) ([]*domain.Vendor, error) {
+	return f.ListByStatus(ctx, "", limit, 0)
+}
+
+type directTx struct{}
+
+func (directTx) Run(ctx context.Context, fn func(context.Context) error) error { return fn(ctx) }
+
+type allowActor struct{}
+
+func (allowActor) RequireRole(context.Context, string, string) error { return nil }
+
+type fakeEvents struct{}
+
+func (fakeEvents) Queue(context.Context, *domain.Vendor) error { return nil }
+func (fakeEvents) Replay(context.Context, string) error        { return nil }
+
+type readyAddresses struct{ *fakeVendorAddressRepository }
+
+func (readyAddresses) FindDefaultForVendor(ctx context.Context, id string) (*domain.VendorAddress, error) {
+	return &domain.VendorAddress{VendorID: id, RecipientName: "Test owner", Phone: "0900000000", Province: "Test province", District: "Test district", Ward: "Test ward", StreetAddress: "Test street", IsDefault: true}, nil
+}
+func testOps() usecase.Operations {
+	return usecase.Operations{Tx: directTx{}, Actors: allowActor{}, Addresses: readyAddresses{newFakeVendorAddressRepository()}, Events: fakeEvents{}}
 }

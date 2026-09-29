@@ -22,19 +22,24 @@ func NewProductRepository(pool *pgxpool.Pool) *ProductRepository {
 
 var ErrProductNotFound = errors.New("repository: product not found")
 
+func (r *ProductRepository) UpdateContent(ctx context.Context, p *domain.Product) error {
+	_, err := connection(ctx, r.pool).Exec(ctx, `UPDATE products SET version=version+1,name=$2,description=$3,price_amount=$4,status='draft',rejection_reason=NULL,updated_at=now() WHERE id=$1`, p.ID, p.Name, p.Description, p.PriceAmount)
+	return err
+}
+
 const productSelectColumns = `
 	SELECT id, vendor_id, category_id, name, slug, description, price_amount, currency,
-	       status, rejection_reason, is_active, created_at, updated_at
+	       status, rejection_reason, is_active, created_at, updated_at, version, enforced_version
 	`
 
 func (r *ProductRepository) Create(ctx context.Context, p *domain.Product) error {
 	const query = `
 		INSERT INTO products (vendor_id, category_id, name, slug, description, price_amount, currency)
 		VALUES ($1, $2, $3, $4, $5, $6, $7)
-		RETURNING id, status, is_active, created_at, updated_at`
+		RETURNING id, status, is_active, created_at, updated_at, version, enforced_version`
 
-	err := r.pool.QueryRow(ctx, query, p.VendorID, p.CategoryID, p.Name, p.Slug, p.Description, p.PriceAmount, p.Currency).
-		Scan(&p.ID, &p.Status, &p.IsActive, &p.CreatedAt, &p.UpdatedAt)
+	err := connection(ctx, r.pool).QueryRow(ctx, query, p.VendorID, p.CategoryID, p.Name, p.Slug, p.Description, p.PriceAmount, p.Currency).
+		Scan(&p.ID, &p.Status, &p.IsActive, &p.CreatedAt, &p.UpdatedAt, &p.Version, &p.EnforcedVersion)
 	if err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
@@ -48,21 +53,21 @@ func (r *ProductRepository) Create(ctx context.Context, p *domain.Product) error
 func (r *ProductRepository) SlugExists(ctx context.Context, slug string) (bool, error) {
 	const query = `SELECT EXISTS(SELECT 1 FROM products WHERE slug = $1)`
 	var exists bool
-	err := r.pool.QueryRow(ctx, query, slug).Scan(&exists)
+	err := connection(ctx, r.pool).QueryRow(ctx, query, slug).Scan(&exists)
 	return exists, err
 }
 
 func (r *ProductRepository) FindByID(ctx context.Context, id string) (*domain.Product, error) {
-	return scanProduct(r.pool.QueryRow(ctx, productSelectColumns+`FROM products WHERE id = $1`, id))
+	return scanProduct(connection(ctx, r.pool).QueryRow(ctx, productSelectColumns+`FROM products WHERE id = $1`+lockProduct(ctx), id))
 }
 
 func (r *ProductRepository) FindBySlug(ctx context.Context, slug string) (*domain.Product, error) {
-	return scanProduct(r.pool.QueryRow(ctx, productSelectColumns+`FROM products WHERE slug = $1`, slug))
+	return scanProduct(connection(ctx, r.pool).QueryRow(ctx, productSelectColumns+`FROM products WHERE slug = $1`, slug))
 }
 
 func (r *ProductRepository) ListByVendor(ctx context.Context, vendorID string, limit, offset int) ([]*domain.Product, error) {
-	rows, err := r.pool.Query(ctx,
-		productSelectColumns+`FROM products WHERE vendor_id = $1 ORDER BY created_at DESC LIMIT $2 OFFSET $3`,
+	rows, err := connection(ctx, r.pool).Query(ctx,
+		productSelectColumns+`FROM products WHERE vendor_id = $1 ORDER BY created_at DESC, id DESC LIMIT $2 OFFSET $3`,
 		vendorID, limit, offset)
 	if err != nil {
 		return nil, err
@@ -77,9 +82,9 @@ func (r *ProductRepository) ListByStatus(ctx context.Context, status string, lim
 		err  error
 	)
 	if status == "" {
-		rows, err = r.pool.Query(ctx, productSelectColumns+`FROM products ORDER BY created_at DESC LIMIT $1 OFFSET $2`, limit, offset)
+		rows, err = connection(ctx, r.pool).Query(ctx, productSelectColumns+`FROM products ORDER BY created_at DESC, id DESC LIMIT $1 OFFSET $2`, limit, offset)
 	} else {
-		rows, err = r.pool.Query(ctx, productSelectColumns+`FROM products WHERE status = $1 ORDER BY created_at DESC LIMIT $2 OFFSET $3`, status, limit, offset)
+		rows, err = connection(ctx, r.pool).Query(ctx, productSelectColumns+`FROM products WHERE status = $1 ORDER BY created_at DESC, id DESC LIMIT $2 OFFSET $3`, status, limit, offset)
 	}
 	if err != nil {
 		return nil, err
@@ -91,7 +96,7 @@ func (r *ProductRepository) ListByStatus(ctx context.Context, status string, lim
 // storefrontWhereClause builds the WHERE clause shared by ListStorefront and
 // CountStorefront, so the two never drift apart on what counts as "visible".
 func storefrontWhereClause(categoryID, vendorID, search string) (clause string, args []any) {
-	clause = `WHERE status = 'approved' AND is_active = TRUE`
+	clause = `WHERE status = 'approved' AND is_active = TRUE AND EXISTS (SELECT 1 FROM vendor_sale_status vs WHERE vs.vendor_id=products.vendor_id AND vs.status='approved' AND vs.confirmed_at>now()-interval '60 seconds')`
 
 	if vendorID != "" {
 		args = append(args, vendorID)
@@ -122,14 +127,16 @@ func storefrontWhereClause(categoryID, vendorID, search string) (clause string, 
 // ListStorefront returns only publicly visible products (approved and
 // active), optionally filtered by category, vendor and a case-insensitive
 // name search.
-func (r *ProductRepository) ListStorefront(ctx context.Context, categoryID, vendorID, search string, limit, offset int) ([]*domain.Product, error) {
+func (r *ProductRepository) ListStorefront(ctx context.Context, categoryID, vendorID, search string, limit, offset int, sortBy ...string) ([]*domain.Product, error) {
 	where, args := storefrontWhereClause(categoryID, vendorID, search)
 	query := productSelectColumns + `FROM products ` + where
 
 	args = append(args, limit, offset)
-	query += ` ORDER BY created_at DESC LIMIT $` + strconv.Itoa(len(args)-1) + ` OFFSET $` + strconv.Itoa(len(args))
+	order := "created_at DESC, id DESC"
+ if len(sortBy)>0 { switch sortBy[0] {case "price_asc":order="price_amount ASC, id ASC";case "price_desc":order="price_amount DESC, id DESC"} }
+ query += ` ORDER BY `+order+` LIMIT $` + strconv.Itoa(len(args)-1) + ` OFFSET $` + strconv.Itoa(len(args))
 
-	rows, err := r.pool.Query(ctx, query, args...)
+	rows, err := connection(ctx, r.pool).Query(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -145,13 +152,13 @@ func (r *ProductRepository) CountStorefront(ctx context.Context, categoryID, ven
 	query := `SELECT count(*) FROM products ` + where
 
 	var total int
-	err := r.pool.QueryRow(ctx, query, args...).Scan(&total)
+	err := connection(ctx, r.pool).QueryRow(ctx, query, args...).Scan(&total)
 	return total, err
 }
 
 func (r *ProductRepository) UpdateStatus(ctx context.Context, id string, status domain.Status, rejectionReason *string) error {
 	const query = `UPDATE products SET status = $1, rejection_reason = $2, updated_at = now() WHERE id = $3`
-	tag, err := r.pool.Exec(ctx, query, status, rejectionReason, id)
+	tag, err := connection(ctx, r.pool).Exec(ctx, query, status, rejectionReason, id)
 	if err != nil {
 		return err
 	}
@@ -163,7 +170,7 @@ func (r *ProductRepository) UpdateStatus(ctx context.Context, id string, status 
 
 func (r *ProductRepository) UpdateActive(ctx context.Context, id string, isActive bool) error {
 	const query = `UPDATE products SET is_active = $1, updated_at = now() WHERE id = $2`
-	tag, err := r.pool.Exec(ctx, query, isActive, id)
+	tag, err := connection(ctx, r.pool).Exec(ctx, query, isActive, id)
 	if err != nil {
 		return err
 	}
@@ -176,7 +183,7 @@ func (r *ProductRepository) UpdateActive(ctx context.Context, id string, isActiv
 func scanProduct(row pgx.Row) (*domain.Product, error) {
 	var p domain.Product
 	err := row.Scan(&p.ID, &p.VendorID, &p.CategoryID, &p.Name, &p.Slug, &p.Description, &p.PriceAmount, &p.Currency,
-		&p.Status, &p.RejectionReason, &p.IsActive, &p.CreatedAt, &p.UpdatedAt)
+		&p.Status, &p.RejectionReason, &p.IsActive, &p.CreatedAt, &p.UpdatedAt, &p.Version, &p.EnforcedVersion)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrProductNotFound
@@ -191,7 +198,7 @@ func scanProducts(rows pgx.Rows) ([]*domain.Product, error) {
 	for rows.Next() {
 		var p domain.Product
 		err := rows.Scan(&p.ID, &p.VendorID, &p.CategoryID, &p.Name, &p.Slug, &p.Description, &p.PriceAmount, &p.Currency,
-			&p.Status, &p.RejectionReason, &p.IsActive, &p.CreatedAt, &p.UpdatedAt)
+			&p.Status, &p.RejectionReason, &p.IsActive, &p.CreatedAt, &p.UpdatedAt, &p.Version, &p.EnforcedVersion)
 		if err != nil {
 			return nil, err
 		}

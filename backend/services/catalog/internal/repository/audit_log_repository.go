@@ -18,7 +18,7 @@ func NewAuditLogRepository(pool *pgxpool.Pool) *AuditLogRepository {
 
 func (r *AuditLogRepository) Create(ctx context.Context, productID, actorUserID, action string, reason *string) error {
 	const query = `INSERT INTO product_audit_logs (product_id, actor_user_id, action, reason) VALUES ($1, $2, $3, $4)`
-	_, err := r.pool.Exec(ctx, query, productID, actorUserID, action, reason)
+	_, err := connection(ctx, r.pool).Exec(ctx, query, productID, actorUserID, action, reason)
 	return err
 }
 
@@ -32,7 +32,7 @@ func (r *AuditLogRepository) List(ctx context.Context, productID string) ([]*dom
 		WHERE product_id = $1
 		ORDER BY created_at DESC`
 
-	rows, err := r.pool.Query(ctx, query, productID)
+	rows, err := connection(ctx, r.pool).Query(ctx, query, productID)
 	if err != nil {
 		return nil, err
 	}

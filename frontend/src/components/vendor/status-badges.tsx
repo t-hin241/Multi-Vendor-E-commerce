@@ -7,12 +7,14 @@ import type { ProductStatus, RestockStatus, VendorStatus } from "@/lib/api-clien
 type Variant = VariantProps<typeof badgeVariants>["variant"];
 
 const VENDOR_STATUS_VARIANT: Record<VendorStatus, Variant> = {
+  suspended: "destructive",
   pending: "warning",
   approved: "success",
   rejected: "destructive",
 };
 
 const VENDOR_STATUS_LABEL: Record<VendorStatus, string> = {
+  suspended: "Tạm khóa bán hàng",
   pending: "Chờ duyệt",
   approved: "Đã duyệt",
   rejected: "Bị từ chối",
@@ -20,7 +22,11 @@ const VENDOR_STATUS_LABEL: Record<VendorStatus, string> = {
 
 export function VendorStatusBadge({ status }: { status: VendorStatus }) {
   return (
-    <StatusBadge status={status} variantMap={VENDOR_STATUS_VARIANT} labelMap={VENDOR_STATUS_LABEL} />
+    <StatusBadge
+      status={status}
+      variantMap={VENDOR_STATUS_VARIANT}
+      labelMap={VENDOR_STATUS_LABEL}
+    />
   );
 }
 

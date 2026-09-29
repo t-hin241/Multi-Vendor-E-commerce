@@ -26,7 +26,7 @@ func (h *AdminHandler) ListApplications(c *gin.Context) {
 	limit := parseIntDefault(c.Query("limit"), 20, 1, 100)
 	offset := parseIntDefault(c.Query("offset"), 0, 0, 1_000_000)
 
-	vendors, err := h.vendors.ListApplications(c.Request.Context(), status, limit, offset)
+	vendors, err := h.vendors.ListApplications(c.Request.Context(), middleware.GetUserID(c), status, limit, offset)
 	if err != nil {
 		httpresponse.HandleError(c, h.log, err)
 		return
@@ -48,7 +48,7 @@ func (h *AdminHandler) Approve(c *gin.Context) {
 // GetAuditLog returns the full approve/reject decision history for one
 // vendor application, newest first.
 func (h *AdminHandler) GetAuditLog(c *gin.Context) {
-	entries, err := h.vendors.ListAuditLog(c.Request.Context(), c.Param("id"))
+	entries, err := h.vendors.ListAuditLog(c.Request.Context(), middleware.GetUserID(c), c.Param("id"), parseIntDefault(c.Query("limit"), 20, 1, 100), parseIntDefault(c.Query("offset"), 0, 0, 1000000))
 	if err != nil {
 		httpresponse.HandleError(c, h.log, err)
 		return

@@ -35,7 +35,7 @@ func (h *VendorAddressHandler) Add(c *gin.Context) {
 }
 
 func (h *VendorAddressHandler) ListMine(c *gin.Context) {
-	addresses, err := h.addresses.ListMine(c.Request.Context(), middleware.GetUserID(c), c.Param("vendorId"))
+	addresses, err := h.addresses.ListMine(c.Request.Context(), middleware.GetUserID(c), c.Param("vendorId"), parseIntDefault(c.Query("limit"), 20, 1, 100), parseIntDefault(c.Query("offset"), 0, 0, 1000000))
 	if err != nil {
 		httpresponse.HandleError(c, h.log, err)
 		return

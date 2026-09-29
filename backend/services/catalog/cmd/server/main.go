@@ -8,14 +8,18 @@ import (
 	"os"
 
 	"shopee/backend/pkg/authjwt"
+	sessionconfig "shopee/backend/pkg/config"
 	"shopee/backend/pkg/health"
+	"shopee/backend/pkg/identityclient"
 	"shopee/backend/pkg/logger"
+ "shopee/backend/pkg/middleware"
 	"shopee/backend/pkg/platform/natsclient"
 	"shopee/backend/pkg/platform/objectstorage"
 	"shopee/backend/pkg/platform/postgres"
 	"shopee/backend/pkg/platform/redisclient"
+	"shopee/backend/pkg/serviceauth"
 	"shopee/backend/pkg/shutdown"
-
+	"shopee/backend/pkg/vendorsales"
 	"shopee/backend/services/catalog/internal/adapter"
 	"shopee/backend/services/catalog/internal/config"
 	"shopee/backend/services/catalog/internal/repository"
@@ -29,6 +33,12 @@ func main() {
 	cfg, err := config.Load()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, serviceName+": config error:", err)
+		os.Exit(1)
+	}
+
+	internalServices, err := sessionconfig.LoadInternalServices()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "internal service configuration invalid")
 		os.Exit(1)
 	}
 
@@ -59,7 +69,12 @@ func main() {
 	}
 
 	jwtManager := authjwt.NewManager(cfg.JWTSecret)
-	vendorClient := adapter.NewHTTPVendorClient(cfg.VendorServiceURL)
+	verifier, err := sessionconfig.LoadSessionVerifier()
+	if err != nil {
+		log.Fatal().Err(err).Msg("session verifier configuration invalid")
+	}
+	jwtManager.SetVerifier(verifier)
+	vendorClient := adapter.NewHTTPVendorClient(cfg.VendorServiceURL, internalServices.Key)
 	orderClient := adapter.NewHTTPOrderClient(cfg.OrderServiceURL)
 	inventoryClient := adapter.NewHTTPInventoryClient(cfg.InventoryServiceURL)
 
@@ -81,6 +96,7 @@ func main() {
 		productRepo, imageRepo, mediaRepo, categoryRepo, auditLogRepo, vendorClient, objectStore,
 		vendorClient, orderClient, storefrontCacheRepo, attributeUseCase, productAttributeValueRepo, productVariantRepo,
 		inventoryClient, productPackagingRepo,
+		usecase.Operations{Identity: identityclient.Client{URL: internalServices.IdentityURL, Key: internalServices.Key}, Transactions: repository.Transactions{Pool: dbPool}, Cleanup: repository.ObjectCleanup{Pool: dbPool}, Log: log},
 	)
 
 	categoryHandler := transport.NewCategoryHandler(categoryUseCase, log)
@@ -90,7 +106,7 @@ func main() {
 	internalHandler := transport.NewInternalHandler(productUseCase, log)
 	attributeHandler := transport.NewAttributeHandler(attributeUseCase, log)
 
-	router := transport.NewRouter(cfg.Base.Env, log, jwtManager, categoryHandler, productHandler, storefrontHandler, adminHandler, internalHandler, attributeHandler,
+	router := transport.NewRouter(cfg.Base.Env, log, jwtManager, categoryHandler, productHandler, storefrontHandler, adminHandler, internalHandler, attributeHandler, internalServices.Key,
 		health.Checker{Name: "postgres", Ping: func(ctx context.Context) error { return dbPool.Ping(ctx) }},
 		health.Checker{Name: "redis", Ping: func(ctx context.Context) error { return redisClient.Ping(ctx).Err() }},
 		health.Checker{Name: "object_storage", Ping: objectStore.Ping},
@@ -101,6 +117,18 @@ func main() {
 			return nil
 		}},
 	)
+
+	maintenance:=transport.MaintenanceHandler{Service:usecase.Maintenance{Repository:repository.Maintenance{Pool:dbPool},Identity:identityclient.Client{URL:internalServices.IdentityURL,Key:internalServices.Key}},Log:log}
+ router.GET("/api/catalog/operations",middleware.RequireAuth(jwtManager),middleware.RequireRole("admin"),maintenance.Stats)
+ router.POST("/api/catalog/operations/replay",middleware.RequireAuth(jwtManager),middleware.RequireRole("admin"),maintenance.Replay)
+ salesStore := vendorsales.Store{Pool: dbPool}
+	router.POST("/internal/vendor-status", serviceauth.Require(internalServices.Key, serviceauth.Header), salesStore.Handler(log))
+	reconcileCtx, stopReconcile := context.WithCancel(ctx)
+	defer stopReconcile()
+ go productUseCase.ReconcileCache(reconcileCtx,storefrontCacheRepo)
+	go (repository.ObjectCleanup{Pool: dbPool}).Run(reconcileCtx, objectStore, log)
+	go (repository.StatusOutbox{Pool: dbPool, Publish: (adapter.ProductStatusPublisher{URL: cfg.OrderServiceURL, Key: internalServices.Key}).Publish}).Run(reconcileCtx, log)
+	go (vendorsales.Client{URL: cfg.VendorServiceURL, Key: internalServices.Key}).Reconcile(reconcileCtx, salesStore, log)
 
 	srv := &http.Server{
 		Addr:              ":" + cfg.Base.Port,

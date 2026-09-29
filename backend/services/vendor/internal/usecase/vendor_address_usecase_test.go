@@ -15,7 +15,7 @@ func newAddressFixture(t *testing.T) (*usecase.VendorAddressUseCase, *fakeVendor
 	t.Helper()
 	vendors := newFakeVendorRepository()
 	addresses := newFakeVendorAddressRepository()
-	uc := usecase.NewVendorAddressUseCase(addresses, vendors)
+	uc := usecase.NewVendorAddressUseCase(addresses, vendors, testOps())
 
 	v := &domain.Vendor{UserID: "user-a", ShopName: "Shop A"}
 	if err := vendors.Create(t.Context(), v); err != nil {
@@ -56,7 +56,7 @@ func TestAddresses_OnlyOneDefaultAtATime(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	list, err := uc.ListMine(ctx, userID, vendorID)
+	list, err := uc.ListMine(ctx, userID, vendorID, 100, 0)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

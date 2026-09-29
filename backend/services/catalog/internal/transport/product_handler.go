@@ -62,7 +62,11 @@ func (h *ProductHandler) Submit(c *gin.Context) {
 		return
 	}
 
-	httpresponse.OK(c, http.StatusOK, toProductResponse(p))
+	status := http.StatusOK
+	if p.EnforcedVersion < p.Version {
+		status = http.StatusAccepted
+	}
+	httpresponse.OK(c, status, toProductResponse(p))
 }
 
 func (h *ProductHandler) SetActive(c *gin.Context) {
@@ -78,10 +82,22 @@ func (h *ProductHandler) SetActive(c *gin.Context) {
 		return
 	}
 
-	httpresponse.OK(c, http.StatusOK, toProductResponse(p))
+	status := http.StatusOK
+	if p.EnforcedVersion < p.Version {
+		status = http.StatusAccepted
+	}
+	httpresponse.OK(c, status, toProductResponse(p))
 }
 
 func (h *ProductHandler) UploadImage(c *gin.Context) {
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxUploadBytes)
+	defer func() {
+		if c.Request.MultipartForm != nil {
+			if err := c.Request.MultipartForm.RemoveAll(); err != nil {
+				h.log.Warn().Err(err).Msg("multipart_cleanup_failed")
+			}
+		}
+	}()
 	fileHeader, err := c.FormFile("image")
 	if err != nil {
 		httpresponse.Error(c, http.StatusBadRequest, "validation_error", "An 'image' file field is required")
@@ -143,6 +159,14 @@ func (h *ProductHandler) ListImages(c *gin.Context) {
 // gallery (images or short videos) — a separate feature from UploadImage's
 // plain photo gallery, with its own field name and size ceiling.
 func (h *ProductHandler) UploadMedia(c *gin.Context) {
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxMediaUploadBytes)
+	defer func() {
+		if c.Request.MultipartForm != nil {
+			if err := c.Request.MultipartForm.RemoveAll(); err != nil {
+				h.log.Warn().Err(err).Msg("multipart_cleanup_failed")
+			}
+		}
+	}()
 	fileHeader, err := c.FormFile("media")
 	if err != nil {
 		httpresponse.Error(c, http.StatusBadRequest, "validation_error", "A 'media' file field is required")
@@ -218,6 +242,6 @@ func (h *ProductHandler) ListVariants(c *gin.Context) {
 
 func paginationParams(c *gin.Context) (limit, offset int) {
 	limit = parseIntDefault(c.Query("limit"), 20, 1, 100)
-	offset = parseIntDefault(c.Query("offset"), 0, 0, 1_000_000)
+	offset = parseIntDefault(c.Query("offset"), 0, 0, 10_000)
 	return limit, offset
 }

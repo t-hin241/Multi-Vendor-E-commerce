@@ -2,6 +2,7 @@
 package middleware
 
 import (
+	"context"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 )
@@ -12,6 +13,13 @@ const RequestIDHeader = "X-Request-Id"
 
 // ContextKeyRequestID is the Gin context key the request id is stored under.
 const ContextKeyRequestID = "request_id"
+
+type requestIDContextKey struct{}
+
+func RequestIDFromContext(ctx context.Context) string {
+	id, _ := ctx.Value(requestIDContextKey{}).(string)
+	return id
+}
 
 // RequestID assigns a request id to every request, reusing an inbound id
 // from the gateway (or another upstream caller) when present so a single
@@ -24,6 +32,7 @@ func RequestID() gin.HandlerFunc {
 		}
 
 		c.Set(ContextKeyRequestID, requestID)
+		c.Request = c.Request.WithContext(context.WithValue(c.Request.Context(), requestIDContextKey{}, requestID))
 		c.Header(RequestIDHeader, requestID)
 		c.Next()
 	}

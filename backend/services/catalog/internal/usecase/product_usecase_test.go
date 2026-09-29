@@ -1,7 +1,12 @@
 package usecase_test
 
 import (
+	"bytes"
 	"errors"
+	"github.com/rs/zerolog"
+	"image"
+	"image/jpeg"
+	"slices"
 	"testing"
 
 	"shopee/backend/pkg/apperror"
@@ -10,6 +15,7 @@ import (
 )
 
 type productTestFixture struct {
+	cleanup           *fakeCleanup
 	products          *usecase.ProductUseCase
 	categories        *fakeCategoryRepository
 	vendors           *fakeVendorGateway
@@ -40,6 +46,7 @@ func newProductFixture() *productTestFixture {
 	variants := newFakeProductVariantRepository()
 	inventory := newFakeInventoryGateway()
 	packaging := newFakeProductPackagingRepository()
+	cleanup := &fakeCleanup{}
 
 	products := usecase.NewProductUseCase(
 		newFakeProductRepository(),
@@ -57,9 +64,11 @@ func newProductFixture() *productTestFixture {
 		variants,
 		inventory,
 		packaging,
+		usecase.Operations{Identity: fakeIdentity{}, Transactions: fakeTransactions{}, Cleanup: cleanup, Log: zerolog.Nop()},
 	)
 
 	return &productTestFixture{
+		cleanup:           cleanup,
 		products:          products,
 		categories:        categories,
 		vendors:           vendors,
@@ -92,10 +101,14 @@ func mustAppError(t *testing.T, err error) *apperror.Error {
 func submitForReview(t *testing.T, f *productTestFixture, userID, productID string) {
 	t.Helper()
 	ctx := t.Context()
-	if _, err := f.products.UploadImage(ctx, userID, productID, "image/jpeg", []byte("fake-jpeg-bytes")); err != nil {
+	if _, err := f.products.UploadImage(ctx, userID, productID, "image/jpeg", validJPEG()); err != nil {
 		t.Fatalf("unexpected error uploading image: %v", err)
 	}
 	f.inventory.plainStock[productID] = 10
+	vs, _ := f.variants.ListForProduct(ctx, productID)
+	for _, v := range vs {
+		f.inventory.stock[v.ID] = 10
+	}
 	if _, err := f.products.SubmitForReview(ctx, userID, productID); err != nil {
 		t.Fatalf("unexpected error submitting for review: %v", err)
 	}
@@ -337,14 +350,15 @@ func TestGetPublicBySlug_IncludesVariantsWithLiveStock(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	submitForReview(t, f, "user-1", p.ID)
-	if _, err := f.products.Approve(ctx, p.ID, "admin-1"); err != nil {
-		t.Fatalf("unexpected error approving: %v", err)
-	}
 	v, _, err := f.products.CreateVariant(ctx, "user-1", p.ID, "SNK-S", []string{"opt-s"})
 	if err != nil {
 		t.Fatalf("unexpected error creating variant: %v", err)
 	}
+	submitForReview(t, f, "user-1", p.ID)
+	if _, err := f.products.Approve(ctx, p.ID, "admin-1"); err != nil {
+		t.Fatalf("unexpected error approving: %v", err)
+	}
+
 	f.inventory.stock[v.ID] = 7
 
 	_, _, _, _, variants, _, degraded, _, err := f.products.GetPublicBySlug(ctx, p.Slug, "", "")
@@ -379,12 +393,12 @@ func TestGetPublicBySlug_ResolvesOptionLabelsWhenMissingFromTemplate(t *testing.
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
+	if _, _, err := f.products.CreateVariant(ctx, "user-1", p.ID, "SNK-S", []string{"opt-s"}); err != nil {
+		t.Fatalf("unexpected error creating variant: %v", err)
+	}
 	submitForReview(t, f, "user-1", p.ID)
 	if _, err := f.products.Approve(ctx, p.ID, "admin-1"); err != nil {
 		t.Fatalf("unexpected error approving: %v", err)
-	}
-	if _, _, err := f.products.CreateVariant(ctx, "user-1", p.ID, "SNK-S", []string{"opt-s"}); err != nil {
-		t.Fatalf("unexpected error creating variant: %v", err)
 	}
 
 	// Simulate the category_attribute_rules gap: the rule-driven template no
@@ -417,14 +431,15 @@ func TestGetPublicBySlug_FallsBackToCacheWhenInventoryFails(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	submitForReview(t, f, "user-1", p.ID)
-	if _, err := f.products.Approve(ctx, p.ID, "admin-1"); err != nil {
-		t.Fatalf("unexpected error approving: %v", err)
-	}
 	v, _, err := f.products.CreateVariant(ctx, "user-1", p.ID, "SNK-S", []string{"opt-s"})
 	if err != nil {
 		t.Fatalf("unexpected error creating variant: %v", err)
 	}
+	submitForReview(t, f, "user-1", p.ID)
+	if _, err := f.products.Approve(ctx, p.ID, "admin-1"); err != nil {
+		t.Fatalf("unexpected error approving: %v", err)
+	}
+
 	f.storefrontCache.variantStock[v.ID] = 3
 	f.inventory.err = errors.New("inventory service unreachable")
 
@@ -449,13 +464,13 @@ func TestGetPublicBySlug_IncludesMedia(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
+	uploaded, err := f.products.UploadMedia(ctx, "user-1", p.ID, "video/mp4", validMP4Header())
+	if err != nil {
+		t.Fatalf("unexpected error uploading media: %v", err)
+	}
 	submitForReview(t, f, "user-1", p.ID)
 	if _, err := f.products.Approve(ctx, p.ID, "admin-1"); err != nil {
 		t.Fatalf("unexpected error approving: %v", err)
-	}
-	uploaded, err := f.products.UploadMedia(ctx, "user-1", p.ID, "video/mp4", []byte("fake-mp4-bytes"))
-	if err != nil {
-		t.Fatalf("unexpected error uploading media: %v", err)
 	}
 
 	_, _, media, _, _, _, _, _, err := f.products.GetPublicBySlug(ctx, p.Slug, "", "")
@@ -767,7 +782,7 @@ func TestUploadImage_RejectsNonOwner(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	_, err = f.products.UploadImage(ctx, "user-2", p.ID, "image/jpeg", []byte("fake-jpeg-bytes"))
+	_, err = f.products.UploadImage(ctx, "user-2", p.ID, "image/jpeg", validJPEG())
 	appErr := mustAppError(t, err)
 	if appErr.Code != apperror.CodeForbidden {
 		t.Errorf("expected forbidden for a non-owner upload, got %v", appErr.Code)
@@ -784,7 +799,7 @@ func TestUploadImage_SucceedsForOwner(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	img, err := f.products.UploadImage(ctx, "user-1", p.ID, "image/jpeg", []byte("fake-jpeg-bytes"))
+	img, err := f.products.UploadImage(ctx, "user-1", p.ID, "image/jpeg", validJPEG())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -806,11 +821,11 @@ func TestUploadImage_ReplacesExistingImage(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	first, err := f.products.UploadImage(ctx, "user-1", p.ID, "image/jpeg", []byte("first"))
+	first, err := f.products.UploadImage(ctx, "user-1", p.ID, "image/jpeg", validJPEG())
 	if err != nil {
 		t.Fatalf("unexpected error uploading first image: %v", err)
 	}
-	second, err := f.products.UploadImage(ctx, "user-1", p.ID, "image/jpeg", []byte("second"))
+	second, err := f.products.UploadImage(ctx, "user-1", p.ID, "image/jpeg", validJPEG())
 	if err != nil {
 		t.Fatalf("unexpected error uploading second image: %v", err)
 	}
@@ -825,8 +840,8 @@ func TestUploadImage_ReplacesExistingImage(t *testing.T) {
 	if len(images) != 1 || images[0].ID != second.ID {
 		t.Fatalf("expected only the replacement image to remain, got %+v", images)
 	}
-	if _, stillStored := f.store.objects[first.ObjectKey]; stillStored {
-		t.Errorf("expected the first image's object to be deleted from storage")
+	if _, stillStored := f.store.objects[first.ObjectKey]; !stillStored || !slices.Contains(f.cleanup.keys, first.ObjectKey) {
+		t.Fatal("replaced object must stay until queued cleanup runs")
 	}
 }
 
@@ -857,7 +872,7 @@ func TestListImagesForOwner_ReturnsUploadedItem(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if _, err := f.products.UploadImage(ctx, "user-1", p.ID, "image/jpeg", []byte("fake-jpeg-bytes")); err != nil {
+	if _, err := f.products.UploadImage(ctx, "user-1", p.ID, "image/jpeg", validJPEG()); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -897,7 +912,7 @@ func TestDeleteImage_RejectsNonOwner(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if _, err := f.products.UploadImage(ctx, "user-1", p.ID, "image/jpeg", []byte("fake-jpeg-bytes")); err != nil {
+	if _, err := f.products.UploadImage(ctx, "user-1", p.ID, "image/jpeg", validJPEG()); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -917,7 +932,7 @@ func TestDeleteImage_RemovesTheImage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	img, err := f.products.UploadImage(ctx, "user-1", p.ID, "image/jpeg", []byte("fake-jpeg-bytes"))
+	img, err := f.products.UploadImage(ctx, "user-1", p.ID, "image/jpeg", validJPEG())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -933,8 +948,8 @@ func TestDeleteImage_RemovesTheImage(t *testing.T) {
 	if len(images) != 0 {
 		t.Errorf("expected no images after delete, got %+v", images)
 	}
-	if _, stillStored := f.store.objects[img.ObjectKey]; stillStored {
-		t.Errorf("expected the deleted image's object to be removed from storage")
+	if _, stillStored := f.store.objects[img.ObjectKey]; !stillStored || !slices.Contains(f.cleanup.keys, img.ObjectKey) {
+		t.Fatal("detached object must stay until queued cleanup runs")
 	}
 }
 
@@ -964,7 +979,7 @@ func TestUploadMedia_RejectsNonOwner(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	_, err = f.products.UploadMedia(ctx, "user-2", p.ID, "video/mp4", []byte("fake-mp4-bytes"))
+	_, err = f.products.UploadMedia(ctx, "user-2", p.ID, "video/mp4", validMP4Header())
 	appErr := mustAppError(t, err)
 	if appErr.Code != apperror.CodeForbidden {
 		t.Errorf("expected forbidden for a non-owner upload, got %v", appErr.Code)
@@ -981,7 +996,7 @@ func TestUploadMedia_SucceedsForOwnerImage(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	m, err := f.products.UploadMedia(ctx, "user-1", p.ID, "image/jpeg", []byte("fake-jpeg-bytes"))
+	m, err := f.products.UploadMedia(ctx, "user-1", p.ID, "image/jpeg", validJPEG())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -991,7 +1006,7 @@ func TestUploadMedia_SucceedsForOwnerImage(t *testing.T) {
 	if m.ContentType != "image/jpeg" {
 		t.Errorf("expected content type image/jpeg, got %q", m.ContentType)
 	}
-	if m.SizeBytes != int64(len("fake-jpeg-bytes")) {
+	if m.SizeBytes != int64(len(validJPEG())) {
 		t.Errorf("expected size_bytes to match the payload length, got %d", m.SizeBytes)
 	}
 	if m.Position != 0 {
@@ -1009,7 +1024,7 @@ func TestUploadMedia_SucceedsForOwnerVideo(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	m, err := f.products.UploadMedia(ctx, "user-1", p.ID, "video/webm", []byte("fake-webm-bytes"))
+	m, err := f.products.UploadMedia(ctx, "user-1", p.ID, "video/webm", []byte{0x1a, 0x45, 0xdf, 0xa3, 0x9f})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1031,10 +1046,10 @@ func TestUploadMedia_SecondItemGetsNextPosition(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if _, err := f.products.UploadMedia(ctx, "user-1", p.ID, "image/jpeg", []byte("first")); err != nil {
+	if _, err := f.products.UploadMedia(ctx, "user-1", p.ID, "image/jpeg", validJPEG()); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	second, err := f.products.UploadMedia(ctx, "user-1", p.ID, "video/mp4", []byte("second"))
+	second, err := f.products.UploadMedia(ctx, "user-1", p.ID, "video/mp4", validMP4Header())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1089,12 +1104,12 @@ func TestUploadMedia_RejectsSixthItem(t *testing.T) {
 	}
 
 	for i := 0; i < 5; i++ {
-		if _, err := f.products.UploadMedia(ctx, "user-1", p.ID, "image/jpeg", []byte("item")); err != nil {
+		if _, err := f.products.UploadMedia(ctx, "user-1", p.ID, "image/jpeg", validJPEG()); err != nil {
 			t.Fatalf("unexpected error uploading item %d: %v", i, err)
 		}
 	}
 
-	_, err = f.products.UploadMedia(ctx, "user-1", p.ID, "image/jpeg", []byte("sixth"))
+	_, err = f.products.UploadMedia(ctx, "user-1", p.ID, "image/jpeg", validJPEG())
 	appErr := mustAppError(t, err)
 	if appErr.Code != apperror.CodeValidation {
 		t.Errorf("expected validation error for a sixth media item, got %v", appErr.Code)
@@ -1128,7 +1143,7 @@ func TestListMediaForOwner_ReturnsUploadedItems(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if _, err := f.products.UploadMedia(ctx, "user-1", p.ID, "image/jpeg", []byte("fake-jpeg-bytes")); err != nil {
+	if _, err := f.products.UploadMedia(ctx, "user-1", p.ID, "image/jpeg", validJPEG()); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -1150,7 +1165,7 @@ func TestSubmitForReview_SucceedsWithImageAndStock(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if _, err := f.products.UploadImage(ctx, "user-1", p.ID, "image/jpeg", []byte("fake-jpeg-bytes")); err != nil {
+	if _, err := f.products.UploadImage(ctx, "user-1", p.ID, "image/jpeg", validJPEG()); err != nil {
 		t.Fatalf("unexpected error uploading image: %v", err)
 	}
 	f.inventory.plainStock[p.ID] = 5
@@ -1209,7 +1224,7 @@ func TestSubmitForReview_RejectsWithNoStock(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if _, err := f.products.UploadImage(ctx, "user-1", p.ID, "image/jpeg", []byte("fake-jpeg-bytes")); err != nil {
+	if _, err := f.products.UploadImage(ctx, "user-1", p.ID, "image/jpeg", validJPEG()); err != nil {
 		t.Fatalf("unexpected error uploading image: %v", err)
 	}
 	// No inventory set up at all.
@@ -1234,7 +1249,7 @@ func TestSubmitForReview_RejectsWhenOnlySomeVariantsAreStocked(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if _, err := f.products.UploadImage(ctx, "user-1", p.ID, "image/jpeg", []byte("fake-jpeg-bytes")); err != nil {
+	if _, err := f.products.UploadImage(ctx, "user-1", p.ID, "image/jpeg", validJPEG()); err != nil {
 		t.Fatalf("unexpected error uploading image: %v", err)
 	}
 	vs, _, err := f.products.CreateVariant(ctx, "user-1", p.ID, "SNK-S", []string{"opt-s"})
@@ -1269,4 +1284,15 @@ func TestSubmitForReview_RejectsNonOwner(t *testing.T) {
 	if appErr.Code != apperror.CodeForbidden {
 		t.Errorf("expected forbidden for a non-owner, got %v", appErr.Code)
 	}
+}
+
+func validJPEG() []byte {
+	var b bytes.Buffer
+	if err := jpeg.Encode(&b, image.NewRGBA(image.Rect(0, 0, 2, 2)), nil); err != nil {
+		panic(err)
+	}
+	return b.Bytes()
+}
+func validMP4Header() []byte {
+	return []byte{0, 0, 0, 24, 102, 116, 121, 112, 109, 112, 52, 50, 0, 0, 0, 0, 109, 112, 52, 50, 105, 115, 111, 109}
 }

@@ -16,22 +16,26 @@ type simulateRequest struct {
 }
 
 type paymentIntentResponse struct {
-	ID               string    `json:"id"`
-	OrderID          string    `json:"order_id"`
-	Amount           int64     `json:"amount"`
-	Currency         string    `json:"currency"`
-	Status           string    `json:"status"`
-	Provider         string    `json:"provider"`
-	ProviderIntentID string    `json:"provider_intent_id"`
-	FailureReason    *string   `json:"failure_reason,omitempty"`
-	CreatedAt        time.Time `json:"created_at"`
-	UpdatedAt        time.Time `json:"updated_at"`
+	ID               string     `json:"id"`
+	OrderID          string     `json:"order_id"`
+	Amount           int64      `json:"amount"`
+	Currency         string     `json:"currency"`
+	Status           string     `json:"status"`
+	Provider         string     `json:"provider"`
+	ProviderIntentID string     `json:"provider_intent_id"`
+	CheckoutURL      string     `json:"checkout_url,omitempty"`
+	QRCode           string     `json:"qr_code,omitempty"`
+	ExpiresAt        *time.Time `json:"expires_at,omitempty"`
+	FailureReason    *string    `json:"failure_reason,omitempty"`
+	CreatedAt        time.Time  `json:"created_at"`
+	UpdatedAt        time.Time  `json:"updated_at"`
 }
 
 func toPaymentIntentResponse(i *domain.PaymentIntent) paymentIntentResponse {
 	return paymentIntentResponse{
 		ID: i.ID, OrderID: i.OrderID, Amount: i.Amount, Currency: i.Currency,
 		Status: string(i.Status), Provider: i.Provider, ProviderIntentID: i.ProviderIntentID,
+		CheckoutURL: i.CheckoutURL, QRCode: i.QRCode, ExpiresAt: i.ExpiresAt,
 		FailureReason: i.FailureReason, CreatedAt: i.CreatedAt, UpdatedAt: i.UpdatedAt,
 	}
 }

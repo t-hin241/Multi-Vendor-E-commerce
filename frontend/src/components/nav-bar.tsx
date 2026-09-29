@@ -4,6 +4,7 @@ import { Menu, LogOut, ShoppingCart, Package, MapPin, Shield, Search } from "luc
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { toast } from "sonner";
 
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
@@ -56,10 +57,14 @@ export function NavBar() {
   const [searchValue, setSearchValue] = useState("");
   const cartQuery = useCart(user?.role === "buyer");
 
-  function handleLogout() {
-    logout();
-    setMobileOpen(false);
-    router.push("/");
+  async function handleLogout() {
+    try {
+      await logout();
+      setMobileOpen(false);
+      router.push("/");
+    } catch {
+      toast.error("Đăng xuất chưa thành công. Vui lòng thử lại.");
+    }
   }
 
   function handleSearchSubmit(e: React.FormEvent) {

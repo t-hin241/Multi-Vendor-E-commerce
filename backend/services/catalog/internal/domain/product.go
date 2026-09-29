@@ -17,6 +17,8 @@ const (
 )
 
 type Product struct {
+	Version         int64
+	EnforcedVersion int64
 	ID              string
 	VendorID        string
 	CategoryID      string
@@ -47,7 +49,7 @@ func (p *Product) IsPubliclyVisible() bool {
 // terminal — no re-review path exists.
 func CanTransition(from, to Status) bool {
 	switch from {
-	case StatusDraft:
+	case StatusDraft, StatusRejected:
 		return to == StatusPendingReview
 	case StatusPendingReview:
 		return to == StatusApproved || to == StatusRejected
@@ -77,8 +79,8 @@ var allowedImageContentTypes = map[string]string{
 }
 
 func ValidateProductInput(name, description string, priceAmount int64) error {
-	if strings.TrimSpace(name) == "" {
-		return apperror.Validation("Product name is required")
+	if strings.TrimSpace(name) == "" || len(name) > 300 || len(description) > 50000 {
+		return apperror.Validation("Product name is required (maximum 300 bytes); description maximum 50000 bytes")
 	}
 	if priceAmount < minPriceAmount {
 		return apperror.Validation("Price must be a positive amount")

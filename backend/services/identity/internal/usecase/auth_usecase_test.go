@@ -2,8 +2,8 @@ package usecase_test
 
 import (
 	"bytes"
-	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/rs/zerolog"
@@ -18,36 +18,33 @@ func newTestAuthUseCase() *usecase.AuthUseCase {
 	return uc
 }
 
-// newTestAuthUseCaseWithLog wires a real (non-discarding) logger so tests
-// that need the dev-only password reset token can recover it from the
-// structured log line, the same way a developer would locally.
-func newTestAuthUseCaseWithLog() (*usecase.AuthUseCase, *bytes.Buffer) {
-	buf := &bytes.Buffer{}
-	log := zerolog.New(buf)
-
-	uc := usecase.NewAuthUseCase(
-		newFakeUserRepository(),
-		newFakeRefreshTokenRepository(),
-		newFakePasswordResetRepository(),
-		authjwt.NewManager("test-secret"),
-		log,
-		"development",
-	)
-	return uc, buf
+type authFixture struct {
+	log    *bytes.Buffer
+	resets *fakePasswordResetRepository
 }
 
-func extractResetToken(t *testing.T, buf *bytes.Buffer) string {
+func newTestAuthUseCaseWithLog() (*usecase.AuthUseCase, *authFixture) {
+	buf := &bytes.Buffer{}
+	tokenCipher, err := usecase.NewTokenCipher(bytes.Repeat([]byte{1}, 32))
+	if err != nil {
+		panic(err)
+	}
+	resets := newFakePasswordResetRepository()
+	resets.cipher = tokenCipher
+	uc := usecase.NewAuthUseCase(newFakeUserRepository(), newFakeRefreshTokenRepository(), resets, authjwt.NewManager("test-secret"), zerolog.New(buf), &fakeTransactions{}, tokenCipher)
+	return uc, &authFixture{buf, resets}
+}
+func (f *authFixture) Reset() { f.log.Reset() }
+func extractResetToken(t *testing.T, f *authFixture) string {
 	t.Helper()
-	var entry struct {
-		ResetToken string `json:"reset_token"`
+	token := f.resets.capturedToken
+	if token == "" {
+		t.Fatal("reset material not queued")
 	}
-	if err := json.Unmarshal(buf.Bytes(), &entry); err != nil {
-		t.Fatalf("failed to parse log line: %v (log: %s)", err, buf.String())
+	if strings.Contains(f.log.String(), token) || strings.Contains(f.log.String(), "reset_token") {
+		t.Fatal("reset secret leaked to logs")
 	}
-	if entry.ResetToken == "" {
-		t.Fatalf("expected a reset_token field in the log line, got: %s", buf.String())
-	}
-	return entry.ResetToken
+	return token
 }
 
 func mustAppError(t *testing.T, err error) *apperror.Error {
@@ -167,7 +164,7 @@ func TestRefreshToken_RotatesAndInvalidatesOldToken(t *testing.T) {
 		t.Fatal("expected a new refresh token to be issued")
 	}
 
-	// The old (now-rotated) refresh token must no longer work.
+	// Reject the refresh token consumed by rotation.
 	_, err = uc.RefreshToken(ctx, registered.RefreshToken)
 	appErr := mustAppError(t, err)
 	if appErr.Code != apperror.CodeUnauthorized {
@@ -194,12 +191,12 @@ func TestResetPassword_RevokesAllSessionsAndAllowsNewLogin(t *testing.T) {
 		t.Fatalf("unexpected error resetting password: %v", err)
 	}
 
-	// The pre-reset refresh token must be revoked...
+	// Reject refresh tokens issued before the password reset.
 	if _, err := uc.RefreshToken(ctx, registered.RefreshToken); err == nil {
 		t.Error("expected the pre-reset refresh token to be revoked")
 	}
 
-	// ...but the new password logs in fine, and the old one no longer does.
+	// Accept the new password and reject the previous password.
 	if _, err := uc.Login(ctx, "alice@example.com", "brand-new-password"); err != nil {
 		t.Errorf("expected login with the new password to succeed: %v", err)
 	}
@@ -207,7 +204,7 @@ func TestResetPassword_RevokesAllSessionsAndAllowsNewLogin(t *testing.T) {
 		t.Error("expected login with the old password to fail")
 	}
 
-	// A reset token is single-use.
+	// Reject reuse of the reset token.
 	if err := uc.ResetPassword(ctx, resetToken, "another-password123"); err == nil {
 		t.Error("expected a reused reset token to be rejected")
 	}

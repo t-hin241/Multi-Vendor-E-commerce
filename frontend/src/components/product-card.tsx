@@ -2,19 +2,41 @@
 
 import { ImageOff } from "lucide-react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import * as api from "@/lib/api-client";
 import type { Product } from "@/lib/api-client";
 import { useAuth } from "@/lib/auth-context";
 import { formatMoney } from "@/lib/format";
 import { useAddCartItem } from "@/lib/hooks/use-cart";
 
 export function ProductCard({ product }: { product: Product }) {
-  const { user } = useAuth();
+  const router = useRouter();
+  const { user, accessToken } = useAuth();
   const addToCart = useAddCartItem();
   const canAddToCart = user?.role === "buyer";
   const isAdding = addToCart.isPending && addToCart.variables?.productId === product.id;
+
+  async function handleBuyNow() {
+    try {
+      // Storefront listings deliberately omit variants. Resolve the public
+      // detail before changing the cart so a variant product never receives
+      // an invalid product-only cart request. The buyer chooses its option
+      // on the product page, then its Buy action continues to checkout.
+      const detail = await api.getProductBySlug(product.slug, accessToken ?? undefined);
+      if ((detail.variants?.length ?? 0) > 0) {
+        router.push(`/products/${product.slug}`);
+        return;
+      }
+
+      await addToCart.mutateAsync({ productId: product.id });
+      router.push("/checkout");
+    } catch {
+      // The cart mutation displays the failure message.
+    }
+  }
 
   return (
     <Card className="group gap-0 overflow-hidden py-0 transition-shadow hover:shadow-md hover:ring-1 hover:ring-primary/30">
@@ -49,9 +71,9 @@ export function ProductCard({ product }: { product: Product }) {
             size="sm"
             className="mt-2"
             disabled={isAdding}
-            onClick={() => addToCart.mutate({ productId: product.id })}
+            onClick={handleBuyNow}
           >
-            {isAdding ? "Đang thêm…" : "Thêm vào giỏ"}
+            {isAdding ? "Đang thêm…" : "Mua ngay"}
           </Button>
         )}
       </CardContent>

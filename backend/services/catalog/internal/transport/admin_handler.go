@@ -64,7 +64,11 @@ func (h *AdminHandler) Approve(c *gin.Context) {
 		return
 	}
 
-	httpresponse.OK(c, http.StatusOK, toProductResponse(p))
+	status := http.StatusOK
+	if p.EnforcedVersion < p.Version {
+		status = http.StatusAccepted
+	}
+	httpresponse.OK(c, status, toProductResponse(p))
 }
 
 func (h *AdminHandler) Reject(c *gin.Context) {
@@ -80,5 +84,9 @@ func (h *AdminHandler) Reject(c *gin.Context) {
 		return
 	}
 
-	httpresponse.OK(c, http.StatusOK, toProductResponse(p))
+	status := http.StatusOK
+	if p.EnforcedVersion < p.Version {
+		status = http.StatusAccepted
+	}
+	httpresponse.OK(c, status, toProductResponse(p))
 }

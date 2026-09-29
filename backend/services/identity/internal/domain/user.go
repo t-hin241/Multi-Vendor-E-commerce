@@ -1,5 +1,4 @@
-// Package domain holds Identity's entities and business rules. It has no
-// dependency on HTTP, the database driver or any provider SDK.
+// Package domain defines Identity's users, roles and registration rules.
 package domain
 
 import (
@@ -18,8 +17,7 @@ const (
 	RoleAdmin  Role = "admin"
 )
 
-// SelfRegisterableRoles are the roles a user may pick for themselves through
-// public registration. Admin accounts are never created this way.
+// SelfRegisterableRoles allows buyer and vendor roles during public registration.
 var SelfRegisterableRoles = map[Role]bool{
 	RoleBuyer:  true,
 	RoleVendor: true,
@@ -38,18 +36,16 @@ type User struct {
 
 const minPasswordLength = 8
 
-// ValidateRegistration checks the fields a new user must supply, independent
-// of any persistence concern (email uniqueness is checked by the use case,
-// which owns the database round trip).
+// ValidateRegistration validates email, password, full name and registration role.
 func ValidateRegistration(email, password, fullName string, role Role) error {
-	if strings.TrimSpace(fullName) == "" {
+	if strings.TrimSpace(fullName) == "" || len(fullName) > 200 {
 		return apperror.Validation("Full name is required")
 	}
-	if _, err := mail.ParseAddress(email); err != nil {
+	if parsed, err := mail.ParseAddress(email); err != nil || len(email) > 254 || parsed.Address != email {
 		return apperror.Validation("A valid email address is required")
 	}
-	if len(password) < minPasswordLength {
-		return apperror.Validation("Password must be at least 8 characters")
+	if len(password) < minPasswordLength || len(password) > 72 {
+		return apperror.Validation("Password must be 8 to 72 bytes")
 	}
 	if !SelfRegisterableRoles[role] {
 		return apperror.Validation("Role must be buyer or vendor")

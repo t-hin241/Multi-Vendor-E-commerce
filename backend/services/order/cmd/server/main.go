@@ -8,13 +8,17 @@ import (
 	"os"
 
 	"shopee/backend/pkg/authjwt"
+	sessionconfig "shopee/backend/pkg/config"
 	"shopee/backend/pkg/health"
 	"shopee/backend/pkg/logger"
 	"shopee/backend/pkg/platform/natsclient"
 	"shopee/backend/pkg/platform/postgres"
 	"shopee/backend/pkg/platform/redisclient"
+	"shopee/backend/pkg/productsales"
+	"shopee/backend/pkg/serviceauth"
 	"shopee/backend/pkg/shutdown"
-
+	"shopee/backend/pkg/vendorreport"
+	"shopee/backend/pkg/vendorsales"
 	"shopee/backend/services/order/internal/adapter"
 	"shopee/backend/services/order/internal/config"
 	"shopee/backend/services/order/internal/repository"
@@ -28,6 +32,12 @@ func main() {
 	cfg, err := config.Load()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, serviceName+": config error:", err)
+		os.Exit(1)
+	}
+
+	internalServices, err := sessionconfig.LoadInternalServices()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "internal service configuration invalid")
 		os.Exit(1)
 	}
 
@@ -53,9 +63,14 @@ func main() {
 	defer natsConn.Close()
 
 	jwtManager := authjwt.NewManager(cfg.JWTSecret)
+	verifier, err := sessionconfig.LoadSessionVerifier()
+	if err != nil {
+		log.Fatal().Err(err).Msg("session verifier configuration invalid")
+	}
+	jwtManager.SetVerifier(verifier)
 	cartClient := adapter.NewHTTPCartClient(cfg.CartServiceURL)
-	catalogClient := adapter.NewHTTPCatalogClient(cfg.CatalogServiceURL)
-	vendorClient := adapter.NewHTTPVendorClient(cfg.VendorServiceURL)
+	catalogClient := adapter.NewHTTPCatalogClient(cfg.CatalogServiceURL, internalServices.Key)
+	vendorClient := adapter.NewHTTPVendorClient(cfg.VendorServiceURL, internalServices.Key)
 	inventoryClient := adapter.NewHTTPInventoryClient(cfg.InventoryServiceURL)
 	shipmentClient := adapter.NewHTTPShipmentClient(cfg.ShipmentServiceURL)
 	notificationClient := adapter.NewHTTPNotificationClient(cfg.NotificationServiceURL)
@@ -64,6 +79,7 @@ func main() {
 	vendorOrderRepo := repository.NewVendorOrderRepository(dbPool)
 	buyerAddressRepo := repository.NewBuyerAddressRepository(dbPool)
 	commissionRuleRepo := repository.NewCommissionRuleRepository(dbPool)
+	returnRequestRepo := repository.NewReturnRequestRepository(dbPool)
 
 	orderUseCase := usecase.NewOrderUseCase(
 		orderRepo, vendorOrderRepo, buyerAddressRepo, commissionRuleRepo,
@@ -73,8 +89,9 @@ func main() {
 	addressHandler := transport.NewBuyerAddressHandler(orderUseCase, log)
 	adminHandler := transport.NewAdminHandler(orderUseCase, log)
 	internalHandler := transport.NewInternalHandler(orderUseCase, log)
+	returnHandler := transport.NewReturnHandler(usecase.NewReturnUseCase(returnRequestRepo, vendorClient), log)
 
-	router := transport.NewRouter(cfg.Base.Env, log, jwtManager, orderHandler, addressHandler, adminHandler, internalHandler,
+	router := transport.NewRouter(cfg.Base.Env, log, jwtManager, orderHandler, addressHandler, adminHandler, internalHandler, returnHandler,
 		health.Checker{Name: "postgres", Ping: func(ctx context.Context) error { return dbPool.Ping(ctx) }},
 		health.Checker{Name: "redis", Ping: func(ctx context.Context) error { return redisClient.Ping(ctx).Err() }},
 		health.Checker{Name: "nats", Ping: func(ctx context.Context) error {
@@ -84,6 +101,15 @@ func main() {
 			return nil
 		}},
 	)
+
+	salesStore := vendorsales.Store{Pool: dbPool}
+	router.POST("/internal/vendor-status", serviceauth.Require(internalServices.Key, serviceauth.Header), salesStore.Handler(log))
+	router.POST("/internal/product-status", serviceauth.Require(internalServices.Key, serviceauth.Header), (productsales.Store{Pool: dbPool}).Handler(log))
+	reconcileCtx, stopReconcile := context.WithCancel(ctx)
+	defer stopReconcile()
+	go (vendorsales.Client{URL: cfg.VendorServiceURL, Key: internalServices.Key}).Reconcile(reconcileCtx, salesStore, log)
+
+	router.GET("/internal/vendor-reports/:vendorId", serviceauth.Require(internalServices.Key, serviceauth.Header), vendorreport.Handler(vendorreport.Service{Repository: vendorOrderRepo}, log))
 
 	srv := &http.Server{
 		Addr:              ":" + cfg.Base.Port,

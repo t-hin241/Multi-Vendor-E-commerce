@@ -9,15 +9,18 @@ import (
 	"time"
 
 	"shopee/backend/pkg/apperror"
+	"shopee/backend/pkg/serviceauth"
+	"shopee/backend/pkg/vendorsales"
 )
 
 type HTTPVendorClient struct {
 	baseURL string
+	key     string
 	client  *http.Client
 }
 
-func NewHTTPVendorClient(baseURL string) *HTTPVendorClient {
-	return &HTTPVendorClient{baseURL: baseURL, client: &http.Client{Timeout: 5 * time.Second}}
+func NewHTTPVendorClient(baseURL, key string) *HTTPVendorClient {
+	return &HTTPVendorClient{baseURL: baseURL, key: key, client: &http.Client{Timeout: 5 * time.Second}}
 }
 
 type vendorStatusResponse struct {
@@ -27,9 +30,7 @@ type vendorStatusResponse struct {
 	} `json:"data"`
 }
 
-// GetApprovedVendorID confirms vendorID both belongs to userID and is
-// approved, echoing it back on success. A user may own several shops
-// (1:N), so the caller always names which one it's acting as.
+// GetApprovedVendorID allows an approved or suspended owner to fulfill existing orders.
 func (c *HTTPVendorClient) GetApprovedVendorID(ctx context.Context, userID, vendorID string) (string, error) {
 	endpoint := fmt.Sprintf("%s/internal/vendors/%s/owned-by/%s", c.baseURL, url.PathEscape(vendorID), url.PathEscape(userID))
 
@@ -38,13 +39,14 @@ func (c *HTTPVendorClient) GetApprovedVendorID(ctx context.Context, userID, vend
 		return "", apperror.Internal(err)
 	}
 
+	serviceauth.SetRequestHeaders(req, c.key)
 	resp, err := c.client.Do(req)
 	if err != nil {
 		return "", apperror.Internal(err)
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode == http.StatusNotFound {
+	if resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusForbidden {
 		return "", apperror.Forbidden("You must have an approved vendor account to view vendor orders")
 	}
 	if resp.StatusCode != http.StatusOK {
@@ -55,9 +57,13 @@ func (c *HTTPVendorClient) GetApprovedVendorID(ctx context.Context, userID, vend
 	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
 		return "", apperror.Internal(err)
 	}
-	if body.Data.Status != "approved" {
+	if body.Data.Status != "approved" && body.Data.Status != "suspended" {
 		return "", apperror.Forbidden("You must have an approved vendor account to view vendor orders")
 	}
 
 	return body.Data.VendorID, nil
+}
+
+func (c *HTTPVendorClient) Approved(ctx context.Context, ids []string) (map[string]int64, error) {
+	return (vendorsales.Client{URL: c.baseURL, Key: c.key}).Approved(ctx, ids)
 }

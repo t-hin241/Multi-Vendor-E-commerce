@@ -54,6 +54,9 @@ type PaymentIntent struct {
 	Status           Status
 	Provider         string
 	ProviderIntentID string
+	CheckoutURL      string
+	QRCode           string
+	ExpiresAt        *time.Time
 	FailureReason    *string
 	CreatedAt        time.Time
 	UpdatedAt        time.Time

@@ -4,6 +4,7 @@
 package config
 
 import (
+	"encoding/base64"
 	"fmt"
 	"os"
 	"strconv"
@@ -13,10 +14,14 @@ import (
 )
 
 type Config struct {
-	Base                   config.Base
-	JWTSecret              string
-	NotificationServiceURL string
-	ObjectStorage          objectstorage.Config
+	PayoutKey                        []byte
+	PayoutServiceKey                 string
+	Base                             config.Base
+	JWTSecret                        string
+	Internal                         config.InternalServices
+	CatalogURL, OrderURL, PaymentURL string
+	NotificationServiceURL           string
+	ObjectStorage                    objectstorage.Config
 }
 
 func Load() (Config, error) {
@@ -40,7 +45,27 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 
+	payoutRaw, err := requireEnv("VENDOR_PAYOUT_ENCRYPTION_KEY")
+	if err != nil {
+		return Config{}, err
+	}
+	payoutKey, err := base64.StdEncoding.DecodeString(payoutRaw)
+	if err != nil || len(payoutKey) != 32 {
+		return Config{}, fmt.Errorf("VENDOR_PAYOUT_ENCRYPTION_KEY must be base64 for exactly 32 bytes")
+	}
+	payoutServiceKey, err := requireEnv("VENDOR_PAYOUT_SERVICE_KEY")
+	if err != nil || len(payoutServiceKey) < 32 {
+		return Config{}, fmt.Errorf("VENDOR_PAYOUT_SERVICE_KEY must contain at least 32 characters")
+	}
+	internal, err := config.LoadInternalServices()
+	if err != nil {
+		return Config{}, err
+	}
+	if payoutServiceKey == internal.Key {
+		return Config{}, fmt.Errorf("payout scope key must differ from internal service key")
+	}
 	return Config{
+		PaymentURL: envDefault("PAYMENT_SERVICE_URL", "http://payment:8087"), PayoutKey: payoutKey, PayoutServiceKey: payoutServiceKey, Internal: internal, CatalogURL: envDefault("CATALOG_SERVICE_URL", "http://catalog:8083"), OrderURL: envDefault("ORDER_SERVICE_URL", "http://order:8086"),
 		Base:                   base,
 		JWTSecret:              jwtSecret,
 		NotificationServiceURL: notificationServiceURL,
@@ -88,4 +113,11 @@ func requireEnv(key string) (string, error) {
 		return "", fmt.Errorf("config: required environment variable %q is not set", key)
 	}
 	return v, nil
+}
+
+func envDefault(key, fallback string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return fallback
 }

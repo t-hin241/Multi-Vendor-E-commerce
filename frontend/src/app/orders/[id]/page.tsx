@@ -24,7 +24,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { useAuth } from "@/lib/auth-context";
 import { formatMoney } from "@/lib/format";
-import { useCancelOrder, useOrder } from "@/lib/hooks/use-orders";
+import { useCancelOrder, useCreateReturnRequest, useOrder } from "@/lib/hooks/use-orders";
 import { useMyShipments } from "@/lib/hooks/use-shipments";
 
 export default function OrderDetailPage() {
@@ -43,6 +43,7 @@ export default function OrderDetailPage() {
   const orderQuery = useOrder(params.id, enabled);
   const shipmentsQuery = useMyShipments(enabled);
   const cancelOrder = useCancelOrder(params.id);
+  const createReturn = useCreateReturnRequest(params.id);
 
   if (!user || user.role !== "buyer") return null;
 
@@ -102,6 +103,22 @@ export default function OrderDetailPage() {
           </div>
         ))}
       </Card>
+
+      {order.status === "completed" && order.items && order.items.length > 0 && (
+        <Card className="mt-4">
+          <CardHeader><CardTitle className="text-base">Trả hàng / hoàn tiền</CardTitle></CardHeader>
+          <CardContent className="flex flex-wrap gap-2">
+            {order.items.map((item) => (
+              <Button key={item.id} variant="outline" size="sm" disabled={createReturn.isPending} onClick={() => {
+                const reason = window.prompt(`Lý do trả hàng cho ${item.product_name}:`);
+                if (reason?.trim()) createReturn.mutate({ orderItemId: item.id, reason: reason.trim() });
+              }}>
+                Yêu cầu trả: {item.product_name}
+              </Button>
+            ))}
+          </CardContent>
+        </Card>
+      )}
 
       <Card className="mt-4">
         <CardHeader>

@@ -19,6 +19,7 @@ func NewRouter(
 	addressHandler *BuyerAddressHandler,
 	adminHandler *AdminHandler,
 	internalHandler *InternalHandler,
+	returnHandler *ReturnHandler,
 	checkers ...health.Checker,
 ) *gin.Engine {
 	if env == "production" {
@@ -40,6 +41,8 @@ func NewRouter(
 		buyerGroup.GET("/mine", orderHandler.ListMine)
 		buyerGroup.GET("/:id", orderHandler.Get)
 		buyerGroup.POST("/:id/cancel", orderHandler.Cancel)
+		buyerGroup.POST("/:id/return-requests", returnHandler.Create)
+		buyerGroup.GET("/return-requests/mine", returnHandler.ListMine)
 
 		buyerGroup.POST("/addresses", addressHandler.Add)
 		buyerGroup.GET("/addresses", addressHandler.ListMine)
@@ -50,6 +53,7 @@ func NewRouter(
 
 	vendorGroup := r.Group("/api/orders/vendor", requireAuth, middleware.RequireRole("vendor"))
 	{
+		vendorGroup.POST("/return-requests/:id/confirm", returnHandler.ConfirmByVendor)
 		vendorGroup.GET("/mine", orderHandler.ListVendorMine)
 		vendorGroup.GET("/summary", orderHandler.Summary)
 		vendorGroup.GET("/export.csv", orderHandler.ExportCSV)
@@ -60,6 +64,8 @@ func NewRouter(
 	{
 		adminGroup.GET("", adminHandler.List)
 		adminGroup.POST("/:id/transition", adminHandler.Transition)
+		adminGroup.GET("/return-requests", returnHandler.AdminList)
+		adminGroup.POST("/return-requests/:id/decision", returnHandler.Decide)
 		adminGroup.GET("/commission-rules", adminHandler.ListCommissionRules)
 		adminGroup.POST("/commission-rules", adminHandler.SetCommissionRule)
 	}
@@ -70,6 +76,7 @@ func NewRouter(
 		internalGroup.POST("/:id/mark-paid", internalHandler.MarkPaid)
 		internalGroup.POST("/:id/mark-payment-failed", internalHandler.MarkPaymentFailed)
 		internalGroup.GET("/products/quantity-sold", internalHandler.QuantitySoldByProductIDs)
+		internalGroup.GET("/review-eligibility", internalHandler.ListReviewEligibility)
 	}
 
 	internalVendorOrderGroup := r.Group("/internal/vendor-orders")

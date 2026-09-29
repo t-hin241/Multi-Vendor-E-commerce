@@ -16,6 +16,12 @@ type Config struct {
 	OrderServiceURL   string
 	Provider          string
 	MockWebhookSecret string
+	PayOSClientID     string
+	PayOSAPIKey       string
+	PayOSChecksumKey  string
+	PayOSBaseURL      string
+	PayOSReturnURL    string
+	PayOSCancelURL    string
 }
 
 func Load() (Config, error) {
@@ -35,18 +41,34 @@ func Load() (Config, error) {
 	}
 
 	provider := getEnv("PAYMENT_PROVIDER", "mock")
-	if provider != "mock" {
-		return Config{}, fmt.Errorf("config: unsupported PAYMENT_PROVIDER %q (only \"mock\" is implemented)", provider)
+	if provider != "mock" && provider != "payos" {
+		return Config{}, fmt.Errorf("config: unsupported PAYMENT_PROVIDER %q", provider)
 	}
-
-	mockWebhookSecret, err := requireEnv("PAYMENT_MOCK_WEBHOOK_SECRET")
-	if err != nil {
-		return Config{}, err
+	if base.Env == "production" && provider == "mock" {
+		return Config{}, fmt.Errorf("config: PAYMENT_PROVIDER=mock is forbidden in production")
+	}
+	var mockWebhookSecret, payosClientID, payosAPIKey, payosChecksumKey, payosReturnURL, payosCancelURL string
+	if provider == "mock" {
+		mockWebhookSecret, err = requireEnv("PAYMENT_MOCK_WEBHOOK_SECRET")
+		if err != nil {
+			return Config{}, err
+		}
+	} else {
+		for _, target := range []struct {
+			key string
+			dst *string
+		}{{"PAYOS_CLIENT_ID", &payosClientID}, {"PAYOS_API_KEY", &payosAPIKey}, {"PAYOS_CHECKSUM_KEY", &payosChecksumKey}, {"PAYOS_RETURN_URL", &payosReturnURL}, {"PAYOS_CANCEL_URL", &payosCancelURL}} {
+			value, loadErr := requireEnv(target.key)
+			if loadErr != nil {
+				return Config{}, loadErr
+			}
+			*target.dst = value
+		}
 	}
 
 	return Config{
 		Base: base, JWTSecret: jwtSecret, OrderServiceURL: orderServiceURL,
-		Provider: provider, MockWebhookSecret: mockWebhookSecret,
+		Provider: provider, MockWebhookSecret: mockWebhookSecret, PayOSClientID: payosClientID, PayOSAPIKey: payosAPIKey, PayOSChecksumKey: payosChecksumKey, PayOSBaseURL: getEnv("PAYOS_API_URL", "https://api-merchant.payos.vn"), PayOSReturnURL: payosReturnURL, PayOSCancelURL: payosCancelURL,
 	}, nil
 }
 

@@ -3,7 +3,11 @@ package repository
 import (
 	"context"
 	"errors"
+	"shopee/backend/pkg/apperror"
+	"shopee/backend/pkg/productsales"
+	"shopee/backend/pkg/vendorsales"
 	"strconv"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -44,11 +48,30 @@ func scanOrder(row pgx.Row) (*domain.Order, error) {
 // item in one transaction: a checkout either produces a complete order or
 // none at all.
 func (r *OrderRepository) CreateFromPlan(ctx context.Context, plan *domain.Plan) (*domain.Order, error) {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	for _, vo := range plan.VendorOrders {
+		if plan.VendorVersions[vo.VendorID] < 1 {
+			return nil, apperror.Conflict("Missing live shop permission")
+		}
+	}
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback(ctx)
+
+	if err := vendorsales.LockApproved(ctx, tx, plan.VendorVersions); err != nil {
+		return nil, err
+	}
+	for _, item := range plan.Items {
+		if plan.ProductVersions[item.ProductID] < 1 {
+			return nil, apperror.Conflict("Product version unavailable; retry checkout")
+		}
+	}
+	if err := productsales.LockVisible(ctx, tx, plan.ProductVersions); err != nil {
+		return nil, err
+	}
 
 	order := plan.Order
 	err = tx.QueryRow(ctx,
@@ -187,4 +210,30 @@ func (r *OrderRepository) ListItemsByOrder(ctx context.Context, orderID string) 
 		items = append(items, item)
 	}
 	return items, rows.Err()
+}
+
+// ListReviewEligibility is an internal, purchase-proof-only projection for
+// Review. The buyer can review only completed vendor sub-orders.
+func (r *OrderRepository) ListReviewEligibility(ctx context.Context, buyerID, productID string) ([]*domain.ReviewEligibility, error) {
+	const query = `
+		SELECT oi.id, oi.vendor_order_id, oi.product_id, vo.vendor_id, oi.product_name, oi.variant_label, vo.updated_at
+		FROM order_items oi
+		JOIN orders o ON o.id = oi.order_id
+		JOIN vendor_orders vo ON vo.id = oi.vendor_order_id
+		WHERE o.buyer_id = $1 AND vo.status = 'completed' AND ($2 = '' OR oi.product_id = $2)
+		ORDER BY vo.updated_at DESC`
+	rows, err := r.pool.Query(ctx, query, buyerID, productID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]*domain.ReviewEligibility, 0)
+	for rows.Next() {
+		var item domain.ReviewEligibility
+		if err := rows.Scan(&item.OrderItemID, &item.VendorOrderID, &item.ProductID, &item.VendorID, &item.ProductName, &item.VariantLabel, &item.CompletedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, &item)
+	}
+	return out, rows.Err()
 }

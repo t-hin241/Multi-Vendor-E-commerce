@@ -101,6 +101,28 @@ func (f *fakeOrderRepository) ListItemsByOrder(_ context.Context, orderID string
 	return f.items[orderID], nil
 }
 
+func (f *fakeOrderRepository) ListReviewEligibility(_ context.Context, buyerID, productID string) ([]*domain.ReviewEligibility, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var out []*domain.ReviewEligibility
+	for orderID, order := range f.byID {
+		if order.BuyerID != buyerID {
+			continue
+		}
+		for _, item := range f.items[orderID] {
+			if productID != "" && item.ProductID != productID {
+				continue
+			}
+			vo, err := f.vendorOrders.FindByID(context.Background(), item.VendorOrderID)
+			if err != nil || vo.Status != domain.StatusCompleted {
+				continue
+			}
+			out = append(out, &domain.ReviewEligibility{OrderItemID: item.ID, VendorOrderID: item.VendorOrderID, ProductID: item.ProductID, VendorID: vo.VendorID, ProductName: item.ProductName, VariantLabel: item.VariantLabel, CompletedAt: vo.UpdatedAt})
+		}
+	}
+	return out, nil
+}
+
 func (f *fakeOrderRepository) ListByStatus(_ context.Context, status string, _, _ int) ([]*domain.Order, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -353,6 +375,7 @@ func (f *fakeCatalogGateway) GetVariant(_ context.Context, variantID string) (*a
 }
 
 type fakeVendorGateway struct {
+	saleErr         error
 	approvedVendors map[string]string
 }
 
@@ -563,4 +586,15 @@ func (f *fakeShipmentGateway) CancelForVendorOrder(_ context.Context, vendorOrde
 	defer f.mu.Unlock()
 	f.cancelled[vendorOrderID] = true
 	return nil
+}
+
+func (f *fakeVendorGateway) Approved(ctx context.Context, ids []string) (map[string]int64, error) {
+	if f.saleErr != nil {
+		return nil, f.saleErr
+	}
+	out := map[string]int64{}
+	for _, id := range ids {
+		out[id] = 1
+	}
+	return out, nil
 }

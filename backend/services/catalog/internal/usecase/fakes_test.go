@@ -355,6 +355,7 @@ func (f *fakeAuditLogRepository) List(_ context.Context, productID string) ([]*d
 // fakeVendorGateway simulates Vendor's internal approval-status endpoint.
 // approvedVendors maps a userID to the vendorID it owns, once approved.
 type fakeVendorGateway struct {
+	saleErr         error
 	approvedVendors map[string]string
 }
 
@@ -966,4 +967,43 @@ func (f *fakeProductPackagingRepository) ListByProductIDs(_ context.Context, pro
 		}
 	}
 	return out, nil
+}
+
+func (f *fakeVendorGateway) Approved(ctx context.Context, ids []string) (map[string]int64, error) {
+	if f.saleErr != nil {
+		return nil, f.saleErr
+	}
+	out := map[string]int64{}
+	for _, id := range ids {
+		out[id] = 1
+	}
+	return out, nil
+}
+
+type fakeTransactions struct{}
+
+func (fakeTransactions) Run(ctx context.Context, fn func(context.Context) error) error {
+	return fn(ctx)
+}
+
+type fakeCleanup struct{ keys []string }
+
+func (*fakeCleanup) Track(context.Context, string, string) error { return nil }
+func (f *fakeCleanup) Enqueue(_ context.Context, key, _ string) error {
+	f.keys = append(f.keys, key)
+	return nil
+}
+
+type fakeIdentity struct{}
+
+func (fakeIdentity) RequireRole(context.Context, string, string) error { return nil }
+
+func (f *fakeProductRepository) UpdateContent(ctx context.Context, p *domain.Product) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	stored := *p
+	stored.Status = domain.StatusDraft
+	stored.Version++
+	f.byID[p.ID] = &stored
+	return nil
 }

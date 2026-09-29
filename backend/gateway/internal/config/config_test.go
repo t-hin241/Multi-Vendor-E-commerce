@@ -11,7 +11,7 @@ func requiredUpstreamEnvVars() []string {
 		"IDENTITY_SERVICE_URL", "VENDOR_SERVICE_URL", "CATALOG_SERVICE_URL",
 		"INVENTORY_SERVICE_URL", "CART_SERVICE_URL", "ORDER_SERVICE_URL",
 		"PAYMENT_SERVICE_URL", "SHIPMENT_SERVICE_URL", "ADMIN_SERVICE_URL",
-		"NOTIFICATION_SERVICE_URL",
+		"NOTIFICATION_SERVICE_URL", "REVIEW_SERVICE_URL",
 	}
 }
 
@@ -60,5 +60,8 @@ func TestLoad_BuildsFullUpstreamTable(t *testing.T) {
 	}
 	if cfg.Upstreams["/api/webhooks/shipment-carrier"] != "http://localhost:9000" {
 		t.Errorf("expected /api/webhooks/shipment-carrier to route to the shipment service, got %q", cfg.Upstreams["/api/webhooks/shipment-carrier"])
+	}
+	if cfg.Upstreams["/api/reviews"] != "http://localhost:9000" {
+		t.Errorf("expected /api/reviews to route to review service, got %q", cfg.Upstreams["/api/reviews"])
 	}
 }

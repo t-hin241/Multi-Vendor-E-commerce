@@ -19,6 +19,9 @@ func TestRequestID_GeneratesOneWhenAbsent(t *testing.T) {
 	router.Use(middleware.RequestID())
 	router.GET("/", func(c *gin.Context) {
 		id := middleware.GetRequestID(c)
+		if middleware.RequestIDFromContext(c.Request.Context()) != id {
+			t.Error("request id missing from outbound context")
+		}
 		if id == "" {
 			t.Error("expected a generated request id, got empty string")
 		}

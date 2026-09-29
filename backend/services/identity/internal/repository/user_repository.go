@@ -22,13 +22,18 @@ func NewUserRepository(pool *pgxpool.Pool) *UserRepository {
 var ErrEmailTaken = errors.New("repository: email already registered")
 var ErrUserNotFound = errors.New("repository: user not found")
 
+func (r *UserRepository) Audit(ctx context.Context, actorID, userID, action, reason string) error {
+	_, err := connection(ctx, r.pool).Exec(ctx, `INSERT INTO identity_audit_logs(actor_id,user_id,action,reason) VALUES(NULLIF($1,'')::uuid,$2,$3,$4)`, actorID, userID, action, reason)
+	return err
+}
+
 func (r *UserRepository) Create(ctx context.Context, u *domain.User) error {
 	const query = `
 		INSERT INTO users (email, password_hash, full_name, role)
 		VALUES ($1, $2, $3, $4)
 		RETURNING id, is_active, created_at, updated_at`
 
-	err := r.pool.QueryRow(ctx, query, u.Email, u.PasswordHash, u.FullName, u.Role).
+	err := connection(ctx, r.pool).QueryRow(ctx, query, u.Email, u.PasswordHash, u.FullName, u.Role).
 		Scan(&u.ID, &u.IsActive, &u.CreatedAt, &u.UpdatedAt)
 	if err != nil {
 		var pgErr *pgconn.PgError
@@ -43,9 +48,9 @@ func (r *UserRepository) Create(ctx context.Context, u *domain.User) error {
 func (r *UserRepository) FindByEmail(ctx context.Context, email string) (*domain.User, error) {
 	const query = `
 		SELECT id, email, password_hash, full_name, role, is_active, created_at, updated_at
-		FROM users WHERE lower(email) = lower($1)`
+		FROM users WHERE lower(btrim(email)) = lower(btrim($1))`
 
-	return scanUser(r.pool.QueryRow(ctx, query, email))
+	return scanUser(connection(ctx, r.pool).QueryRow(ctx, query+lockUser(ctx), email))
 }
 
 func (r *UserRepository) FindByID(ctx context.Context, id string) (*domain.User, error) {
@@ -53,12 +58,12 @@ func (r *UserRepository) FindByID(ctx context.Context, id string) (*domain.User,
 		SELECT id, email, password_hash, full_name, role, is_active, created_at, updated_at
 		FROM users WHERE id = $1`
 
-	return scanUser(r.pool.QueryRow(ctx, query, id))
+	return scanUser(connection(ctx, r.pool).QueryRow(ctx, query+lockUser(ctx), id))
 }
 
 func (r *UserRepository) UpdatePasswordHash(ctx context.Context, userID, passwordHash string) error {
 	const query = `UPDATE users SET password_hash = $1, updated_at = now() WHERE id = $2`
-	tag, err := r.pool.Exec(ctx, query, passwordHash, userID)
+	tag, err := connection(ctx, r.pool).Exec(ctx, query, passwordHash, userID)
 	if err != nil {
 		return err
 	}
@@ -68,9 +73,8 @@ func (r *UserRepository) UpdatePasswordHash(ctx context.Context, userID, passwor
 	return nil
 }
 
-// List is admin's user directory: role is an exact-match filter (empty =
-// every role), q is a substring match against email or full name (empty =
-// unfiltered). Newest accounts first.
+// List returns newest accounts first, filtered by role and email/name substring.
+// Empty filters match all accounts.
 func (r *UserRepository) List(ctx context.Context, role, q string, limit, offset int) ([]*domain.User, error) {
 	const query = `
 		SELECT id, email, password_hash, full_name, role, is_active, created_at, updated_at
@@ -80,7 +84,7 @@ func (r *UserRepository) List(ctx context.Context, role, q string, limit, offset
 		ORDER BY created_at DESC
 		LIMIT $3 OFFSET $4`
 
-	rows, err := r.pool.Query(ctx, query, role, q, limit, offset)
+	rows, err := connection(ctx, r.pool).Query(ctx, query, role, q, limit, offset)
 	if err != nil {
 		return nil, err
 	}
@@ -97,12 +101,10 @@ func (r *UserRepository) List(ctx context.Context, role, q string, limit, offset
 	return users, rows.Err()
 }
 
-// SetActive flips a user's account status. Login already checks IsActive
-// (auth_usecase.go), so deactivating blocks future logins; the caller is
-// responsible for also revoking any already-issued session.
+// SetActive updates the account's active flag and modification time.
 func (r *UserRepository) SetActive(ctx context.Context, userID string, isActive bool) error {
 	const query = `UPDATE users SET is_active = $1, updated_at = now() WHERE id = $2`
-	tag, err := r.pool.Exec(ctx, query, isActive, userID)
+	tag, err := connection(ctx, r.pool).Exec(ctx, query, isActive, userID)
 	if err != nil {
 		return err
 	}

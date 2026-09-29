@@ -11,9 +11,12 @@ import (
 )
 
 type Config struct {
-	Base               config.Base
-	JWTSecret          string
-	IdentityServiceURL string
+	Base                                                                       config.Base
+	JWTSecret                                                                  string
+	IdentityServiceURL                                                         string
+	ResetDeliveryKey, SMTPHost, SMTPPort, SMTPUsername, SMTPPassword, SMTPFrom string
+	SMTPAllowPlaintext                                                         bool
+	IdentityServiceKey                                                         string
 }
 
 func Load() (Config, error) {
@@ -32,7 +35,19 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 
-	return Config{Base: base, JWTSecret: jwtSecret, IdentityServiceURL: identityServiceURL}, nil
+	key := os.Getenv("IDENTITY_RESET_DELIVERY_KEY")
+	if len(key) < 32 {
+		return Config{}, fmt.Errorf("IDENTITY_RESET_DELIVERY_KEY must have at least 32 characters")
+	}
+	port := os.Getenv("SMTP_PORT")
+	if port == "" {
+		port = "587"
+	}
+	plain := os.Getenv("SMTP_ALLOW_PLAINTEXT") == "true"
+	if base.Env == "production" && (plain || os.Getenv("SMTP_HOST") == "" || os.Getenv("SMTP_FROM") == "") {
+		return Config{}, fmt.Errorf("production password reset requires SMTP with TLS and sender configured")
+	}
+	return Config{IdentityServiceKey: os.Getenv("IDENTITY_SERVICE_KEY"), Base: base, JWTSecret: jwtSecret, IdentityServiceURL: identityServiceURL, ResetDeliveryKey: key, SMTPHost: os.Getenv("SMTP_HOST"), SMTPPort: port, SMTPUsername: os.Getenv("SMTP_USERNAME"), SMTPPassword: os.Getenv("SMTP_PASSWORD"), SMTPFrom: os.Getenv("SMTP_FROM"), SMTPAllowPlaintext: plain}, nil
 }
 
 func requireEnv(key string) (string, error) {

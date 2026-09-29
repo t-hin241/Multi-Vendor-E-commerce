@@ -6,18 +6,20 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"shopee/backend/pkg/serviceauth"
 	"time"
 
 	"shopee/backend/pkg/apperror"
 )
 
 type HTTPCatalogClient struct {
+	key     string
 	baseURL string
 	client  *http.Client
 }
 
-func NewHTTPCatalogClient(baseURL string) *HTTPCatalogClient {
-	return &HTTPCatalogClient{baseURL: baseURL, client: &http.Client{Timeout: 5 * time.Second}}
+func NewHTTPCatalogClient(baseURL, key string) *HTTPCatalogClient {
+	return &HTTPCatalogClient{key: key, baseURL: baseURL, client: &http.Client{Timeout: 5 * time.Second}}
 }
 
 type internalProductResponse struct {
@@ -38,6 +40,7 @@ func (c *HTTPCatalogClient) GetProductOwnerVendorID(ctx context.Context, product
 		return "", apperror.Internal(err)
 	}
 
+	serviceauth.SetRequestHeaders(req, c.key)
 	resp, err := c.client.Do(req)
 	if err != nil {
 		return "", apperror.Internal(err)
@@ -70,6 +73,7 @@ func (c *HTTPCatalogClient) GetProductStatus(ctx context.Context, productID stri
 		return "", apperror.Internal(err)
 	}
 
+	serviceauth.SetRequestHeaders(req, c.key)
 	resp, err := c.client.Do(req)
 	if err != nil {
 		return "", apperror.Internal(err)
@@ -110,6 +114,7 @@ func (c *HTTPCatalogClient) GetVariantOwner(ctx context.Context, variantID strin
 		return "", "", apperror.Internal(err)
 	}
 
+	serviceauth.SetRequestHeaders(req, c.key)
 	resp, err := c.client.Do(req)
 	if err != nil {
 		return "", "", apperror.Internal(err)

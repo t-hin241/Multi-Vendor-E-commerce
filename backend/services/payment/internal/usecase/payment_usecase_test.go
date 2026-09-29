@@ -36,7 +36,7 @@ func newFixture() *fixture {
 	orders := newFakeOrderGateway()
 	prov := &fakeProvider{}
 
-	uc := usecase.NewPaymentUseCase(intents, events, orders, prov, fakeVerifier{}, nil, "mock", zerolog.Nop())
+	uc := usecase.NewPaymentUseCase(intents, events, orders, prov, fakeVerifier{}, nil, "mock", "", "", zerolog.Nop())
 	return &fixture{uc: uc, intents: intents, events: events, orders: orders, prov: prov}
 }
 
