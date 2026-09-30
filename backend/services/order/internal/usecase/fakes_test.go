@@ -1190,16 +1190,6 @@ func (f *fakeNotificationGateway) Notify(_ context.Context, userID, notifType, r
 	return nil
 }
 
-func (f *fakeNotificationGateway) types() []string {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	var out []string
-	for _, n := range f.sent {
-		out = append(out, n.notifType)
-	}
-	return out
-}
-
 // fakeShipmentGateway quotes feeByVendor (default fee otherwise) and
 // reports unavailable for vendors in unavailable.
 type fakeShipmentGateway struct {
