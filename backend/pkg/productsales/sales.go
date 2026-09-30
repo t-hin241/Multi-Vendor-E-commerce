@@ -2,15 +2,16 @@ package productsales
 
 import (
 	"context"
+	"shopee/backend/pkg/apperror"
+	"shopee/backend/pkg/httpresponse"
+	"sort"
+	"time"
+
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rs/zerolog"
-	"shopee/backend/pkg/apperror"
-	"shopee/backend/pkg/httpresponse"
-	"sort"
-	"time"
 )
 
 type Status struct {

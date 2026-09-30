@@ -37,7 +37,8 @@ export function UserModeration() {
 
   const usersQuery = useQuery({
     queryKey: ["admin-users", role, q],
-    queryFn: () => callWithAuth((token) => api.listUsers(token, { role: role || undefined, q: q || undefined })),
+    queryFn: () =>
+      callWithAuth((token) => api.listUsers(token, { role: role || undefined, q: q || undefined })),
   });
 
   async function handleSetActive(id: string, isActive: boolean) {
@@ -83,7 +84,9 @@ export function UserModeration() {
               {usersQuery.data?.map((u) => (
                 <TableRow key={u.id}>
                   <TableCell className="font-medium whitespace-normal">{u.full_name}</TableCell>
-                  <TableCell className="whitespace-normal text-muted-foreground">{u.email}</TableCell>
+                  <TableCell className="whitespace-normal text-muted-foreground">
+                    {u.email}
+                  </TableCell>
                   <TableCell className="capitalize">{u.role}</TableCell>
                   <TableCell>
                     <Badge variant={u.is_active ? "success" : "destructive"}>

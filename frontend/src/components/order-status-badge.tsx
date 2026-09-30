@@ -25,5 +25,7 @@ const ORDER_STATUS_LABEL: Record<OrderStatus, string> = {
 };
 
 export function OrderStatusBadge({ status }: { status: OrderStatus }) {
-  return <StatusBadge status={status} variantMap={ORDER_STATUS_VARIANT} labelMap={ORDER_STATUS_LABEL} />;
+  return (
+    <StatusBadge status={status} variantMap={ORDER_STATUS_VARIANT} labelMap={ORDER_STATUS_LABEL} />
+  );
 }

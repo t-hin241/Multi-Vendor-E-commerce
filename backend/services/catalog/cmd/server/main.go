@@ -76,7 +76,7 @@ func main() {
 	jwtManager.SetVerifier(verifier)
 	vendorClient := adapter.NewHTTPVendorClient(cfg.VendorServiceURL, internalServices.Key)
 	orderClient := adapter.NewHTTPOrderClient(cfg.OrderServiceURL)
-	inventoryClient := adapter.NewHTTPInventoryClient(cfg.InventoryServiceURL)
+	inventoryClient := adapter.NewHTTPInventoryClient(cfg.InventoryServiceURL, internalServices.Key)
 
 	categoryRepo := repository.NewCategoryRepository(dbPool)
 	productRepo := repository.NewProductRepository(dbPool)
@@ -121,6 +121,7 @@ func main() {
 	maintenance := transport.MaintenanceHandler{Service: usecase.Maintenance{Repository: repository.Maintenance{Pool: dbPool}, Identity: identityclient.Client{URL: internalServices.IdentityURL, Key: internalServices.Key}}, Log: log}
 	router.GET("/api/catalog/operations", middleware.RequireAuth(jwtManager), middleware.RequireRole("admin"), maintenance.Stats)
 	router.POST("/api/catalog/operations/replay", middleware.RequireAuth(jwtManager), middleware.RequireRole("admin"), maintenance.Replay)
+	router.POST("/internal/stock-cache/invalidate", serviceauth.Require(internalServices.Key, serviceauth.Header), maintenance.InvalidateStock)
 	salesStore := vendorsales.Store{Pool: dbPool}
 	router.POST("/internal/vendor-status", serviceauth.Require(internalServices.Key, serviceauth.Header), salesStore.Handler(log))
 	reconcileCtx, stopReconcile := context.WithCancel(ctx)

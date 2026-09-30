@@ -2,12 +2,14 @@ package usecase
 
 import (
 	"context"
+	"time"
 
 	"shopee/backend/services/order/internal/adapter"
 	"shopee/backend/services/order/internal/domain"
 )
 
 type OrderRepositoryPort interface {
+	WithLockedOrder(context.Context, string, func(context.Context) error) error
 	CreateFromPlan(ctx context.Context, plan *domain.Plan) (*domain.Order, error)
 	FindByID(ctx context.Context, id string) (*domain.Order, error)
 	ListByBuyer(ctx context.Context, buyerID string, limit, offset int) ([]*domain.Order, error)
@@ -61,11 +63,26 @@ type CommissionRuleRepositoryPort interface {
 	List(ctx context.Context, limit, offset int) ([]*domain.CommissionRule, error)
 }
 
-// CartGateway lets the use case read a buyer's cart selection and clear it
-// after checkout, without owning any cart data itself.
+// CartGateway is Cart's internal checkout contract: freeze the buyer's cart
+// for one checkout operation, then — once the order stands — consume only
+// the purchased lines. Both calls are idempotent per operation id and use
+// Order's service identity, never the buyer's token.
 type CartGateway interface {
-	GetItems(ctx context.Context, bearerToken string) ([]adapter.CartLine, error)
-	Clear(ctx context.Context, bearerToken string) error
+	Snapshot(ctx context.Context, buyerID, operationID string, expectedVersion *int64) (*adapter.CartSnapshot, error)
+	Consume(ctx context.Context, buyerID, operationID string, lines []adapter.CartConsumeLine) error
+}
+
+// CartConsumptionRepositoryPort persists the durable consume task written
+// with each order (see domain.CartConsumption).
+type CartConsumptionRepositoryPort interface {
+	ListOpenByBuyer(ctx context.Context, buyerID string) ([]*domain.CartConsumption, error)
+	Activate(ctx context.Context, orderID string) error
+	Cancel(ctx context.Context, orderID string) error
+	MarkConsumed(ctx context.Context, orderID string) error
+	RecordFailure(ctx context.Context, orderID, reason string, park bool) error
+	ClaimDue(ctx context.Context, limit int) ([]*domain.CartConsumption, error)
+	ListStaleHeld(ctx context.Context, olderThan time.Time, limit int) ([]*domain.CartConsumption, error)
+	Stats(ctx context.Context) (domain.CartConsumptionStats, error)
 }
 
 // CatalogGateway is the checkout pricing snapshot's source of truth.
@@ -83,6 +100,7 @@ type VendorGateway interface {
 // InventoryGateway is the reserve/release/commit contract used at checkout,
 // on cancellation or payment failure, and on payment success respectively.
 type InventoryGateway interface {
+	Operation(context.Context, string) (*adapter.ReservationReceipt, error)
 	Reserve(ctx context.Context, orderID string, lines []adapter.ReserveLine) error
 	Release(ctx context.Context, orderID string) error
 	Commit(ctx context.Context, orderID string) error

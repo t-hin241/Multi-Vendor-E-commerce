@@ -1,9 +1,10 @@
 package transport
 
 import (
-	"github.com/gin-gonic/gin"
 	"shopee/backend/pkg/httpresponse"
 	"shopee/backend/pkg/middleware"
+
+	"github.com/gin-gonic/gin"
 )
 
 func (h *ProductHandler) UpdateContent(c *gin.Context) {

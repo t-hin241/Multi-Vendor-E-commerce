@@ -106,13 +106,22 @@ export default function OrderDetailPage() {
 
       {order.status === "completed" && order.items && order.items.length > 0 && (
         <Card className="mt-4">
-          <CardHeader><CardTitle className="text-base">Trả hàng / hoàn tiền</CardTitle></CardHeader>
+          <CardHeader>
+            <CardTitle className="text-base">Trả hàng / hoàn tiền</CardTitle>
+          </CardHeader>
           <CardContent className="flex flex-wrap gap-2">
             {order.items.map((item) => (
-              <Button key={item.id} variant="outline" size="sm" disabled={createReturn.isPending} onClick={() => {
-                const reason = window.prompt(`Lý do trả hàng cho ${item.product_name}:`);
-                if (reason?.trim()) createReturn.mutate({ orderItemId: item.id, reason: reason.trim() });
-              }}>
+              <Button
+                key={item.id}
+                variant="outline"
+                size="sm"
+                disabled={createReturn.isPending}
+                onClick={() => {
+                  const reason = window.prompt(`Lý do trả hàng cho ${item.product_name}:`);
+                  if (reason?.trim())
+                    createReturn.mutate({ orderItemId: item.id, reason: reason.trim() });
+                }}
+              >
                 Yêu cầu trả: {item.product_name}
               </Button>
             ))}

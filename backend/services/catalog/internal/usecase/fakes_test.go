@@ -863,17 +863,6 @@ func (f *fakeAttributeRepository) seed(id, code, name string, dataType domain.Da
 	f.byID[id] = &domain.Attribute{ID: id, Code: code, Name: name, DataType: dataType, IsActive: true, CreatedAt: time.Now()}
 }
 
-// seedVariantAxis adds a select attribute marked variant-defining directly,
-// bypassing Create, for variant-related test setup.
-func (f *fakeAttributeRepository) seedVariantAxis(id, code, name string) {
-	f.byID[id] = &domain.Attribute{ID: id, Code: code, Name: name, DataType: domain.DataTypeSelect, IsActive: true, IsVariantDefining: true, CreatedAt: time.Now()}
-}
-
-// seedOption adds an option directly, bypassing AddOption, for test setup.
-func (f *fakeAttributeRepository) seedOption(id, attributeID, value string) {
-	f.options[attributeID] = append(f.options[attributeID], &domain.AttributeOption{ID: id, AttributeID: attributeID, Value: value, CreatedAt: time.Now()})
-}
-
 type fakeCategoryAttributeRuleRepository struct {
 	mu     sync.Mutex
 	rules  []*domain.CategoryAttributeRule

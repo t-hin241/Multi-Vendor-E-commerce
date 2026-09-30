@@ -68,10 +68,10 @@ func main() {
 		log.Fatal().Err(err).Msg("session verifier configuration invalid")
 	}
 	jwtManager.SetVerifier(verifier)
-	cartClient := adapter.NewHTTPCartClient(cfg.CartServiceURL)
+	cartClient := adapter.NewHTTPCartClient(cfg.CartServiceURL, internalServices.Key)
 	catalogClient := adapter.NewHTTPCatalogClient(cfg.CatalogServiceURL, internalServices.Key)
 	vendorClient := adapter.NewHTTPVendorClient(cfg.VendorServiceURL, internalServices.Key)
-	inventoryClient := adapter.NewHTTPInventoryClient(cfg.InventoryServiceURL)
+	inventoryClient := adapter.NewHTTPInventoryClient(cfg.InventoryServiceURL, internalServices.Key)
 	shipmentClient := adapter.NewHTTPShipmentClient(cfg.ShipmentServiceURL)
 	notificationClient := adapter.NewHTTPNotificationClient(cfg.NotificationServiceURL)
 
@@ -80,11 +80,15 @@ func main() {
 	buyerAddressRepo := repository.NewBuyerAddressRepository(dbPool)
 	commissionRuleRepo := repository.NewCommissionRuleRepository(dbPool)
 	returnRequestRepo := repository.NewReturnRequestRepository(dbPool)
+	cartConsumptionRepo := repository.NewCartConsumptionRepository(dbPool)
 
 	orderUseCase := usecase.NewOrderUseCase(
-		orderRepo, vendorOrderRepo, buyerAddressRepo, commissionRuleRepo,
+		orderRepo, vendorOrderRepo, buyerAddressRepo, commissionRuleRepo, cartConsumptionRepo,
 		cartClient, catalogClient, vendorClient, inventoryClient, shipmentClient, notificationClient, log,
 	)
+	consumeCtx, stopConsume := context.WithCancel(ctx)
+	defer stopConsume()
+	go usecase.CartConsumptionWorker{UseCase: orderUseCase}.Run(consumeCtx)
 	orderHandler := transport.NewOrderHandler(orderUseCase, log)
 	addressHandler := transport.NewBuyerAddressHandler(orderUseCase, log)
 	adminHandler := transport.NewAdminHandler(orderUseCase, log)
@@ -92,6 +96,7 @@ func main() {
 	returnHandler := transport.NewReturnHandler(usecase.NewReturnUseCase(returnRequestRepo, vendorClient), log)
 
 	router := transport.NewRouter(cfg.Base.Env, log, jwtManager, orderHandler, addressHandler, adminHandler, internalHandler, returnHandler,
+		internalServices.Key,
 		health.Checker{Name: "postgres", Ping: func(ctx context.Context) error { return dbPool.Ping(ctx) }},
 		health.Checker{Name: "redis", Ping: func(ctx context.Context) error { return redisClient.Ping(ctx).Err() }},
 		health.Checker{Name: "nats", Ping: func(ctx context.Context) error {
@@ -111,6 +116,8 @@ func main() {
 
 	router.GET("/internal/vendor-reports/:vendorId", serviceauth.Require(internalServices.Key, serviceauth.Header), vendorreport.Handler(vendorreport.Service{Repository: vendorOrderRepo}, log))
 
+	router.GET("/internal/orders/:id/inventory-status", serviceauth.Require(internalServices.Key, serviceauth.Header), internalHandler.InventoryStatus)
+	router.POST("/internal/inventory-events", serviceauth.Require(internalServices.Key, serviceauth.Header), internalHandler.InventoryEvent)
 	srv := &http.Server{
 		Addr:              ":" + cfg.Base.Port,
 		Handler:           router,

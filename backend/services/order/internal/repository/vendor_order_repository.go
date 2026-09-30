@@ -44,7 +44,7 @@ func scanVendorOrder(row scanner) (*domain.VendorOrder, error) {
 }
 
 func (r *VendorOrderRepository) FindByID(ctx context.Context, id string) (*domain.VendorOrder, error) {
-	row := r.pool.QueryRow(ctx, `SELECT `+vendorOrderColumns+` FROM vendor_orders WHERE id = $1`, id)
+	row := connection(ctx, r.pool).QueryRow(ctx, `SELECT `+vendorOrderColumns+` FROM vendor_orders WHERE id = $1`, id)
 	return scanVendorOrder(row)
 }
 
@@ -61,7 +61,7 @@ func (r *VendorOrderRepository) ListByVendor(ctx context.Context, vendorID strin
 }
 
 func (r *VendorOrderRepository) list(ctx context.Context, query string, args ...any) ([]*domain.VendorOrder, error) {
-	rows, err := r.pool.Query(ctx, query, args...)
+	rows, err := connection(ctx, r.pool).Query(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -79,7 +79,7 @@ func (r *VendorOrderRepository) list(ctx context.Context, query string, args ...
 }
 
 func (r *VendorOrderRepository) UpdateStatus(ctx context.Context, id string, status domain.Status) error {
-	tag, err := r.pool.Exec(ctx, `UPDATE vendor_orders SET status = $1, updated_at = now() WHERE id = $2`, status, id)
+	tag, err := connection(ctx, r.pool).Exec(ctx, `UPDATE vendor_orders SET status = $1, updated_at = now() WHERE id = $2`, status, id)
 	if err != nil {
 		return err
 	}
@@ -94,7 +94,7 @@ func (r *VendorOrderRepository) UpdateStatus(ctx context.Context, id string, sta
 // row — a later commission rule change never touches an already-snapshotted
 // vendor order.
 func (r *VendorOrderRepository) SetCommission(ctx context.Context, id string, rateBps int, commissionAmount, netAmount int64) error {
-	tag, err := r.pool.Exec(ctx,
+	tag, err := connection(ctx, r.pool).Exec(ctx,
 		`UPDATE vendor_orders SET commission_rate_bps = $1, commission_amount = $2, net_amount = $3, updated_at = now() WHERE id = $4`,
 		rateBps, commissionAmount, netAmount, id,
 	)
@@ -112,7 +112,7 @@ func (r *VendorOrderRepository) SetCommission(ctx context.Context, id string, ra
 // checkout time — never touched again afterward, even if a later fee-rule
 // edit would compute a different number for the same route.
 func (r *VendorOrderRepository) SetShippingFee(ctx context.Context, id string, feeAmount int64) error {
-	tag, err := r.pool.Exec(ctx, `UPDATE vendor_orders SET shipping_fee_amount = $1, updated_at = now() WHERE id = $2`, feeAmount, id)
+	tag, err := connection(ctx, r.pool).Exec(ctx, `UPDATE vendor_orders SET shipping_fee_amount = $1, updated_at = now() WHERE id = $2`, feeAmount, id)
 	if err != nil {
 		return err
 	}
@@ -135,7 +135,7 @@ func (r *VendorOrderRepository) SummaryByVendor(ctx context.Context, vendorID st
 		FROM vendor_orders WHERE vendor_id = $1 AND status = ANY($2)`
 
 	var s domain.VendorSummary
-	err := r.pool.QueryRow(ctx, query, vendorID, paidOrFurtherStatuses).
+	err := connection(ctx, r.pool).QueryRow(ctx, query, vendorID, paidOrFurtherStatuses).
 		Scan(&s.TotalOrders, &s.TotalRevenue, &s.TotalCommission, &s.TotalNet)
 	if err != nil {
 		return nil, err
@@ -153,7 +153,7 @@ func (r *VendorOrderRepository) TopProductsByVendor(ctx context.Context, vendorI
 		ORDER BY sum(oi.quantity) DESC
 		LIMIT $3`
 
-	rows, err := r.pool.Query(ctx, query, vendorID, paidOrFurtherStatuses, limit)
+	rows, err := connection(ctx, r.pool).Query(ctx, query, vendorID, paidOrFurtherStatuses, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -178,7 +178,7 @@ func (r *VendorOrderRepository) ListItemsByVendorOrderIDs(ctx context.Context, v
 		return map[string][]*domain.OrderItem{}, nil
 	}
 
-	rows, err := r.pool.Query(ctx, `SELECT `+orderItemColumns+` FROM order_items WHERE vendor_order_id = ANY($1) ORDER BY created_at ASC`, vendorOrderIDs)
+	rows, err := connection(ctx, r.pool).Query(ctx, `SELECT `+orderItemColumns+` FROM order_items WHERE vendor_order_id = ANY($1) ORDER BY created_at ASC`, vendorOrderIDs)
 	if err != nil {
 		return nil, err
 	}
@@ -206,7 +206,7 @@ func (r *VendorOrderRepository) QuantitySoldByProductIDs(ctx context.Context, pr
 		WHERE oi.product_id = ANY($1) AND vo.status = ANY($2)
 		GROUP BY oi.product_id`
 
-	rows, err := r.pool.Query(ctx, query, productIDs, paidOrFurtherStatuses)
+	rows, err := connection(ctx, r.pool).Query(ctx, query, productIDs, paidOrFurtherStatuses)
 	if err != nil {
 		return nil, err
 	}

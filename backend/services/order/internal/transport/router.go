@@ -9,6 +9,7 @@ import (
 	"shopee/backend/pkg/authjwt"
 	"shopee/backend/pkg/health"
 	"shopee/backend/pkg/middleware"
+	"shopee/backend/pkg/serviceauth"
 )
 
 func NewRouter(
@@ -20,6 +21,7 @@ func NewRouter(
 	adminHandler *AdminHandler,
 	internalHandler *InternalHandler,
 	returnHandler *ReturnHandler,
+	internalKey string,
 	checkers ...health.Checker,
 ) *gin.Engine {
 	if env == "production" {
@@ -73,8 +75,8 @@ func NewRouter(
 	internalGroup := r.Group("/internal/orders")
 	{
 		internalGroup.GET("/:id", internalHandler.Get)
-		internalGroup.POST("/:id/mark-paid", internalHandler.MarkPaid)
-		internalGroup.POST("/:id/mark-payment-failed", internalHandler.MarkPaymentFailed)
+		internalGroup.POST("/:id/mark-paid", serviceauth.Require(internalKey, serviceauth.Header), internalHandler.MarkPaid)
+		internalGroup.POST("/:id/mark-payment-failed", serviceauth.Require(internalKey, serviceauth.Header), internalHandler.MarkPaymentFailed)
 		internalGroup.GET("/products/quantity-sold", internalHandler.QuantitySoldByProductIDs)
 		internalGroup.GET("/review-eligibility", internalHandler.ListReviewEligibility)
 	}

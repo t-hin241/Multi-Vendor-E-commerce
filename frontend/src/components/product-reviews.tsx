@@ -39,7 +39,13 @@ function Stars({
   );
 }
 
-export function ProductReviews({ productId, className }: { productId: string; className?: string }) {
+export function ProductReviews({
+  productId,
+  className,
+}: {
+  productId: string;
+  className?: string;
+}) {
   const { user, callWithAuth } = useAuth();
   const client = useQueryClient();
   const [rating, setRating] = useState(5);
@@ -155,7 +161,8 @@ export function ProductReviews({ productId, className }: { productId: string; cl
               <div className="flex items-center justify-between">
                 <Stars rating={review.rating} />
                 <span className="text-xs text-muted-foreground">
-                  {review.buyer_name || "Người mua đã xác minh"} · {new Date(review.created_at).toLocaleDateString("vi-VN")}
+                  {review.buyer_name || "Người mua đã xác minh"} ·{" "}
+                  {new Date(review.created_at).toLocaleDateString("vi-VN")}
                 </span>
               </div>
               <p className="mt-2 whitespace-pre-wrap text-sm">{review.comment}</p>

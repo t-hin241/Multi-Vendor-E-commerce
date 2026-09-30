@@ -18,6 +18,9 @@ type Plan struct {
 	Order           Order
 	VendorOrders    []VendorOrder
 	Items           []OrderItem // VendorOrderID left as the vendor's index into VendorOrders; the repository resolves it to a real id after insert.
+	// CartConsumption, when set, is inserted (status held) in the same
+	// transaction as the order; OrderID is filled in by the repository.
+	CartConsumption *CartConsumption
 }
 
 // BuildCheckoutPlan groups checkout lines by vendor and computes every

@@ -17,7 +17,12 @@ import {
 import * as api from "@/lib/api-client";
 import { useAuth } from "@/lib/auth-context";
 
-const CATEGORY_LEVEL_LABELS = ["", "Level 1 (main category)", "Level 2 (category)", "Level 3 (sub-category)"];
+const CATEGORY_LEVEL_LABELS = [
+  "",
+  "Level 1 (main category)",
+  "Level 2 (category)",
+  "Level 3 (sub-category)",
+];
 
 export function CategoryManager() {
   const { callWithAuth } = useAuth();
@@ -97,7 +102,9 @@ export function CategoryManager() {
               </Select>
             )}
           </div>
-          <p className="text-xs text-muted-foreground">Will create: {CATEGORY_LEVEL_LABELS[levelToCreate]}</p>
+          <p className="text-xs text-muted-foreground">
+            Will create: {CATEGORY_LEVEL_LABELS[levelToCreate]}
+          </p>
 
           <form onSubmit={handleSubmit} className="flex gap-3">
             <Input

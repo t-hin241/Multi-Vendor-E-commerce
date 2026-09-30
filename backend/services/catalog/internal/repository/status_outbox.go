@@ -3,11 +3,12 @@ package repository
 import (
 	"context"
 	"errors"
+	"shopee/backend/pkg/productsales"
+	"time"
+
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rs/zerolog"
-	"shopee/backend/pkg/productsales"
-	"time"
 )
 
 var ErrNoProductStatus = errors.New("no due product status")

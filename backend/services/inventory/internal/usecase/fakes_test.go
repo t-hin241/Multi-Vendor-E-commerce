@@ -15,6 +15,7 @@ type fakeItemRepository struct {
 	mu        sync.Mutex
 	byProduct map[string]*domain.InventoryItem
 	byVariant map[string]*domain.InventoryItem
+	counts    map[string]*domain.StockCount
 	nextID    int
 }
 
@@ -86,7 +87,7 @@ func (f *fakeItemRepository) ListByVendor(_ context.Context, vendorID string, _,
 	return out, nil
 }
 
-func (f *fakeItemRepository) Restock(_ context.Context, productID string, quantity int64) error {
+func (f *fakeItemRepository) Restock(_ context.Context, productID string, quantity int64, audit ...string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	item, ok := f.byProduct[productID]
@@ -97,7 +98,7 @@ func (f *fakeItemRepository) Restock(_ context.Context, productID string, quanti
 	return nil
 }
 
-func (f *fakeItemRepository) RestockVariant(_ context.Context, variantID string, quantity int64) error {
+func (f *fakeItemRepository) RestockVariant(_ context.Context, variantID string, quantity int64, audit ...string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	item, ok := f.byVariant[variantID]
@@ -106,6 +107,60 @@ func (f *fakeItemRepository) RestockVariant(_ context.Context, variantID string,
 	}
 	item.AvailableQuantity += quantity
 	return nil
+}
+
+func (f *fakeItemRepository) findByID(id string) *domain.InventoryItem {
+	for _, item := range f.byProduct {
+		if item.ID == id {
+			return item
+		}
+	}
+	for _, item := range f.byVariant {
+		if item.ID == id {
+			return item
+		}
+	}
+	return nil
+}
+
+func (f *fakeItemRepository) FindByID(_ context.Context, id string) (*domain.InventoryItem, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	item := f.findByID(id)
+	if item == nil {
+		return nil, repository.ErrItemNotFound
+	}
+	copyItem := *item
+	return &copyItem, nil
+}
+
+// RecordStockCount mirrors the repository: same domain rules, idempotent
+// by count id. The PostgreSQL behavior is covered by integration tests.
+func (f *fakeItemRepository) RecordStockCount(_ context.Context, count *domain.StockCount) (*domain.StockCount, bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.counts == nil {
+		f.counts = map[string]*domain.StockCount{}
+	}
+	if stored, ok := f.counts[count.ID]; ok {
+		if !domain.SameStockCount(stored, count.InventoryItemID, count.CountedOnHand, count.Reason) {
+			return nil, false, apperror.Conflict("This stock count id was already used with different values")
+		}
+		return stored, true, nil
+	}
+	item := f.findByID(count.InventoryItemID)
+	if item == nil {
+		return nil, false, repository.ErrItemNotFound
+	}
+	next, err := domain.PlanStockCount(item.AvailableQuantity, item.ReservedQuantity, count.CountedOnHand)
+	if err != nil {
+		return nil, false, err
+	}
+	count.PreviousAvailable, count.NewAvailable, count.ReservedAtCount = item.AvailableQuantity, next, item.ReservedQuantity
+	item.AvailableQuantity = next
+	stored := *count
+	f.counts[count.ID] = &stored
+	return &stored, false, nil
 }
 
 func (f *fakeItemRepository) ListByVariantIDs(_ context.Context, variantIDs []string) (map[string]int64, error) {
@@ -309,4 +364,17 @@ func (f *fakeRestockRequestRepository) UpdateStatus(_ context.Context, id string
 	now := time.Now()
 	req.DecidedAt = &now
 	return nil
+}
+
+type fakeTransactions struct{}
+
+func (fakeTransactions) Run(ctx context.Context, fn func(context.Context) error) error {
+	return fn(ctx)
+}
+
+type fakeIdentity struct{}
+
+func (fakeIdentity) RequireRole(context.Context, string, string) error { return nil }
+func (f *fakeReservationRepository) Operation(context.Context, string) (*domain.Operation, error) {
+	return nil, apperror.NotFound("No operation")
 }

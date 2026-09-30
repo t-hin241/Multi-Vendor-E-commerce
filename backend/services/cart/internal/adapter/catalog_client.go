@@ -21,6 +21,7 @@ type ProductInfo struct {
 	Name        string
 	PriceAmount int64
 	Currency    string
+	Status      string
 	IsVisible   bool
 	HasVariants bool
 }
@@ -59,6 +60,7 @@ type internalProductResponse struct {
 		Name        string `json:"name"`
 		PriceAmount int64  `json:"price_amount"`
 		Currency    string `json:"currency"`
+		Status      string `json:"status"`
 		IsVisible   bool   `json:"is_visible"`
 		HasVariants bool   `json:"has_variants"`
 	} `json:"data"`
@@ -97,6 +99,7 @@ func (c *HTTPCatalogClient) GetProduct(ctx context.Context, productID string) (*
 		Name:        body.Data.Name,
 		PriceAmount: body.Data.PriceAmount,
 		Currency:    body.Data.Currency,
+		Status:      body.Data.Status,
 		IsVisible:   body.Data.IsVisible,
 		HasVariants: body.Data.HasVariants,
 	}, nil

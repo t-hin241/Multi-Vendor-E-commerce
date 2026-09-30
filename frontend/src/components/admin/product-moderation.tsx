@@ -33,7 +33,9 @@ export function ProductModeration() {
   const productsQuery = useQuery({
     queryKey: ["admin-products", status],
     queryFn: () =>
-      callWithAuth((token) => api.listProductsForModeration(token, { status: status || undefined })),
+      callWithAuth((token) =>
+        api.listProductsForModeration(token, { status: status || undefined }),
+      ),
   });
 
   async function handleApprove(id: string) {
@@ -58,7 +60,9 @@ export function ProductModeration() {
       {productsQuery.error && (
         <p className="text-sm text-destructive">
           Could not load products:{" "}
-          {productsQuery.error instanceof api.ApiError ? productsQuery.error.message : "unknown error"}
+          {productsQuery.error instanceof api.ApiError
+            ? productsQuery.error.message
+            : "unknown error"}
         </p>
       )}
 
@@ -167,7 +171,9 @@ function ProductModerationDetail({ productId }: { productId: string }) {
 
   return (
     <div className="flex flex-col gap-2 py-1">
-      <p className="text-sm">{p.description || <span className="text-muted-foreground">No description</span>}</p>
+      <p className="text-sm">
+        {p.description || <span className="text-muted-foreground">No description</span>}
+      </p>
 
       {p.images && p.images.length > 0 ? (
         <div className="flex flex-wrap gap-2">
@@ -197,8 +203,8 @@ function ProductModerationDetail({ productId }: { productId: string }) {
         <ul className="flex flex-col gap-1 text-sm">
           {p.variants.map((v) => (
             <li key={v.id}>
-              {v.sku} — {v.options.map((o) => `${o.attribute_name}: ${o.option_value}`).join(", ")} —
-              stock: {v.available_quantity ?? 0}
+              {v.sku} — {v.options.map((o) => `${o.attribute_name}: ${o.option_value}`).join(", ")}{" "}
+              — stock: {v.available_quantity ?? 0}
             </li>
           ))}
         </ul>

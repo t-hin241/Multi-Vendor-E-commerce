@@ -132,11 +132,23 @@ export function AttributeManager() {
           <form onSubmit={handleCreateAttribute} className="flex flex-wrap items-end gap-3">
             <Label className="flex flex-col items-start gap-1.5 text-sm">
               Code
-              <Input value={code} onChange={(e) => setCode(e.target.value)} placeholder="mau_sac" required className="w-32" />
+              <Input
+                value={code}
+                onChange={(e) => setCode(e.target.value)}
+                placeholder="mau_sac"
+                required
+                className="w-32"
+              />
             </Label>
             <Label className="flex flex-col items-start gap-1.5 text-sm">
               Name
-              <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Màu sắc" required className="w-40" />
+              <Input
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                placeholder="Màu sắc"
+                required
+                className="w-40"
+              />
             </Label>
             <Label className="flex flex-col items-start gap-1.5 text-sm">
               Data type
@@ -170,7 +182,12 @@ export function AttributeManager() {
             </Label>
             <Label className="flex flex-col items-start gap-1.5 text-sm">
               Unit (optional)
-              <Input value={unit} onChange={(e) => setUnit(e.target.value)} placeholder="cm" className="w-24" />
+              <Input
+                value={unit}
+                onChange={(e) => setUnit(e.target.value)}
+                placeholder="cm"
+                className="w-24"
+              />
             </Label>
             <Button type="submit" disabled={isCreating}>
               {isCreating ? "Adding…" : "Add attribute"}
@@ -180,7 +197,9 @@ export function AttributeManager() {
           {attributesQuery.error && (
             <p className="text-sm text-destructive">
               Could not load attributes:{" "}
-              {attributesQuery.error instanceof api.ApiError ? attributesQuery.error.message : "unknown error"}
+              {attributesQuery.error instanceof api.ApiError
+                ? attributesQuery.error.message
+                : "unknown error"}
             </p>
           )}
 
@@ -272,7 +291,10 @@ export function AttributeManager() {
               </Select>
             )}
             {ruleMidId && ruleSubOptions.length > 0 && (
-              <Select value={ruleSubId || "__this__"} onValueChange={(v) => setRuleSubId(v === "__this__" ? "" : v)}>
+              <Select
+                value={ruleSubId || "__this__"}
+                onValueChange={(v) => setRuleSubId(v === "__this__" ? "" : v)}
+              >
                 <SelectTrigger className="w-56">
                   <SelectValue />
                 </SelectTrigger>
@@ -306,11 +328,17 @@ export function AttributeManager() {
                 </Select>
               </Label>
               <Label className="text-sm">
-                <Checkbox checked={ruleRequired} onCheckedChange={(c) => setRuleRequired(c === true)} />
+                <Checkbox
+                  checked={ruleRequired}
+                  onCheckedChange={(c) => setRuleRequired(c === true)}
+                />
                 Required
               </Label>
               <Label className="text-sm">
-                <Checkbox checked={ruleExcluded} onCheckedChange={(c) => setRuleExcluded(c === true)} />
+                <Checkbox
+                  checked={ruleExcluded}
+                  onCheckedChange={(c) => setRuleExcluded(c === true)}
+                />
                 Exclude (override off)
               </Label>
               <Label className="flex flex-col items-start gap-1.5 text-sm">
@@ -331,9 +359,13 @@ export function AttributeManager() {
 
           {targetCategoryId && (
             <div>
-              <p className="text-xs font-medium text-muted-foreground">Effective template for this category:</p>
+              <p className="text-xs font-medium text-muted-foreground">
+                Effective template for this category:
+              </p>
               {templateQuery.data && templateQuery.data.attributes.length === 0 ? (
-                <p className="mt-1 text-sm text-muted-foreground">No attributes apply to this category yet.</p>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  No attributes apply to this category yet.
+                </p>
               ) : (
                 <ul className="mt-1 flex flex-wrap gap-2">
                   {templateQuery.data?.attributes.map((f) => (

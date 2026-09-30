@@ -74,7 +74,7 @@ export function NavBar() {
   }
 
   const roleLinks = linksForRole(user?.role);
-  const cartCount = cartQuery.data?.items.reduce((sum, line) => sum + line.quantity, 0) ?? 0;
+  const cartCount = cartQuery.data?.item_count ?? 0;
 
   return (
     <header className="sticky top-0 z-40 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80">

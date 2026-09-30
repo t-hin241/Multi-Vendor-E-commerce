@@ -1,11 +1,12 @@
 package transport
 
 import (
-	"github.com/rs/zerolog"
 	"net/http/httptest"
 	"shopee/backend/pkg/authjwt"
 	"strings"
 	"testing"
+
+	"github.com/rs/zerolog"
 )
 
 func TestInternalCatalogRequiresServiceAuthentication(t *testing.T) {

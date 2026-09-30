@@ -13,6 +13,8 @@ jobs:
       run:
         working-directory: backend
     strategy:
+      # Report every failing module instead of cancelling the rest of the matrix.
+      fail-fast: false
       matrix:
         module:
           - pkg
@@ -49,9 +51,11 @@ jobs:
         run: go vet ./...
         working-directory: backend/${{ matrix.module }}
 
-      - uses: golangci/golangci-lint-action@v6
+      # Action v8+ is required for golangci-lint v2. Pin the linter version so a new
+      # release cannot break CI unexpectedly; bump it deliberately.
+      - uses: golangci/golangci-lint-action@v8
         with:
-          version: latest
+          version: v2.14.0
           working-directory: backend/${{ matrix.module }}
           args: --timeout=5m
 
@@ -158,6 +162,32 @@ jobs:
           cache-dependency-path: backend/services/catalog/go.sum
       - run: go test -race -count=1 ./...
         working-directory: backend/services/catalog
+
+  inventory-integration:
+    name: Inventory, Cart, Order and Payment PostgreSQL integration
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: inventory_test
+          POSTGRES_DB: inventory_test
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports: ["5432:5432"]
+        options: --health-cmd "pg_isready -U inventory_test -d inventory_test" --health-interval 5s --health-timeout 3s --health-retries 10
+    env:
+      INVENTORY_TEST_DATABASE_URL: postgres://inventory_test@localhost:5432/inventory_test?sslmode=disable
+      ORDER_TEST_DATABASE_URL: postgres://inventory_test@localhost:5432/inventory_test?sslmode=disable
+      PAYMENT_TEST_DATABASE_URL: postgres://inventory_test@localhost:5432/inventory_test?sslmode=disable
+      CART_TEST_DATABASE_URL: postgres://inventory_test@localhost:5432/inventory_test?sslmode=disable
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache-dependency-path: backend/services/inventory/go.sum
+      - run: go test -race -count=1 ./services/inventory/... ./services/cart/... ./services/order/... ./services/payment/...
+        working-directory: backend
 
   frontend:
     name: Frontend (lint + test + build)

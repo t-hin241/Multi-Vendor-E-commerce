@@ -13,14 +13,15 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/rs/zerolog"
 	"shopee/backend/pkg/apperror"
 	"shopee/backend/pkg/productsales"
 	"shopee/backend/services/catalog/internal/domain"
 	"shopee/backend/services/catalog/internal/repository"
 	"shopee/backend/services/catalog/internal/usecase"
+
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/rs/zerolog"
 )
 
 func catalogDB(t *testing.T) *pgxpool.Pool {

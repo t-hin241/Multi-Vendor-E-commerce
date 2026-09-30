@@ -38,7 +38,9 @@ export default function VendorOrdersPage() {
   const shipmentsQuery = useQuery({
     queryKey: ["vendor-shipments", selectedVendorId],
     queryFn: () =>
-      callWithAuth((token) => api.listMyShipments(token, { vendorId: selectedVendorId!, limit: 100 })),
+      callWithAuth((token) =>
+        api.listMyShipments(token, { vendorId: selectedVendorId!, limit: 100 }),
+      ),
     enabled: Boolean(selectedVendorId),
   });
 
@@ -86,7 +88,12 @@ export default function VendorOrdersPage() {
           <p className="text-sm font-medium">Cần xử lý ({queue.length})</p>
           <ul className="mt-2 flex flex-col gap-3">
             {queue.map((vo) => (
-              <VendorOrderCard key={vo.id} vendorOrder={vo} shipment={shipmentFor(vo)} onChanged={refresh} />
+              <VendorOrderCard
+                key={vo.id}
+                vendorOrder={vo}
+                shipment={shipmentFor(vo)}
+                onChanged={refresh}
+              />
             ))}
           </ul>
         </div>
@@ -97,7 +104,12 @@ export default function VendorOrdersPage() {
           <p className="text-sm font-medium">Lịch sử</p>
           <ul className="mt-2 flex flex-col gap-3">
             {visibleHistory.map((vo) => (
-              <VendorOrderCard key={vo.id} vendorOrder={vo} shipment={shipmentFor(vo)} onChanged={refresh} />
+              <VendorOrderCard
+                key={vo.id}
+                vendorOrder={vo}
+                shipment={shipmentFor(vo)}
+                onChanged={refresh}
+              />
             ))}
           </ul>
           {history.length > 5 && (
@@ -258,7 +270,9 @@ function VendorOrderActions({
     setError(null);
     setIsBusy(true);
     try {
-      await callWithAuth((token) => api.updateVendorOrderStatus(token, vendorOrder.id, "processing"));
+      await callWithAuth((token) =>
+        api.updateVendorOrderStatus(token, vendorOrder.id, "processing"),
+      );
       onChanged();
     } catch (err) {
       setError(err instanceof api.ApiError ? err.message : "Không thể cập nhật đơn hàng.");
@@ -295,7 +309,9 @@ function VendorOrderActions({
     setError(null);
     setIsBusy(true);
     try {
-      await callWithAuth((token) => api.updateVendorOrderStatus(token, vendorOrder.id, "completed"));
+      await callWithAuth((token) =>
+        api.updateVendorOrderStatus(token, vendorOrder.id, "completed"),
+      );
       onChanged();
     } catch (err) {
       setError(err instanceof api.ApiError ? err.message : "Không thể cập nhật đơn hàng.");
@@ -369,7 +385,11 @@ function CarrierInterceptionActions({
       await callWithAuth((token) => api.simulateCarrierDecision(token, shipmentId, accepted));
       onChanged();
     } catch (err) {
-      setError(err instanceof api.ApiError ? err.message : "Không thể ghi nhận quyết định của đơn vị vận chuyển.");
+      setError(
+        err instanceof api.ApiError
+          ? err.message
+          : "Không thể ghi nhận quyết định của đơn vị vận chuyển.",
+      );
     } finally {
       setIsBusy(false);
     }

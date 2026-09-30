@@ -46,10 +46,15 @@ export function OrderIntervention() {
 
   const ordersQuery = useQuery({
     queryKey: ["admin-orders", status],
-    queryFn: () => callWithAuth((token) => api.listAdminOrders(token, { status: status || undefined })),
+    queryFn: () =>
+      callWithAuth((token) => api.listAdminOrders(token, { status: status || undefined })),
   });
 
-  async function handleTransition(orderId: string, target: "cancelled" | "refunded", reason: string) {
+  async function handleTransition(
+    orderId: string,
+    target: "cancelled" | "refunded",
+    reason: string,
+  ) {
     await callWithAuth((token) => api.adminTransitionOrder(token, orderId, target, reason));
     await queryClient.invalidateQueries({ queryKey: ["admin-orders"] });
   }
@@ -58,7 +63,9 @@ export function OrderIntervention() {
     <div className="flex flex-col gap-4">
       <SectionHeader
         title="Orders"
-        action={<StatusFilter status={status} onChange={setStatus} options={ORDER_STATUS_OPTIONS} />}
+        action={
+          <StatusFilter status={status} onChange={setStatus} options={ORDER_STATUS_OPTIONS} />
+        }
       />
 
       <Alert>
@@ -66,8 +73,8 @@ export function OrderIntervention() {
         <AlertTitle>Audit &amp; intervention only</AlertTitle>
         <AlertDescription>
           Normal fulfillment (processing → shipped → completed) is vendor-driven and not editable
-          here. Admin can only cancel a not-yet-paid order or refund a paid one — every action
-          below requires a reason and is recorded against the order.
+          here. Admin can only cancel a not-yet-paid order or refund a paid one — every action below
+          requires a reason and is recorded against the order.
         </AlertDescription>
       </Alert>
 

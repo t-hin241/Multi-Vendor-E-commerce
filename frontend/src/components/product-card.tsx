@@ -67,12 +67,7 @@ export function ProductCard({ product }: { product: Product }) {
         </p>
         <p className="text-xs text-muted-foreground">Đã bán {product.quantity_sold ?? 0}</p>
         {canAddToCart && (
-          <Button
-            size="sm"
-            className="mt-2"
-            disabled={isAdding}
-            onClick={handleBuyNow}
-          >
+          <Button size="sm" className="mt-2" disabled={isAdding} onClick={handleBuyNow}>
             {isAdding ? "Đang thêm…" : "Mua ngay"}
           </Button>
         )}

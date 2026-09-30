@@ -47,8 +47,12 @@ export function PaymentSection({ orderId }: { orderId: string }) {
     return (
       <Card className="w-full max-w-sm">
         <CardContent className="flex flex-col gap-3">
-          <Alert><AlertDescription>Đang chuyển đến cổng thanh toán an toàn…</AlertDescription></Alert>
-          <Button asChild><a href={intent.checkout_url}>Mở trang thanh toán</a></Button>
+          <Alert>
+            <AlertDescription>Đang chuyển đến cổng thanh toán an toàn…</AlertDescription>
+          </Alert>
+          <Button asChild>
+            <a href={intent.checkout_url}>Mở trang thanh toán</a>
+          </Button>
         </CardContent>
       </Card>
     );
@@ -59,8 +63,8 @@ export function PaymentSection({ orderId }: { orderId: string }) {
       <CardContent className="flex flex-col gap-3">
         <Alert>
           <AlertDescription>
-            Thanh toán thử nghiệm (sandbox) — không phát sinh giao dịch thật. Chọn một kết quả để
-            mô phỏng:
+            Thanh toán thử nghiệm (sandbox) — không phát sinh giao dịch thật. Chọn một kết quả để mô
+            phỏng:
           </AlertDescription>
         </Alert>
         <div className="flex gap-2">

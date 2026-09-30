@@ -10,9 +10,10 @@ import (
 	"net/url"
 	"strings"
 
+	"shopee/backend/pkg/apperror"
+
 	_ "golang.org/x/image/webp"
 	"golang.org/x/net/html"
-	"shopee/backend/pkg/apperror"
 )
 
 // ValidateMediaBytes checks the actual content before decoding or storing it.

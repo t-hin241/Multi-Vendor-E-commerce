@@ -19,10 +19,20 @@ function getPageNumbers(current: number, total: number): (number | "ellipsis")[]
 }
 
 type PaginationProps =
-  | { currentPage: number; totalPages: number; onPageChange: (page: number) => void; hasNextPage?: undefined }
+  | {
+      currentPage: number;
+      totalPages: number;
+      onPageChange: (page: number) => void;
+      hasNextPage?: undefined;
+    }
   // Used when the backend doesn't report a total (e.g. orders list) — renders
   // just the Prev/Next pair, no page-number buttons.
-  | { currentPage: number; hasNextPage: boolean; onPageChange: (page: number) => void; totalPages?: undefined };
+  | {
+      currentPage: number;
+      hasNextPage: boolean;
+      onPageChange: (page: number) => void;
+      totalPages?: undefined;
+    };
 
 export function Pagination(props: PaginationProps) {
   const { currentPage, onPageChange } = props;

@@ -33,7 +33,9 @@ export function RestockModeration() {
   const requestsQuery = useQuery({
     queryKey: ["admin-restock-requests", status],
     queryFn: () =>
-      callWithAuth((token) => api.listRestockRequestsForAdmin(token, { status: status || undefined })),
+      callWithAuth((token) =>
+        api.listRestockRequestsForAdmin(token, { status: status || undefined }),
+      ),
   });
 
   async function handleApprove(id: string) {
@@ -58,7 +60,9 @@ export function RestockModeration() {
       {requestsQuery.error && (
         <p className="text-sm text-destructive">
           Could not load restock requests:{" "}
-          {requestsQuery.error instanceof api.ApiError ? requestsQuery.error.message : "unknown error"}
+          {requestsQuery.error instanceof api.ApiError
+            ? requestsQuery.error.message
+            : "unknown error"}
         </p>
       )}
 

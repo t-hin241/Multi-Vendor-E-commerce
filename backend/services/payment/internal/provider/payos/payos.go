@@ -32,6 +32,7 @@ func New(clientID, apiKey, checksumKey, baseURL string) *Provider {
 }
 
 type createRequest struct {
+	ExpiredAt   *int64 `json:"expiredAt,omitempty"`
 	OrderCode   int64  `json:"orderCode"`
 	Amount      int64  `json:"amount"`
 	Description string `json:"description"`
@@ -55,6 +56,13 @@ func (p *Provider) CreateIntent(ctx context.Context, in provider.CreateIntentInp
 	}
 	code := p.nextOrderCode.Add(1)
 	reqBody := createRequest{OrderCode: code, Amount: in.Amount, Description: "Thanh toan don hang " + shortOrder(in.OrderID), ReturnURL: in.ReturnURL, CancelURL: in.CancelURL}
+	if in.ExpiresAt != nil {
+		deadline := in.ExpiresAt.Unix()
+		if deadline <= time.Now().Unix() || deadline > 2147483647 {
+			return provider.CreateIntentResult{}, fmt.Errorf("payos: invalid payment deadline")
+		}
+		reqBody.ExpiredAt = &deadline
+	}
 	reqBody.Signature = p.sign(map[string]any{"amount": reqBody.Amount, "cancelUrl": reqBody.CancelURL, "description": reqBody.Description, "orderCode": reqBody.OrderCode, "returnUrl": reqBody.ReturnURL})
 	body, err := json.Marshal(reqBody)
 	if err != nil {
@@ -82,7 +90,7 @@ func (p *Provider) CreateIntent(ctx context.Context, in provider.CreateIntentInp
 	if decoded.Code != "00" || decoded.Data.PaymentLinkID == "" || decoded.Data.CheckoutURL == "" {
 		return provider.CreateIntentResult{}, fmt.Errorf("payos create link: %s", decoded.Desc)
 	}
-	return provider.CreateIntentResult{ProviderIntentID: decoded.Data.PaymentLinkID, CheckoutURL: decoded.Data.CheckoutURL, QRCode: decoded.Data.QRCode}, nil
+	return provider.CreateIntentResult{ProviderIntentID: decoded.Data.PaymentLinkID, CheckoutURL: decoded.Data.CheckoutURL, QRCode: decoded.Data.QRCode, ExpiresAt: in.ExpiresAt}, nil
 }
 
 func shortOrder(id string) string {

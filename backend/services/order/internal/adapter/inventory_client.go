@@ -5,10 +5,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
-	"time"
-
 	"shopee/backend/pkg/apperror"
+	"shopee/backend/pkg/serviceauth"
+	"time"
 )
 
 type ReserveLine struct {
@@ -16,19 +17,20 @@ type ReserveLine struct {
 	VariantID *string `json:"variant_id,omitempty"`
 	Quantity  int64   `json:"quantity"`
 }
-
+type ReservationReceipt struct {
+	OrderID     string        `json:"order_id"`
+	OperationID string        `json:"operation_id"`
+	Status      string        `json:"status"`
+	ExpiresAt   time.Time     `json:"expires_at"`
+	Items       []ReserveLine `json:"items"`
+}
 type HTTPInventoryClient struct {
-	baseURL string
-	client  *http.Client
+	baseURL, key string
+	client       *http.Client
 }
 
-func NewHTTPInventoryClient(baseURL string) *HTTPInventoryClient {
-	return &HTTPInventoryClient{baseURL: baseURL, client: &http.Client{Timeout: 10 * time.Second}}
-}
-
-type reserveRequestBody struct {
-	OrderID string        `json:"order_id"`
-	Items   []ReserveLine `json:"items"`
+func NewHTTPInventoryClient(baseURL, key string) *HTTPInventoryClient {
+	return &HTTPInventoryClient{baseURL: baseURL, key: key, client: &http.Client{Timeout: 5 * time.Second}}
 }
 
 type errorEnvelope struct {
@@ -38,77 +40,104 @@ type errorEnvelope struct {
 	} `json:"error"`
 }
 
-// Reserve holds stock for every line of orderID. A 409 from Inventory means
-// the checkout can't be fulfilled (something is out of stock) and is
-// surfaced as a Conflict, not an infrastructure failure.
-func (c *HTTPInventoryClient) Reserve(ctx context.Context, orderID string, lines []ReserveLine) error {
-	payload, err := json.Marshal(reserveRequestBody{OrderID: orderID, Items: lines})
+func (c *HTTPInventoryClient) call(ctx context.Context, method, path, id string, payload any) (*ReservationReceipt, error) {
+	body, err := json.Marshal(payload)
 	if err != nil {
-		return apperror.Internal(err)
+		return nil, err
 	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/internal/inventory/reserve", bytes.NewReader(payload))
-	if err != nil {
-		return apperror.Internal(err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := c.client.Do(req)
-	if err != nil {
-		return apperror.Internal(err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode == http.StatusCreated {
-		return nil
-	}
-
-	var body errorEnvelope
-	_ = json.NewDecoder(resp.Body).Decode(&body)
-
-	if resp.StatusCode == http.StatusConflict {
-		msg := body.Error.Message
-		if msg == "" {
-			msg = "Not enough stock to fulfill this order"
+	for attempt := 0; attempt < 2; attempt++ {
+		req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, bytes.NewReader(body))
+		if err != nil {
+			return nil, err
 		}
-		return apperror.Conflict(msg)
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("X-Request-ID", "inventory-"+id)
+		serviceauth.SetRequestHeaders(req, c.key)
+		resp, err := c.client.Do(req)
+		if err != nil {
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
+			continue
+		}
+		data, readErr := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+		resp.Body.Close()
+		if readErr != nil {
+			continue
+		}
+		if resp.StatusCode >= 500 {
+			continue
+		}
+		if resp.StatusCode == 404 {
+			return nil, apperror.NotFound("Reservation operation not found")
+		}
+		if resp.StatusCode == 409 || resp.StatusCode == 400 {
+			// Keep Inventory's own message (e.g. which product is short)
+			// so checkout can tell the buyer what to change.
+			var envelope errorEnvelope
+			_ = json.Unmarshal(data, &envelope)
+			if resp.StatusCode == 400 {
+				msg := envelope.Error.Message
+				if msg == "" {
+					msg = "Inventory rejected the reservation request"
+				}
+				return nil, apperror.Validation(msg)
+			}
+			msg := envelope.Error.Message
+			if msg == "" {
+				msg = "Inventory operation conflicts with its current state"
+			}
+			return nil, apperror.Conflict(msg)
+		}
+		if resp.StatusCode != 200 && resp.StatusCode != 201 {
+			return nil, apperror.Internal(fmt.Errorf("inventory returned status %d", resp.StatusCode))
+		}
+		var envelope struct {
+			Data ReservationReceipt `json:"data"`
+		}
+		if err := json.Unmarshal(data, &envelope); err != nil {
+			return nil, apperror.Internal(err)
+		}
+		if envelope.Data.OrderID != id || envelope.Data.OperationID != id {
+			return nil, apperror.Internal(fmt.Errorf("invalid inventory operation receipt"))
+		}
+		return &envelope.Data, nil
 	}
-
-	return apperror.Internal(fmt.Errorf("inventory service returned status %d", resp.StatusCode))
+	return nil, apperror.Internal(fmt.Errorf("inventory operation response unavailable; retry the same operation ID"))
 }
-
-// Release returns any active reservation for orderID back to available
-// stock. It is safe to call even if nothing was ever reserved.
-func (c *HTTPInventoryClient) Release(ctx context.Context, orderID string) error {
-	return c.postOrderID(ctx, "/internal/inventory/release", orderID)
+func (c *HTTPInventoryClient) Operation(ctx context.Context, id string) (*ReservationReceipt, error) {
+	return c.call(ctx, http.MethodGet, "/internal/inventory/operations/"+id, id, nil)
 }
-
-// Commit finalizes orderID's held reservation into a permanent stock
-// decrement once payment has succeeded. It is safe to call more than once.
-func (c *HTTPInventoryClient) Commit(ctx context.Context, orderID string) error {
-	return c.postOrderID(ctx, "/internal/inventory/commit", orderID)
-}
-
-func (c *HTTPInventoryClient) postOrderID(ctx context.Context, path, orderID string) error {
-	payload, err := json.Marshal(map[string]string{"order_id": orderID})
+func (c *HTTPInventoryClient) Reserve(ctx context.Context, id string, lines []ReserveLine) error {
+	receipt, err := c.call(ctx, http.MethodPost, "/internal/inventory/reserve", id, struct {
+		OrderID string        `json:"order_id"`
+		Items   []ReserveLine `json:"items"`
+	}{id, lines})
 	if err != nil {
 		return err
 	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+path, bytes.NewReader(payload))
+	if receipt.Status != "held" || !receipt.ExpiresAt.After(time.Now()) {
+		return apperror.Conflict("Reservation is no longer held")
+	}
+	return nil
+}
+func (c *HTTPInventoryClient) Release(ctx context.Context, id string) error {
+	receipt, err := c.call(ctx, http.MethodPost, "/internal/inventory/release", id, map[string]string{"order_id": id})
 	if err != nil {
 		return err
 	}
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := c.client.Do(req)
+	if receipt.Status != "released" && receipt.Status != "expired" {
+		return apperror.Conflict("Inventory has not released the operation")
+	}
+	return nil
+}
+func (c *HTTPInventoryClient) Commit(ctx context.Context, id string) error {
+	receipt, err := c.call(ctx, http.MethodPost, "/internal/inventory/commit", id, map[string]string{"order_id": id})
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("inventory service returned status %d", resp.StatusCode)
+	if receipt.Status != "committed" {
+		return apperror.Conflict("Inventory has not committed the operation")
 	}
 	return nil
 }

@@ -199,6 +199,8 @@ services:
       DATABASE_URL: postgres://${POSTGRES_USER:-shopee}:${POSTGRES_PASSWORD}@postgres:5432/inventory_db?sslmode=disable
       VENDOR_SERVICE_URL: http://vendor:8082
       CATALOG_SERVICE_URL: http://catalog:8083
+      ORDER_SERVICE_URL: http://order:8086
+      INVENTORY_EXPIRY_ENABLED: ${INVENTORY_EXPIRY_ENABLED:-false}
     ports:
       - "8084:8084"
 
@@ -213,6 +215,8 @@ services:
         condition: service_healthy
       catalog:
         condition: service_started
+      inventory:
+        condition: service_started
     build:
       context: ./backend
       dockerfile: services/cart/Dockerfile
@@ -221,6 +225,10 @@ services:
       PORT: "8085"
       DATABASE_URL: postgres://${POSTGRES_USER:-shopee}:${POSTGRES_PASSWORD}@postgres:5432/cart_db?sslmode=disable
       CATALOG_SERVICE_URL: http://catalog:8083
+      INVENTORY_SERVICE_URL: http://inventory:8084
+      CART_RETENTION_ENABLED: ${CART_RETENTION_ENABLED:-true}
+      CART_RETENTION_DAYS: ${CART_RETENTION_DAYS:-180}
+      CART_OPERATION_RETENTION_DAYS: ${CART_OPERATION_RETENTION_DAYS:-90}
     ports:
       - "8085:8085"
 

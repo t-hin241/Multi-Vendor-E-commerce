@@ -8,11 +8,12 @@ import (
 	"path"
 	"strings"
 
-	"github.com/google/uuid"
 	"shopee/backend/pkg/apperror"
 	"shopee/backend/services/review/internal/adapter"
 	"shopee/backend/services/review/internal/domain"
 	"shopee/backend/services/review/internal/repository"
+
+	"github.com/google/uuid"
 )
 
 type ReviewRepository interface {

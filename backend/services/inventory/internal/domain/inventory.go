@@ -15,9 +15,11 @@ const (
 	ReservationActive    ReservationStatus = "active"
 	ReservationReleased  ReservationStatus = "released"
 	ReservationCommitted ReservationStatus = "committed"
+	ReservationExpired   ReservationStatus = "expired"
 )
 
 type InventoryItem struct {
+	ActorUserID       string
 	ID                string
 	ProductID         string
 	VariantID         *string
@@ -38,21 +40,18 @@ type ReservationLine struct {
 }
 
 type Reservation struct {
-	ID              string
-	InventoryItemID string
-	ProductID       string
-	VariantID       *string
-	OrderID         string
-	Quantity        int64
-	Status          ReservationStatus
-	ExpiresAt       time.Time
-	CreatedAt       time.Time
+	ID              string            `json:"id"`
+	InventoryItemID string            `json:"inventory_item_id"`
+	ProductID       string            `json:"product_id"`
+	VariantID       *string           `json:"variant_id"`
+	OrderID         string            `json:"order_id"`
+	Quantity        int64             `json:"quantity"`
+	Status          ReservationStatus `json:"status"`
+	ExpiresAt       time.Time         `json:"expires_at"`
+	CreatedAt       time.Time         `json:"created_at"`
 }
 
-// ReservationTTL bounds how long a reservation holds stock before it should
-// be considered abandoned. Releasing expired reservations back to available
-// stock is a background sweep added when Asynq jobs land (phase 5); for now
-// Order explicitly releases on cancel/payment-failure.
+// ReservationTTL is the payment hold deadline shared through operation receipts.
 const ReservationTTL = 30 * time.Minute
 
 func ValidateQuantity(quantity int64) error {

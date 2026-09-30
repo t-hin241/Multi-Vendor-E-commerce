@@ -13,6 +13,7 @@ import (
 )
 
 type InventoryUseCase struct {
+	ops             Operations
 	items           InventoryItemRepositoryPort
 	reservations    ReservationRepositoryPort
 	restockRequests RestockRequestRepositoryPort
@@ -26,15 +27,16 @@ func NewInventoryUseCase(
 	restockRequests RestockRequestRepositoryPort,
 	vendors VendorGateway,
 	catalog CatalogGateway,
+	ops Operations,
 ) *InventoryUseCase {
-	return &InventoryUseCase{items: items, reservations: reservations, restockRequests: restockRequests, vendors: vendors, catalog: catalog}
+	return &InventoryUseCase{ops: ops, items: items, reservations: reservations, restockRequests: restockRequests, vendors: vendors, catalog: catalog}
 }
 
 // CreateItem sets a product's (or, if variantID is given, one specific
 // variant's) initial stock. Exactly one of productID/variantID must be
 // set; a variant-scoped call never trusts productID for ownership — see
 // verifyItemOwnership.
-func (uc *InventoryUseCase) CreateItem(ctx context.Context, userID string, productID, variantID *string, initialQuantity int64) (*domain.InventoryItem, error) {
+func (uc *InventoryUseCase) createItem(ctx context.Context, userID string, productID, variantID *string, initialQuantity int64) (*domain.InventoryItem, error) {
 	if initialQuantity < 0 {
 		return nil, apperror.Validation("Initial quantity cannot be negative")
 	}
@@ -44,12 +46,12 @@ func (uc *InventoryUseCase) CreateItem(ctx context.Context, userID string, produ
 		return nil, err
 	}
 
-	item := &domain.InventoryItem{ProductID: resolvedProductID, VariantID: variantID, VendorID: vendorID, AvailableQuantity: initialQuantity}
+	item := &domain.InventoryItem{ProductID: resolvedProductID, VariantID: variantID, VendorID: vendorID, ActorUserID: userID, AvailableQuantity: initialQuantity}
 	if err := uc.items.Create(ctx, item); err != nil {
 		if errors.Is(err, repository.ErrItemAlreadyExists) {
 			return nil, apperror.Conflict("Stock has already been set up for this product")
 		}
-		return nil, apperror.Internal(err)
+		return nil, inventoryError(err)
 	}
 	return item, nil
 }
@@ -88,7 +90,7 @@ func (uc *InventoryUseCase) RequestRestock(ctx context.Context, userID string, p
 		if errors.Is(err, repository.ErrItemNotFound) {
 			return nil, apperror.NotFound("Stock has not been set up for this product yet")
 		}
-		return nil, apperror.Internal(err)
+		return nil, inventoryError(err)
 	}
 
 	req := &domain.RestockRequest{
@@ -100,7 +102,7 @@ func (uc *InventoryUseCase) RequestRestock(ctx context.Context, userID string, p
 		RequestedBy:       userID,
 	}
 	if err := uc.restockRequests.Create(ctx, req); err != nil {
-		return nil, apperror.Internal(err)
+		return nil, inventoryError(err)
 	}
 	return req, nil
 }
@@ -116,7 +118,7 @@ func (uc *InventoryUseCase) ListMyRestockRequests(ctx context.Context, userID, v
 
 	requests, err := uc.restockRequests.ListByVendor(ctx, vendorID, limit, offset)
 	if err != nil {
-		return nil, apperror.Internal(err)
+		return nil, inventoryError(err)
 	}
 	return requests, nil
 }
@@ -134,7 +136,7 @@ func (uc *InventoryUseCase) ListRestockRequestsForAdmin(ctx context.Context, sta
 
 	requests, err := uc.restockRequests.ListByStatus(ctx, status, limit, offset)
 	if err != nil {
-		return nil, apperror.Internal(err)
+		return nil, inventoryError(err)
 	}
 	return requests, nil
 }
@@ -142,36 +144,39 @@ func (uc *InventoryUseCase) ListRestockRequestsForAdmin(ctx context.Context, sta
 // ApproveRestockRequest applies the requested quantity increase (and its
 // stock_movements audit row, via the same atomic Restock/RestockVariant
 // path CreateItem's sibling always used) and marks the request approved.
-func (uc *InventoryUseCase) ApproveRestockRequest(ctx context.Context, adminUserID, requestID string) (*domain.RestockRequest, error) {
+func (uc *InventoryUseCase) approveRestockRequest(ctx context.Context, adminUserID, requestID string) (*domain.RestockRequest, error) {
 	req, err := uc.findRestockRequest(ctx, requestID)
 	if err != nil {
 		return nil, err
+	}
+	if req.Status == domain.RestockApproved {
+		return req, nil
 	}
 	if !domain.CanTransitionRestock(req.Status, domain.RestockApproved) {
 		return nil, apperror.Conflict("Only a pending restock request can be approved")
 	}
 
 	if req.VariantID != nil {
-		err = uc.items.RestockVariant(ctx, *req.VariantID, req.RequestedQuantity)
+		err = uc.items.RestockVariant(ctx, *req.VariantID, req.RequestedQuantity, adminUserID, req.ID)
 	} else {
-		err = uc.items.Restock(ctx, req.ProductID, req.RequestedQuantity)
+		err = uc.items.Restock(ctx, req.ProductID, req.RequestedQuantity, adminUserID, req.ID)
 	}
 	if err != nil {
 		var notStocked *repository.ErrProductNotStocked
 		if errors.As(err, &notStocked) {
 			return nil, apperror.NotFound("Stock has not been set up for this product yet")
 		}
-		return nil, apperror.Internal(err)
+		return nil, inventoryError(err)
 	}
 
 	if err := uc.restockRequests.UpdateStatus(ctx, req.ID, domain.RestockApproved, adminUserID, nil); err != nil {
-		return nil, apperror.Internal(err)
+		return nil, inventoryError(err)
 	}
 	req.Status = domain.RestockApproved
 	return req, nil
 }
 
-func (uc *InventoryUseCase) RejectRestockRequest(ctx context.Context, adminUserID, requestID, reason string) (*domain.RestockRequest, error) {
+func (uc *InventoryUseCase) rejectRestockRequest(ctx context.Context, adminUserID, requestID, reason string) (*domain.RestockRequest, error) {
 	if reason == "" {
 		return nil, apperror.Validation("A rejection reason is required")
 	}
@@ -180,12 +185,15 @@ func (uc *InventoryUseCase) RejectRestockRequest(ctx context.Context, adminUserI
 	if err != nil {
 		return nil, err
 	}
+	if req.Status == domain.RestockRejected && req.RejectionReason != nil && *req.RejectionReason == reason {
+		return req, nil
+	}
 	if !domain.CanTransitionRestock(req.Status, domain.RestockRejected) {
 		return nil, apperror.Conflict("Only a pending restock request can be rejected")
 	}
 
 	if err := uc.restockRequests.UpdateStatus(ctx, req.ID, domain.RestockRejected, adminUserID, &reason); err != nil {
-		return nil, apperror.Internal(err)
+		return nil, inventoryError(err)
 	}
 	req.Status = domain.RestockRejected
 	req.RejectionReason = &reason
@@ -198,7 +206,7 @@ func (uc *InventoryUseCase) findRestockRequest(ctx context.Context, id string) (
 		if errors.Is(err, repository.ErrRestockRequestNotFound) {
 			return nil, apperror.NotFound("Restock request not found")
 		}
-		return nil, apperror.Internal(err)
+		return nil, inventoryError(err)
 	}
 	return req, nil
 }
@@ -252,7 +260,7 @@ func (uc *InventoryUseCase) GetProductStock(ctx context.Context, productID strin
 func (uc *InventoryUseCase) GetStockForVariants(ctx context.Context, variantIDs []string) (map[string]int64, error) {
 	stock, err := uc.items.ListByVariantIDs(ctx, variantIDs)
 	if err != nil {
-		return nil, apperror.Internal(err)
+		return nil, inventoryError(err)
 	}
 	return stock, nil
 }
@@ -265,7 +273,7 @@ func (uc *InventoryUseCase) ListMine(ctx context.Context, userID, vendorID strin
 
 	items, err := uc.items.ListByVendor(ctx, vendorID, limit, offset)
 	if err != nil {
-		return nil, apperror.Internal(err)
+		return nil, inventoryError(err)
 	}
 	return items, nil
 }
@@ -296,7 +304,7 @@ func (uc *InventoryUseCase) Reserve(ctx context.Context, orderID string, lines [
 		if errors.As(err, &insufficient) {
 			return nil, apperror.Conflict("Not enough stock available for product " + insufficient.ProductID)
 		}
-		return nil, apperror.Internal(err)
+		return nil, inventoryError(err)
 	}
 	return reservations, nil
 }
@@ -309,7 +317,7 @@ func (uc *InventoryUseCase) Release(ctx context.Context, orderID string) error {
 		return apperror.Validation("order_id is required")
 	}
 	if err := uc.reservations.ReleaseByOrderID(ctx, orderID); err != nil {
-		return apperror.Internal(err)
+		return inventoryError(err)
 	}
 	return nil
 }
@@ -322,7 +330,7 @@ func (uc *InventoryUseCase) Commit(ctx context.Context, orderID string) error {
 		return apperror.Validation("order_id is required")
 	}
 	if err := uc.reservations.CommitByOrderID(ctx, orderID); err != nil {
-		return apperror.Internal(err)
+		return inventoryError(err)
 	}
 	return nil
 }
@@ -336,13 +344,16 @@ func (uc *InventoryUseCase) Commit(ctx context.Context, orderID string) error {
 // is never consulted in that case, closing off a vendor passing a product
 // they own alongside a variant they don't.
 func (uc *InventoryUseCase) verifyItemOwnership(ctx context.Context, userID string, productID, variantID *string) (vendorID, resolvedProductID string, err error) {
+	if productID != nil && variantID != nil {
+		return "", "", apperror.Validation("Choose product or variant, not both")
+	}
 	if variantID != nil {
 		ownerVendorID, ownerProductID, err := uc.catalog.GetVariantOwner(ctx, *variantID)
 		if err != nil {
 			return "", "", err
 		}
 		if _, err := uc.vendors.GetApprovedVendorID(ctx, userID, ownerVendorID); err != nil {
-			return "", "", apperror.Forbidden("You do not own this product")
+			return "", "", err
 		}
 		return ownerVendorID, ownerProductID, nil
 	}
@@ -355,7 +366,40 @@ func (uc *InventoryUseCase) verifyItemOwnership(ctx context.Context, userID stri
 		return "", "", err
 	}
 	if _, err := uc.vendors.GetApprovedVendorID(ctx, userID, ownerVendorID); err != nil {
-		return "", "", apperror.Forbidden("You do not own this product")
+		return "", "", err
 	}
 	return ownerVendorID, *productID, nil
+}
+
+func (uc *InventoryUseCase) CreateItem(ctx context.Context, userID string, productID, variantID *string, initialQuantity int64) (value *domain.InventoryItem, err error) {
+	err = uc.ops.Transactions.Run(ctx, func(ctx context.Context) error {
+		var e error
+		value, e = uc.createItem(ctx, userID, productID, variantID, initialQuantity)
+		return e
+	})
+	return value, inventoryError(err)
+}
+
+func (uc *InventoryUseCase) ApproveRestockRequest(ctx context.Context, adminUserID, requestID string) (value *domain.RestockRequest, err error) {
+	if e := uc.ops.Identity.RequireRole(ctx, adminUserID, "admin"); e != nil {
+		return nil, e
+	}
+	err = uc.ops.Transactions.Run(ctx, func(ctx context.Context) error {
+		var e error
+		value, e = uc.approveRestockRequest(ctx, adminUserID, requestID)
+		return e
+	})
+	return value, inventoryError(err)
+}
+
+func (uc *InventoryUseCase) RejectRestockRequest(ctx context.Context, adminUserID, requestID, reason string) (value *domain.RestockRequest, err error) {
+	if e := uc.ops.Identity.RequireRole(ctx, adminUserID, "admin"); e != nil {
+		return nil, e
+	}
+	err = uc.ops.Transactions.Run(ctx, func(ctx context.Context) error {
+		var e error
+		value, e = uc.rejectRestockRequest(ctx, adminUserID, requestID, reason)
+		return e
+	})
+	return value, inventoryError(err)
 }

@@ -277,24 +277,24 @@ export default function ProductDetailPage() {
       <div className="mt-6 grid gap-8 lg:grid-cols-2">
         <div>
           <h2 className="text-lg font-medium">Mô tả sản phẩm</h2>
-        {isHtmlDescription ? (
-          <Card className="mt-3">
-            <ReadMore fadeFrom="card" className="px-(--card-spacing)">
-              <CardContent
-                className={cn(
-                  "!px-0 text-sm text-muted-foreground [&_a]:text-primary [&_a]:underline [&_h1]:mb-2 [&_h1]:text-lg [&_h1]:font-semibold [&_h2]:mb-2 [&_h2]:text-base [&_h2]:font-semibold [&_h3]:mb-1 [&_h3]:font-semibold [&_img]:my-2 [&_img]:max-w-full [&_img]:rounded [&_li]:mb-1 [&_ol]:mb-2 [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:mb-2 [&_strong]:font-semibold [&_em]:italic [&_table]:w-full [&_table]:border-collapse [&_td]:border [&_td]:p-1.5 [&_th]:border [&_th]:p-1.5 [&_ul]:mb-2 [&_ul]:list-disc [&_ul]:pl-5",
-                )}
-                dangerouslySetInnerHTML={{ __html: descriptionHtml }}
-              />
+          {isHtmlDescription ? (
+            <Card className="mt-3">
+              <ReadMore fadeFrom="card" className="px-(--card-spacing)">
+                <CardContent
+                  className={cn(
+                    "!px-0 text-sm text-muted-foreground [&_a]:text-primary [&_a]:underline [&_h1]:mb-2 [&_h1]:text-lg [&_h1]:font-semibold [&_h2]:mb-2 [&_h2]:text-base [&_h2]:font-semibold [&_h3]:mb-1 [&_h3]:font-semibold [&_img]:my-2 [&_img]:max-w-full [&_img]:rounded [&_li]:mb-1 [&_ol]:mb-2 [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:mb-2 [&_strong]:font-semibold [&_em]:italic [&_table]:w-full [&_table]:border-collapse [&_td]:border [&_td]:p-1.5 [&_th]:border [&_th]:p-1.5 [&_ul]:mb-2 [&_ul]:list-disc [&_ul]:pl-5",
+                  )}
+                  dangerouslySetInnerHTML={{ __html: descriptionHtml }}
+                />
+              </ReadMore>
+            </Card>
+          ) : (
+            <ReadMore className="mt-3">
+              <p className="text-sm whitespace-pre-wrap text-muted-foreground">
+                {product.description}
+              </p>
             </ReadMore>
-          </Card>
-        ) : (
-          <ReadMore className="mt-3">
-            <p className="text-sm whitespace-pre-wrap text-muted-foreground">
-              {product.description}
-            </p>
-          </ReadMore>
-        )}
+          )}
         </div>
 
         <ProductReviews productId={product.id} className="mt-0" />

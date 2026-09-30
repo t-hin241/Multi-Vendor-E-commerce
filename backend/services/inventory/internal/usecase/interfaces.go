@@ -12,21 +12,19 @@ type InventoryItemRepositoryPort interface {
 	FindByVariantID(ctx context.Context, variantID string) (*domain.InventoryItem, error)
 	ListByVendor(ctx context.Context, vendorID string, limit, offset int) ([]*domain.InventoryItem, error)
 	ListByVariantIDs(ctx context.Context, variantIDs []string) (map[string]int64, error)
-	Restock(ctx context.Context, productID string, quantity int64) error
-	RestockVariant(ctx context.Context, variantID string, quantity int64) error
+	Restock(ctx context.Context, productID string, quantity int64, audit ...string) error
+	RestockVariant(ctx context.Context, variantID string, quantity int64, audit ...string) error
+	FindByID(ctx context.Context, id string) (*domain.InventoryItem, error)
+	RecordStockCount(ctx context.Context, count *domain.StockCount) (*domain.StockCount, bool, error)
 }
 
 type ReservationRepositoryPort interface {
+	Operation(context.Context, string) (*domain.Operation, error)
 	ReserveAtomic(ctx context.Context, orderID string, lines []domain.ReservationLine) ([]*domain.Reservation, error)
 	ReleaseByOrderID(ctx context.Context, orderID string) error
 	CommitByOrderID(ctx context.Context, orderID string) error
 }
 
-// RestockRequestRepositoryPort stores a vendor's asks to add stock to an
-// already-approved product, pending an admin decision. UpdateStatus only
-// ever touches this table — the actual quantity increase on approval goes
-// through InventoryItemRepositoryPort.Restock/RestockVariant, same as
-// before this feature existed.
 type RestockRequestRepositoryPort interface {
 	Create(ctx context.Context, req *domain.RestockRequest) error
 	FindByID(ctx context.Context, id string) (*domain.RestockRequest, error)

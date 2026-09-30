@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strconv"
 	"sync"
+	"time"
 
 	"shopee/backend/pkg/apperror"
 	"shopee/backend/services/order/internal/adapter"
@@ -18,6 +19,7 @@ type fakeOrderRepository struct {
 	items        map[string][]*domain.OrderItem
 	nextID       int
 	vendorOrders *fakeVendorOrderRepository
+	consumptions *fakeCartConsumptionRepository
 }
 
 // newFakeOrderRepository takes the same fakeVendorOrderRepository the use
@@ -54,6 +56,10 @@ func (f *fakeOrderRepository) CreateFromPlan(_ context.Context, plan *domain.Pla
 		itemCopy.VendorOrderID = vendorOrderIDs[idx]
 		f.items[order.ID] = append(f.items[order.ID], &itemCopy)
 		f.vendorOrders.addItem(&itemCopy)
+	}
+
+	if plan.CartConsumption != nil && f.consumptions != nil {
+		f.consumptions.insert(order.ID, plan.CartConsumption)
 	}
 
 	return &order, nil
@@ -323,30 +329,167 @@ func (f *fakeCommissionRuleRepository) List(_ context.Context, _, _ int) ([]*dom
 	return f.rules, nil
 }
 
-// fakeCartGateway simulates Cart: a bearer token maps to that buyer's raw
-// cart lines. Clear removes them.
+// fakeCartGateway simulates Cart's internal checkout contract: byBuyer holds
+// each buyer's cart lines; Snapshot freezes them per operation (replaying
+// the same operation id), Consume records what was purchased.
 type fakeCartGateway struct {
-	mu      sync.Mutex
-	byToken map[string][]adapter.CartLine
-	cleared map[string]bool
+	mu          sync.Mutex
+	byBuyer     map[string][]adapter.CartLine
+	snapshots   map[string]*adapter.CartSnapshot
+	consumed    map[string][]adapter.CartConsumeLine // by buyer
+	consumeErr  error
+	snapshotErr error
+	calls       int
 }
 
 func newFakeCartGateway() *fakeCartGateway {
-	return &fakeCartGateway{byToken: make(map[string][]adapter.CartLine), cleared: make(map[string]bool)}
+	return &fakeCartGateway{byBuyer: map[string][]adapter.CartLine{}, snapshots: map[string]*adapter.CartSnapshot{}, consumed: map[string][]adapter.CartConsumeLine{}}
 }
 
-func (f *fakeCartGateway) GetItems(_ context.Context, bearerToken string) ([]adapter.CartLine, error) {
+func (f *fakeCartGateway) Snapshot(_ context.Context, buyerID, operationID string, _ *int64) (*adapter.CartSnapshot, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return f.byToken[bearerToken], nil
+	if f.snapshotErr != nil {
+		return nil, f.snapshotErr
+	}
+	if snap, ok := f.snapshots[operationID]; ok {
+		return snap, nil
+	}
+	snap := &adapter.CartSnapshot{OperationID: operationID, CartVersion: 1}
+	for i, line := range f.byBuyer[buyerID] {
+		if line.LineID == "" {
+			line.LineID = fmt.Sprintf("line-%d", i)
+		}
+		snap.Lines = append(snap.Lines, line)
+	}
+	f.snapshots[operationID] = snap
+	return snap, nil
 }
 
-func (f *fakeCartGateway) Clear(_ context.Context, bearerToken string) error {
+func (f *fakeCartGateway) Consume(_ context.Context, buyerID, _ string, lines []adapter.CartConsumeLine) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.cleared[bearerToken] = true
-	f.byToken[bearerToken] = nil
+	f.calls++
+	if f.consumeErr != nil {
+		return f.consumeErr
+	}
+	f.consumed[buyerID] = append(f.consumed[buyerID], lines...)
 	return nil
+}
+
+// fakeCartConsumptionRepository stores consume tasks; CreateFromPlan writes
+// into it like the real repository does in the order transaction.
+type fakeCartConsumptionRepository struct {
+	mu    sync.Mutex
+	tasks map[string]*domain.CartConsumption
+}
+
+func newFakeCartConsumptionRepository() *fakeCartConsumptionRepository {
+	return &fakeCartConsumptionRepository{tasks: map[string]*domain.CartConsumption{}}
+}
+
+func (f *fakeCartConsumptionRepository) insert(orderID string, c *domain.CartConsumption) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	copyTask := *c
+	copyTask.OrderID, copyTask.Status, copyTask.CreatedAt = orderID, domain.CartConsumptionHeld, time.Now()
+	f.tasks[orderID] = &copyTask
+}
+
+func (f *fakeCartConsumptionRepository) get(orderID string) *domain.CartConsumption {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if t, ok := f.tasks[orderID]; ok {
+		copyTask := *t
+		return &copyTask
+	}
+	return nil
+}
+
+func (f *fakeCartConsumptionRepository) setStatus(orderID string, from []domain.CartConsumptionStatus, to domain.CartConsumptionStatus) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if t, ok := f.tasks[orderID]; ok {
+		for _, s := range from {
+			if t.Status == s {
+				t.Status = to
+				return
+			}
+		}
+	}
+}
+
+func (f *fakeCartConsumptionRepository) ListOpenByBuyer(_ context.Context, buyerID string) ([]*domain.CartConsumption, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var out []*domain.CartConsumption
+	for _, t := range f.tasks {
+		if t.BuyerID == buyerID && (t.Status == domain.CartConsumptionHeld || t.Status == domain.CartConsumptionPending) {
+			copyTask := *t
+			out = append(out, &copyTask)
+		}
+	}
+	return out, nil
+}
+
+func (f *fakeCartConsumptionRepository) Activate(_ context.Context, orderID string) error {
+	f.setStatus(orderID, []domain.CartConsumptionStatus{domain.CartConsumptionHeld}, domain.CartConsumptionPending)
+	return nil
+}
+
+func (f *fakeCartConsumptionRepository) Cancel(_ context.Context, orderID string) error {
+	f.setStatus(orderID, []domain.CartConsumptionStatus{domain.CartConsumptionHeld}, domain.CartConsumptionCancelled)
+	return nil
+}
+
+func (f *fakeCartConsumptionRepository) MarkConsumed(_ context.Context, orderID string) error {
+	f.setStatus(orderID, []domain.CartConsumptionStatus{domain.CartConsumptionPending, domain.CartConsumptionParked}, domain.CartConsumptionConsumed)
+	return nil
+}
+
+func (f *fakeCartConsumptionRepository) RecordFailure(_ context.Context, orderID, reason string, park bool) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	t, ok := f.tasks[orderID]
+	if !ok || t.Status != domain.CartConsumptionPending {
+		return nil
+	}
+	t.Attempts++
+	t.LastError = &reason
+	if park || t.Attempts >= domain.MaxCartConsumeAttempts {
+		t.Status = domain.CartConsumptionParked
+	}
+	return nil
+}
+
+func (f *fakeCartConsumptionRepository) ClaimDue(_ context.Context, limit int) ([]*domain.CartConsumption, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var out []*domain.CartConsumption
+	for _, t := range f.tasks {
+		if t.Status == domain.CartConsumptionPending && len(out) < limit {
+			copyTask := *t
+			out = append(out, &copyTask)
+		}
+	}
+	return out, nil
+}
+
+func (f *fakeCartConsumptionRepository) ListStaleHeld(_ context.Context, olderThan time.Time, limit int) ([]*domain.CartConsumption, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var out []*domain.CartConsumption
+	for _, t := range f.tasks {
+		if t.Status == domain.CartConsumptionHeld && t.CreatedAt.Before(olderThan) && len(out) < limit {
+			copyTask := *t
+			out = append(out, &copyTask)
+		}
+	}
+	return out, nil
+}
+
+func (f *fakeCartConsumptionRepository) Stats(context.Context) (domain.CartConsumptionStats, error) {
+	return domain.CartConsumptionStats{}, nil
 }
 
 type fakeCatalogGateway struct {
@@ -399,6 +542,7 @@ func (f *fakeVendorGateway) GetApprovedVendorID(_ context.Context, userID, vendo
 // reservation failure for a specific product id, so checkout's
 // compensating cancel path can be exercised without a real service.
 type fakeInventoryGateway struct {
+	commitError     error
 	mu              sync.Mutex
 	shortProduct    string
 	reservedOrders  map[string][]adapter.ReserveLine
@@ -417,6 +561,9 @@ func newFakeInventoryGateway() *fakeInventoryGateway {
 func (f *fakeInventoryGateway) Commit(_ context.Context, orderID string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.commitError != nil {
+		return f.commitError
+	}
 	f.committedOrders[orderID] = true
 	return nil
 }
@@ -601,4 +748,11 @@ func (f *fakeVendorGateway) Approved(ctx context.Context, ids []string) (map[str
 		out[id] = 1
 	}
 	return out, nil
+}
+
+func (f *fakeOrderRepository) WithLockedOrder(ctx context.Context, id string, fn func(context.Context) error) error {
+	return fn(ctx)
+}
+func (f *fakeInventoryGateway) Operation(ctx context.Context, id string) (*adapter.ReservationReceipt, error) {
+	return &adapter.ReservationReceipt{OrderID: id, OperationID: id, Status: "held", ExpiresAt: time.Now().Add(30 * time.Minute)}, nil
 }

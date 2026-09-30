@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"shopee/backend/pkg/serviceauth"
 	"strings"
 	"time"
 )
@@ -20,12 +21,13 @@ type InventoryGateway interface {
 }
 
 type HTTPInventoryClient struct {
+	key     string
 	baseURL string
 	client  *http.Client
 }
 
-func NewHTTPInventoryClient(baseURL string) *HTTPInventoryClient {
-	return &HTTPInventoryClient{baseURL: baseURL, client: &http.Client{Timeout: 5 * time.Second}}
+func NewHTTPInventoryClient(baseURL, key string) *HTTPInventoryClient {
+	return &HTTPInventoryClient{key: key, baseURL: baseURL, client: &http.Client{Timeout: 5 * time.Second}}
 }
 
 type variantStockResponse struct {
@@ -53,6 +55,7 @@ func (c *HTTPInventoryClient) GetVariantStock(ctx context.Context, variantIDs []
 		return nil, err
 	}
 
+	serviceauth.SetRequestHeaders(req, c.key)
 	resp, err := c.client.Do(req)
 	if err != nil {
 		return nil, err
@@ -94,6 +97,7 @@ func (c *HTTPInventoryClient) CheckStockReadiness(ctx context.Context, productID
 		return false, err
 	}
 
+	serviceauth.SetRequestHeaders(req, c.key)
 	resp, err := c.client.Do(req)
 	if err != nil {
 		return false, err
@@ -128,6 +132,7 @@ func (c *HTTPInventoryClient) GetProductStock(ctx context.Context, productID str
 		return 0, false, err
 	}
 
+	serviceauth.SetRequestHeaders(req, c.key)
 	resp, err := c.client.Do(req)
 	if err != nil {
 		return 0, false, err
