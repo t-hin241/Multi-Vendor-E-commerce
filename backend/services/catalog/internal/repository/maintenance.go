@@ -2,9 +2,10 @@ package repository
 
 import (
 	"context"
+	"shopee/backend/pkg/apperror"
+
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"shopee/backend/pkg/apperror"
 )
 
 type Maintenance struct{ Pool *pgxpool.Pool }
@@ -52,4 +53,9 @@ func (r Maintenance) Replay(ctx context.Context, actor, kind, id, reason string)
 		}
 		return NewAuditLogRepository(r.Pool).Create(ctx, product, actor, "replay_"+kind, &reason)
 	})
+}
+
+func (r Maintenance) InvalidateStock(ctx context.Context, ids []string) error {
+	_, err := r.Pool.Exec(ctx, `DELETE FROM variant_stock_cache WHERE variant_id=ANY($1)`, ids)
+	return err
 }

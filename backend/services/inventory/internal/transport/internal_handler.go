@@ -1,15 +1,18 @@
 package transport
 
 import (
-	"github.com/google/uuid"
+	"errors"
 	"net/http"
 	"shopee/backend/pkg/apperror"
 	"strings"
+
+	"github.com/google/uuid"
 
 	"github.com/gin-gonic/gin"
 	"github.com/rs/zerolog"
 
 	"shopee/backend/pkg/httpresponse"
+	"shopee/backend/pkg/middleware"
 	"shopee/backend/services/inventory/internal/domain"
 	"shopee/backend/services/inventory/internal/usecase"
 )
@@ -38,13 +41,13 @@ func (h *InternalHandler) Reserve(c *gin.Context) {
 		lines = append(lines, domain.ReservationLine{ProductID: item.ProductID, VariantID: item.VariantID, Quantity: item.Quantity})
 	}
 
-	reservations, err := h.inventory.Reserve(c.Request.Context(), req.OrderID, lines)
+	_, err := h.inventory.Reserve(c.Request.Context(), req.OrderID, lines)
 	if err != nil {
 		httpresponse.HandleError(c, h.log, err)
 		return
 	}
 
-	httpresponse.OK(c, http.StatusCreated, toReservationResponseList(reservations))
+	h.operationResponse(c, req.OrderID, http.StatusCreated)
 }
 
 // GetVariantStock serves Catalog's public product-detail page: current
@@ -135,7 +138,7 @@ func (h *InternalHandler) Release(c *gin.Context) {
 		return
 	}
 
-	httpresponse.OK(c, http.StatusOK, gin.H{"released": true})
+	h.operationResponse(c, req.OrderID, http.StatusOK)
 }
 
 func (h *InternalHandler) Commit(c *gin.Context) {
@@ -146,9 +149,31 @@ func (h *InternalHandler) Commit(c *gin.Context) {
 	}
 
 	if err := h.inventory.Commit(c.Request.Context(), req.OrderID); err != nil {
+		// A refused commit means money may have been captured for stock
+		// that is not held any more (expired, released or never reserved):
+		// it must reach reconciliation, so it is always logged.
+		var appErr *apperror.Error
+		if errors.As(err, &appErr) && appErr.Code == apperror.CodeConflict {
+			h.log.Warn().Str("order_id", req.OrderID).Str("request_id", middleware.GetRequestID(c)).
+				Str("reason", appErr.Message).Msg("inventory_commit_conflict")
+		}
 		httpresponse.HandleError(c, h.log, err)
 		return
 	}
 
-	httpresponse.OK(c, http.StatusOK, gin.H{"committed": true})
+	h.operationResponse(c, req.OrderID, http.StatusOK)
+}
+
+func (h *InternalHandler) Operation(c *gin.Context) { h.operationResponse(c, c.Param("orderID"), 200) }
+func (h *InternalHandler) operationResponse(c *gin.Context, id string, status int) {
+	if _, err := uuid.Parse(id); err != nil {
+		httpresponse.Error(c, 400, "validation_error", "Invalid order ID")
+		return
+	}
+	o, err := h.inventory.Operation(c.Request.Context(), id)
+	if err != nil {
+		httpresponse.HandleError(c, h.log, err)
+		return
+	}
+	httpresponse.OK(c, status, o)
 }

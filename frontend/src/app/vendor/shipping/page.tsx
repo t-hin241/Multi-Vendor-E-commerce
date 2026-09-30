@@ -63,7 +63,10 @@ function ShippingMethods({ vendorId }: { vendorId: string }) {
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const carriersQuery = useQuery({ queryKey: ["active-carriers"], queryFn: () => api.listActiveCarriers() });
+  const carriersQuery = useQuery({
+    queryKey: ["active-carriers"],
+    queryFn: () => api.listActiveCarriers(),
+  });
   const methodsQuery = useQuery({
     queryKey: ["vendor-shipping-methods", vendorId],
     queryFn: () => callWithAuth((token) => api.listMyShippingMethods(token, vendorId)),
@@ -146,7 +149,12 @@ function ShippingMethods({ vendorId }: { vendorId: string }) {
                 </span>
                 <div className="flex gap-3 text-sm">
                   {!m.is_default && m.is_active && (
-                    <Button variant="link" size="sm" className="h-auto p-0" onClick={() => handleSetDefault(m.id)}>
+                    <Button
+                      variant="link"
+                      size="sm"
+                      className="h-auto p-0"
+                      onClick={() => handleSetDefault(m.id)}
+                    >
                       Đặt mặc định
                     </Button>
                   )}
@@ -294,11 +302,21 @@ function WarehouseAddresses({ vendorId }: { vendorId: string }) {
                   </p>
                 </div>
                 <div className="flex flex-col items-end gap-1 text-sm">
-                  <Button variant="link" size="sm" className="h-auto p-0" onClick={() => startEdit(a)}>
+                  <Button
+                    variant="link"
+                    size="sm"
+                    className="h-auto p-0"
+                    onClick={() => startEdit(a)}
+                  >
                     Sửa
                   </Button>
                   {!a.is_default && (
-                    <Button variant="link" size="sm" className="h-auto p-0" onClick={() => handleSetDefault(a.id)}>
+                    <Button
+                      variant="link"
+                      size="sm"
+                      className="h-auto p-0"
+                      onClick={() => handleSetDefault(a.id)}
+                    >
                       Đặt mặc định
                     </Button>
                   )}

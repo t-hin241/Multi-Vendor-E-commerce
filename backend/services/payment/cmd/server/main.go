@@ -63,7 +63,11 @@ func main() {
 		log.Fatal().Err(err).Msg("session verifier configuration invalid")
 	}
 	jwtManager.SetVerifier(sessionVerifier)
-	orderClient := adapter.NewHTTPOrderClient(cfg.OrderServiceURL)
+	internalServices, err := sessionconfig.LoadInternalServices()
+	if err != nil {
+		log.Fatal().Msg("internal service configuration invalid")
+	}
+	orderClient := adapter.NewHTTPOrderClient(cfg.OrderServiceURL, internalServices.Key)
 
 	var paymentProvider provider.Provider
 	var verifier provider.Verifier
@@ -94,12 +98,16 @@ func main() {
 		}},
 	)
 
-	internalServices, err := sessionconfig.LoadInternalServices()
-	if err != nil {
-		log.Fatal().Msg("internal service configuration invalid")
-	}
 	router.GET("/internal/vendor-reports/:vendorId", serviceauth.Require(internalServices.Key, serviceauth.Header), vendorreport.Handler(vendorreport.Service{Repository: repository.VendorReport{Pool: dbPool}}, log))
 
+	syncCtx, stopSync := context.WithCancel(ctx)
+	defer stopSync()
+	go (repository.OrderSync{Pool: dbPool}).Run(syncCtx, func(ctx context.Context, id, outcome string) error {
+		if outcome == "captured" {
+			return orderClient.MarkPaid(ctx, id)
+		}
+		return orderClient.MarkPaymentFailed(ctx, id, "Payment failed")
+	}, log)
 	srv := &http.Server{
 		Addr:              ":" + cfg.Base.Port,
 		Handler:           router,

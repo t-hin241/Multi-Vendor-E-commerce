@@ -1,11 +1,12 @@
 package transport
 
 import (
-	"github.com/gin-gonic/gin"
-	"github.com/rs/zerolog"
 	"shopee/backend/pkg/authjwt"
 	"shopee/backend/pkg/health"
 	"shopee/backend/pkg/middleware"
+
+	"github.com/gin-gonic/gin"
+	"github.com/rs/zerolog"
 )
 
 func NewRouter(env string, log zerolog.Logger, jwt *authjwt.Manager, h *Handler, checkers ...health.Checker) *gin.Engine {

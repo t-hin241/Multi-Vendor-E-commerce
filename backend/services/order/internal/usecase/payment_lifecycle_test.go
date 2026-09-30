@@ -11,14 +11,14 @@ import (
 func TestMarkPaid_TransitionsOrderAndVendorOrdersAndCommitsStock(t *testing.T) {
 	f := newCheckoutFixture()
 	ctx := t.Context()
-	f.cart.byToken[testToken] = []adapter.CartLine{
+	f.cart.byBuyer["buyer-1"] = []adapter.CartLine{
 		{ProductID: "p1", Quantity: 1},
 		{ProductID: "p2", Quantity: 1},
 	}
 	f.catalog.products["p1"] = &adapter.ProductInfo{ID: "p1", VendorID: "vendor-a", Name: "Shoe", PriceAmount: 1000, Currency: "VND", IsVisible: true}
 	f.catalog.products["p2"] = &adapter.ProductInfo{ID: "p2", VendorID: "vendor-b", Name: "Hat", PriceAmount: 500, Currency: "VND", IsVisible: true}
 
-	order, err := f.uc.Checkout(ctx, "buyer-1", testToken, f.addressID)
+	order, err := f.uc.Checkout(ctx, "buyer-1", f.addressID, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -67,10 +67,10 @@ func TestMarkPaid_TransitionsOrderAndVendorOrdersAndCommitsStock(t *testing.T) {
 func TestMarkPaymentFailed_CancelsOrderAndReleasesStock(t *testing.T) {
 	f := newCheckoutFixture()
 	ctx := t.Context()
-	f.cart.byToken[testToken] = []adapter.CartLine{{ProductID: "p1", Quantity: 1}}
+	f.cart.byBuyer["buyer-1"] = []adapter.CartLine{{ProductID: "p1", Quantity: 1}}
 	f.catalog.products["p1"] = &adapter.ProductInfo{ID: "p1", VendorID: "vendor-a", Name: "Shoe", PriceAmount: 1000, Currency: "VND", IsVisible: true}
 
-	order, err := f.uc.Checkout(ctx, "buyer-1", testToken, f.addressID)
+	order, err := f.uc.Checkout(ctx, "buyer-1", f.addressID, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -90,10 +90,10 @@ func TestMarkPaymentFailed_CancelsOrderAndReleasesStock(t *testing.T) {
 func TestMarkPaid_ConflictWhenOrderAlreadyCancelled(t *testing.T) {
 	f := newCheckoutFixture()
 	ctx := t.Context()
-	f.cart.byToken[testToken] = []adapter.CartLine{{ProductID: "p1", Quantity: 1}}
+	f.cart.byBuyer["buyer-1"] = []adapter.CartLine{{ProductID: "p1", Quantity: 1}}
 	f.catalog.products["p1"] = &adapter.ProductInfo{ID: "p1", VendorID: "vendor-a", Name: "Shoe", PriceAmount: 1000, Currency: "VND", IsVisible: true}
 
-	order, err := f.uc.Checkout(ctx, "buyer-1", testToken, f.addressID)
+	order, err := f.uc.Checkout(ctx, "buyer-1", f.addressID, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -111,7 +111,7 @@ func TestMarkPaid_ConflictWhenOrderAlreadyCancelled(t *testing.T) {
 func TestUpdateVendorOrderStatus_WeakestLinkGatesOverallOrder(t *testing.T) {
 	f := newCheckoutFixture()
 	ctx := t.Context()
-	f.cart.byToken[testToken] = []adapter.CartLine{
+	f.cart.byBuyer["buyer-1"] = []adapter.CartLine{
 		{ProductID: "p1", Quantity: 1},
 		{ProductID: "p2", Quantity: 1},
 	}
@@ -120,7 +120,7 @@ func TestUpdateVendorOrderStatus_WeakestLinkGatesOverallOrder(t *testing.T) {
 	f.vendors.approvedVendors["user-a"] = "vendor-a"
 	f.vendors.approvedVendors["user-b"] = "vendor-b"
 
-	order, err := f.uc.Checkout(ctx, "buyer-1", testToken, f.addressID)
+	order, err := f.uc.Checkout(ctx, "buyer-1", f.addressID, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -181,12 +181,12 @@ func TestUpdateVendorOrderStatus_WeakestLinkGatesOverallOrder(t *testing.T) {
 func TestUpdateVendorOrderStatus_RejectsNonOwningVendor(t *testing.T) {
 	f := newCheckoutFixture()
 	ctx := t.Context()
-	f.cart.byToken[testToken] = []adapter.CartLine{{ProductID: "p1", Quantity: 1}}
+	f.cart.byBuyer["buyer-1"] = []adapter.CartLine{{ProductID: "p1", Quantity: 1}}
 	f.catalog.products["p1"] = &adapter.ProductInfo{ID: "p1", VendorID: "vendor-a", Name: "Shoe", PriceAmount: 1000, Currency: "VND", IsVisible: true}
 	f.vendors.approvedVendors["user-a"] = "vendor-a"
 	f.vendors.approvedVendors["user-other"] = "vendor-other"
 
-	order, err := f.uc.Checkout(ctx, "buyer-1", testToken, f.addressID)
+	order, err := f.uc.Checkout(ctx, "buyer-1", f.addressID, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -205,10 +205,10 @@ func TestUpdateVendorOrderStatus_RejectsNonOwningVendor(t *testing.T) {
 func TestAdminTransition_RefundsAPaidOrder(t *testing.T) {
 	f := newCheckoutFixture()
 	ctx := t.Context()
-	f.cart.byToken[testToken] = []adapter.CartLine{{ProductID: "p1", Quantity: 1}}
+	f.cart.byBuyer["buyer-1"] = []adapter.CartLine{{ProductID: "p1", Quantity: 1}}
 	f.catalog.products["p1"] = &adapter.ProductInfo{ID: "p1", VendorID: "vendor-a", Name: "Shoe", PriceAmount: 1000, Currency: "VND", IsVisible: true}
 
-	order, err := f.uc.Checkout(ctx, "buyer-1", testToken, f.addressID)
+	order, err := f.uc.Checkout(ctx, "buyer-1", f.addressID, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -228,10 +228,10 @@ func TestAdminTransition_RefundsAPaidOrder(t *testing.T) {
 func TestAdminTransition_RejectsDisallowedTarget(t *testing.T) {
 	f := newCheckoutFixture()
 	ctx := t.Context()
-	f.cart.byToken[testToken] = []adapter.CartLine{{ProductID: "p1", Quantity: 1}}
+	f.cart.byBuyer["buyer-1"] = []adapter.CartLine{{ProductID: "p1", Quantity: 1}}
 	f.catalog.products["p1"] = &adapter.ProductInfo{ID: "p1", VendorID: "vendor-a", Name: "Shoe", PriceAmount: 1000, Currency: "VND", IsVisible: true}
 
-	order, err := f.uc.Checkout(ctx, "buyer-1", testToken, f.addressID)
+	order, err := f.uc.Checkout(ctx, "buyer-1", f.addressID, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

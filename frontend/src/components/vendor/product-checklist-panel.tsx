@@ -113,7 +113,12 @@ export function ProductChecklistPanel({
           </div>
         </ChecklistRow>
 
-        <Button type="button" onClick={onSubmitForReview} disabled={isSubmitting} className="self-start">
+        <Button
+          type="button"
+          onClick={onSubmitForReview}
+          disabled={isSubmitting}
+          className="self-start"
+        >
           {isSubmitting ? "Đang gửi…" : "Gửi duyệt"}
         </Button>
       </CardContent>

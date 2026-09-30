@@ -4,7 +4,6 @@ import (
 	"encoding/csv"
 	"net/http"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -25,20 +24,17 @@ func NewOrderHandler(orders *usecase.OrderUseCase, log zerolog.Logger) *OrderHan
 	return &OrderHandler{orders: orders, log: log}
 }
 
+// Checkout places an order from the buyer's cart. The buyer is identified
+// only by the verified access token (RequireAuth); Order talks to Cart with
+// its own service identity, so the token is never forwarded or stored.
 func (h *OrderHandler) Checkout(c *gin.Context) {
-	token, ok := strings.CutPrefix(c.GetHeader("Authorization"), "Bearer ")
-	if !ok || token == "" {
-		httpresponse.Error(c, http.StatusUnauthorized, "unauthorized", "Missing bearer token")
-		return
-	}
-
 	var req checkoutRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		httpresponse.Error(c, http.StatusBadRequest, "validation_error", err.Error())
+		httpresponse.Error(c, http.StatusBadRequest, "validation_error", "address_id is required and cart_version, when given, must be a positive integer")
 		return
 	}
 
-	order, err := h.orders.Checkout(c.Request.Context(), middleware.GetUserID(c), token, req.AddressID)
+	order, err := h.orders.Checkout(c.Request.Context(), middleware.GetUserID(c), req.AddressID, req.CartVersion)
 	if err != nil {
 		httpresponse.HandleError(c, h.log, err)
 		return

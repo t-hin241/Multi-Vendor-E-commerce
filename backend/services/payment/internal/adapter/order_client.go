@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"shopee/backend/pkg/serviceauth"
 	"strings"
 	"time"
 
@@ -16,29 +17,34 @@ import (
 // intent-creation time so the amount collected is never sized by anything
 // the client sent.
 type OrderSnapshot struct {
-	ID          string
-	BuyerID     string
-	Status      string
-	TotalAmount int64
-	Currency    string
+	InventoryStatus      string
+	ReservationExpiresAt *time.Time
+	ID                   string
+	BuyerID              string
+	Status               string
+	TotalAmount          int64
+	Currency             string
 }
 
 type HTTPOrderClient struct {
+	key     string
 	baseURL string
 	client  *http.Client
 }
 
-func NewHTTPOrderClient(baseURL string) *HTTPOrderClient {
-	return &HTTPOrderClient{baseURL: baseURL, client: &http.Client{Timeout: 10 * time.Second}}
+func NewHTTPOrderClient(baseURL, key string) *HTTPOrderClient {
+	return &HTTPOrderClient{key: key, baseURL: baseURL, client: &http.Client{Timeout: 10 * time.Second}}
 }
 
 type internalOrderResponseBody struct {
 	Data struct {
-		ID          string `json:"id"`
-		BuyerID     string `json:"buyer_id"`
-		Status      string `json:"status"`
-		TotalAmount int64  `json:"total_amount"`
-		Currency    string `json:"currency"`
+		InventoryStatus      string     `json:"inventory_status"`
+		ReservationExpiresAt *time.Time `json:"reservation_expires_at"`
+		ID                   string     `json:"id"`
+		BuyerID              string     `json:"buyer_id"`
+		Status               string     `json:"status"`
+		TotalAmount          int64      `json:"total_amount"`
+		Currency             string     `json:"currency"`
 	} `json:"data"`
 }
 
@@ -50,6 +56,7 @@ func (c *HTTPOrderClient) GetOrder(ctx context.Context, orderID string) (*OrderS
 		return nil, apperror.Internal(err)
 	}
 
+	serviceauth.SetRequestHeaders(req, c.key)
 	resp, err := c.client.Do(req)
 	if err != nil {
 		return nil, apperror.Internal(err)
@@ -69,7 +76,7 @@ func (c *HTTPOrderClient) GetOrder(ctx context.Context, orderID string) (*OrderS
 	}
 
 	return &OrderSnapshot{
-		ID: body.Data.ID, BuyerID: body.Data.BuyerID, Status: body.Data.Status,
+		InventoryStatus: body.Data.InventoryStatus, ReservationExpiresAt: body.Data.ReservationExpiresAt, ID: body.Data.ID, BuyerID: body.Data.BuyerID, Status: body.Data.Status,
 		TotalAmount: body.Data.TotalAmount, Currency: body.Data.Currency,
 	}, nil
 }
@@ -84,12 +91,16 @@ func (c *HTTPOrderClient) MarkPaid(ctx context.Context, orderID string) error {
 		return apperror.Internal(err)
 	}
 
+	serviceauth.SetRequestHeaders(req, c.key)
 	resp, err := c.client.Do(req)
 	if err != nil {
 		return apperror.Internal(err)
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode == http.StatusConflict {
+		return apperror.Conflict("Order rejected payment outcome; reconciliation required")
+	}
 	if resp.StatusCode != http.StatusOK {
 		return apperror.Internal(fmt.Errorf("order service returned status %d marking order paid", resp.StatusCode))
 	}
@@ -112,12 +123,16 @@ func (c *HTTPOrderClient) MarkPaymentFailed(ctx context.Context, orderID, reason
 	}
 	req.Header.Set("Content-Type", "application/json")
 
+	serviceauth.SetRequestHeaders(req, c.key)
 	resp, err := c.client.Do(req)
 	if err != nil {
 		return apperror.Internal(err)
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode == http.StatusConflict {
+		return apperror.Conflict("Order rejected payment outcome; reconciliation required")
+	}
 	if resp.StatusCode != http.StatusOK {
 		return apperror.Internal(fmt.Errorf("order service returned status %d marking payment failed", resp.StatusCode))
 	}

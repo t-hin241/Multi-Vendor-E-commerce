@@ -145,7 +145,13 @@ export function VariantGenerator({
             </div>
           ))}
         </div>
-        <Button type="button" variant="outline" size="sm" className="self-start" onClick={handleGenerate}>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="self-start"
+          onClick={handleGenerate}
+        >
           Tạo danh sách phiên bản
         </Button>
 
@@ -213,7 +219,13 @@ export function VariantGenerator({
               ))}
             </div>
 
-            <Button type="button" size="sm" className="self-start" onClick={handleCreateVariants} disabled={isSaving}>
+            <Button
+              type="button"
+              size="sm"
+              className="self-start"
+              onClick={handleCreateVariants}
+              disabled={isSaving}
+            >
               {isSaving ? "Đang tạo…" : "Tạo phiên bản"}
             </Button>
           </div>

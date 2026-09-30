@@ -117,8 +117,13 @@ func toVendorOrderResponseList(vendorOrders []*domain.VendorOrder, itemsByVendor
 	return out
 }
 
+// checkoutRequest.CartVersion is the cart version the buyer reviewed. It is
+// optional only for clients built before the cart upgrade; with it, a cart
+// changed in another tab/device is rejected (409 cart_changed) instead of
+// being bought unseen.
 type checkoutRequest struct {
-	AddressID string `json:"address_id" binding:"required"`
+	AddressID   string `json:"address_id" binding:"required"`
+	CartVersion *int64 `json:"cart_version" binding:"omitempty,min=1"`
 }
 
 type addressRequest struct {
@@ -171,11 +176,13 @@ type markPaymentFailedRequest struct {
 }
 
 type internalOrderResponse struct {
-	ID          string `json:"id"`
-	BuyerID     string `json:"buyer_id"`
-	Status      string `json:"status"`
-	TotalAmount int64  `json:"total_amount"`
-	Currency    string `json:"currency"`
+	InventoryStatus      string     `json:"inventory_status,omitempty"`
+	ReservationExpiresAt *time.Time `json:"reservation_expires_at,omitempty"`
+	ID                   string     `json:"id"`
+	BuyerID              string     `json:"buyer_id"`
+	Status               string     `json:"status"`
+	TotalAmount          int64      `json:"total_amount"`
+	Currency             string     `json:"currency"`
 }
 
 func toInternalOrderResponse(o *domain.Order) internalOrderResponse {

@@ -113,6 +113,12 @@ func (r *OrderRepository) CreateFromPlan(ctx context.Context, plan *domain.Plan)
 		}
 	}
 
+	if plan.CartConsumption != nil {
+		if err := insertCartConsumption(ctx, tx, order.ID, plan.CartConsumption); err != nil {
+			return nil, err
+		}
+	}
+
 	if err := tx.Commit(ctx); err != nil {
 		return nil, err
 	}
@@ -120,7 +126,7 @@ func (r *OrderRepository) CreateFromPlan(ctx context.Context, plan *domain.Plan)
 }
 
 func (r *OrderRepository) FindByID(ctx context.Context, id string) (*domain.Order, error) {
-	return scanOrder(r.pool.QueryRow(ctx, `SELECT `+orderColumns+` FROM orders WHERE id = $1`, id))
+	return scanOrder(connection(ctx, r.pool).QueryRow(ctx, `SELECT `+orderColumns+` FROM orders WHERE id = $1`, id))
 }
 
 func (r *OrderRepository) ListByBuyer(ctx context.Context, buyerID string, limit, offset int) ([]*domain.Order, error) {
@@ -134,7 +140,7 @@ func (r *OrderRepository) ListByStatus(ctx context.Context, status string, limit
 }
 
 func (r *OrderRepository) list(ctx context.Context, query string, args ...any) ([]*domain.Order, error) {
-	rows, err := r.pool.Query(ctx, query, args...)
+	rows, err := connection(ctx, r.pool).Query(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -153,7 +159,7 @@ func (r *OrderRepository) list(ctx context.Context, query string, args ...any) (
 
 func (r *OrderRepository) UpdateStatus(ctx context.Context, id string, status domain.Status, reason *string) error {
 	const query = `UPDATE orders SET status = $1, cancellation_reason = $2, updated_at = now() WHERE id = $3`
-	tag, err := r.pool.Exec(ctx, query, status, reason, id)
+	tag, err := connection(ctx, r.pool).Exec(ctx, query, status, reason, id)
 	if err != nil {
 		return err
 	}
@@ -169,7 +175,7 @@ func (r *OrderRepository) UpdateStatus(ctx context.Context, id string, status do
 // depends on a shipment that's created immediately afterward.
 func (r *OrderRepository) UpdateTotalAmount(ctx context.Context, id string, totalAmount int64) error {
 	const query = `UPDATE orders SET total_amount = $1, updated_at = now() WHERE id = $2`
-	tag, err := r.pool.Exec(ctx, query, totalAmount, id)
+	tag, err := connection(ctx, r.pool).Exec(ctx, query, totalAmount, id)
 	if err != nil {
 		return err
 	}
@@ -195,7 +201,7 @@ func scanOrderItem(row scanner) (*domain.OrderItem, error) {
 }
 
 func (r *OrderRepository) ListItemsByOrder(ctx context.Context, orderID string) ([]*domain.OrderItem, error) {
-	rows, err := r.pool.Query(ctx, `SELECT `+orderItemColumns+` FROM order_items WHERE order_id = $1 ORDER BY created_at ASC`, orderID)
+	rows, err := connection(ctx, r.pool).Query(ctx, `SELECT `+orderItemColumns+` FROM order_items WHERE order_id = $1 ORDER BY created_at ASC`, orderID)
 	if err != nil {
 		return nil, err
 	}
@@ -222,7 +228,7 @@ func (r *OrderRepository) ListReviewEligibility(ctx context.Context, buyerID, pr
 		JOIN vendor_orders vo ON vo.id = oi.vendor_order_id
 		WHERE o.buyer_id = $1 AND vo.status = 'completed' AND ($2 = '' OR oi.product_id = $2)
 		ORDER BY vo.updated_at DESC`
-	rows, err := r.pool.Query(ctx, query, buyerID, productID)
+	rows, err := connection(ctx, r.pool).Query(ctx, query, buyerID, productID)
 	if err != nil {
 		return nil, err
 	}
@@ -236,4 +242,18 @@ func (r *OrderRepository) ListReviewEligibility(ctx context.Context, buyerID, pr
 		out = append(out, &item)
 	}
 	return out, rows.Err()
+}
+
+func (r *OrderRepository) WithLockedOrder(ctx context.Context, id string, fn func(context.Context) error) error {
+	return (Transactions{Pool: r.pool}).Run(ctx, func(ctx context.Context) error {
+		var locked string
+		err := connection(ctx, r.pool).QueryRow(ctx, `SELECT id FROM orders WHERE id=$1 FOR UPDATE`, id).Scan(&locked)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return apperror.NotFound("Order not found")
+		}
+		if err != nil {
+			return err
+		}
+		return fn(ctx)
+	})
 }

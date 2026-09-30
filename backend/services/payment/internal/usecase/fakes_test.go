@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"time"
 
 	"shopee/backend/services/payment/internal/adapter"
 	"shopee/backend/services/payment/internal/domain"
@@ -100,6 +101,7 @@ func (f *fakeEventRepo) RecordIfNew(_ context.Context, providerEventID, _, _ str
 }
 
 type fakeOrderGateway struct {
+	omitWindow  bool
 	mu          sync.Mutex
 	orders      map[string]*adapter.OrderSnapshot
 	paidCalls   []string
@@ -118,6 +120,11 @@ func (f *fakeOrderGateway) GetOrder(_ context.Context, orderID string) (*adapter
 		return nil, errors.New("order not found")
 	}
 	cp := *o
+	if cp.ReservationExpiresAt == nil && !f.omitWindow {
+		expires := time.Now().Add(30 * time.Minute)
+		cp.ReservationExpiresAt = &expires
+		cp.InventoryStatus = "held"
+	}
 	return &cp, nil
 }
 

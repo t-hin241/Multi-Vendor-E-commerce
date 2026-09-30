@@ -3,6 +3,7 @@ package usecase_test
 import (
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/rs/zerolog"
 
@@ -246,5 +247,28 @@ func TestSimulate_UnavailableWithoutASimulator(t *testing.T) {
 	appErr := mustAppError(t, err)
 	if appErr.Code != apperror.CodeValidation {
 		t.Errorf("expected validation error when no simulator is wired, got %v", appErr.Code)
+	}
+}
+
+func TestCreateIntentRequiresReservationDeadline(t *testing.T) {
+	f := newFixture()
+	past := time.Now().Add(-time.Minute)
+	f.orders.orders["order-1"] = &adapter.OrderSnapshot{ID: "order-1", BuyerID: "buyer-1", Status: "pending_payment", TotalAmount: 100, Currency: "VND", InventoryStatus: "held", ReservationExpiresAt: &past}
+	if _, err := f.uc.CreateIntent(t.Context(), "buyer-1", "order-1"); err == nil {
+		t.Fatal("expired reservation allowed payment")
+	}
+	f.orders.orders["order-1"].ReservationExpiresAt = nil
+	f.orders.omitWindow = true
+	if _, err := f.uc.CreateIntent(t.Context(), "buyer-1", "order-1"); err == nil {
+		t.Fatal("missing reservation allowed payment")
+	}
+	future := time.Now().Add(time.Minute)
+	f.orders.orders["order-1"].ReservationExpiresAt = &future
+	intent, err := f.uc.CreateIntent(t.Context(), "buyer-1", "order-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if intent.ExpiresAt == nil || !intent.ExpiresAt.Equal(future) {
+		t.Fatal("payment deadline exceeds inventory hold")
 	}
 }

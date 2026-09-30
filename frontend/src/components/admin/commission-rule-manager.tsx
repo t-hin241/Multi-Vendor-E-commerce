@@ -62,10 +62,15 @@ export function CommissionRuleManager() {
         <CardContent className="flex flex-col gap-3">
           {current ? (
             <p className="text-sm text-muted-foreground">
-              Current rate: <span className="font-medium text-foreground">{(current.rate_bps / 100).toFixed(2)}%</span>
+              Current rate:{" "}
+              <span className="font-medium text-foreground">
+                {(current.rate_bps / 100).toFixed(2)}%
+              </span>
             </p>
           ) : (
-            !loadError && <p className="text-sm text-muted-foreground">No commission rule set yet.</p>
+            !loadError && (
+              <p className="text-sm text-muted-foreground">No commission rule set yet.</p>
+            )
           )}
           {loadError && <p className="text-sm text-destructive">{loadError}</p>}
 

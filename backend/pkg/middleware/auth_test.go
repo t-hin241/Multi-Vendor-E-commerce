@@ -2,12 +2,13 @@ package middleware_test
 
 import (
 	"context"
-	"github.com/gin-gonic/gin"
 	"net/http/httptest"
 	"shopee/backend/pkg/authjwt"
 	"shopee/backend/pkg/middleware"
 	"testing"
 	"time"
+
+	"github.com/gin-gonic/gin"
 )
 
 func TestRequireAuthRejectsRevokedAndUnavailableSessions(t *testing.T) {

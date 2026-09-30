@@ -65,13 +65,24 @@ func main() {
 	}
 	jwtManager.SetVerifier(verifier)
 	catalogClient := adapter.NewHTTPCatalogClient(cfg.CatalogServiceURL, internalServices.Key)
+	inventoryClient := adapter.NewHTTPInventoryClient(cfg.InventoryServiceURL, internalServices.Key)
 
 	cartRepo := repository.NewCartRepository(dbPool)
 	cartItemRepo := repository.NewCartItemRepository(dbPool)
-	cartUseCase := usecase.NewCartUseCase(cartRepo, cartItemRepo, catalogClient)
+	operationRepo := repository.NewCheckoutOperationRepository(dbPool)
+	cartUseCase := usecase.NewCartUseCase(repository.Transactions{Pool: dbPool}, cartRepo, cartItemRepo, operationRepo, catalogClient, inventoryClient, log)
 	cartHandler := transport.NewCartHandler(cartUseCase, log)
+	internalHandler := transport.NewInternalHandler(cartUseCase, log)
 
-	router := transport.NewRouter(cfg.Base.Env, log, jwtManager, cartHandler,
+	retentionCtx, stopRetention := context.WithCancel(ctx)
+	defer stopRetention()
+	retention := usecase.NewRetentionWorker(repository.NewRetentionRepository(dbPool), usecase.RetentionPolicy{
+		Enabled: cfg.Retention.Enabled, CartIdle: cfg.Retention.CartIdle,
+		OperationTTL: cfg.Retention.OperationTTL, Interval: cfg.Retention.Interval,
+	}, log)
+	go retention.Run(retentionCtx)
+
+	router := transport.NewRouter(cfg.Base.Env, log, jwtManager, cartHandler, internalHandler, internalServices.Key,
 		health.Checker{Name: "postgres", Ping: func(ctx context.Context) error { return dbPool.Ping(ctx) }},
 		health.Checker{Name: "redis", Ping: func(ctx context.Context) error { return redisClient.Ping(ctx).Err() }},
 		health.Checker{Name: "nats", Ping: func(ctx context.Context) error {

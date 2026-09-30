@@ -111,13 +111,26 @@ export function ShippingConfigManager() {
     const base = Number(baseFee);
     const freeKg = Number(freeWeightKg);
     const perKg = Number(extraFeePerKg);
-    if (!ruleCarrierId || !ruleZoneId || Number.isNaN(base) || Number.isNaN(freeKg) || Number.isNaN(perKg)) {
+    if (
+      !ruleCarrierId ||
+      !ruleZoneId ||
+      Number.isNaN(base) ||
+      Number.isNaN(freeKg) ||
+      Number.isNaN(perKg)
+    ) {
       setError("Fill in carrier, zone and valid numbers for the fee.");
       return;
     }
     try {
       await callWithAuth((token) =>
-        api.setFeeRule(token, ruleCarrierId, ruleZoneId, Math.round(base), Math.round(freeKg * 1000), Math.round(perKg)),
+        api.setFeeRule(
+          token,
+          ruleCarrierId,
+          ruleZoneId,
+          Math.round(base),
+          Math.round(freeKg * 1000),
+          Math.round(perKg),
+        ),
       );
       setBaseFee("");
       await queryClient.invalidateQueries({ queryKey: ["fee-rules"] });
@@ -281,15 +294,28 @@ export function ShippingConfigManager() {
             </Select>
             <Label className="flex flex-col items-start gap-1.5 text-xs">
               Base fee (VND)
-              <Input value={baseFee} onChange={(e) => setBaseFee(e.target.value)} required className="w-28" />
+              <Input
+                value={baseFee}
+                onChange={(e) => setBaseFee(e.target.value)}
+                required
+                className="w-28"
+              />
             </Label>
             <Label className="flex flex-col items-start gap-1.5 text-xs">
               Free weight (kg)
-              <Input value={freeWeightKg} onChange={(e) => setFreeWeightKg(e.target.value)} className="w-24" />
+              <Input
+                value={freeWeightKg}
+                onChange={(e) => setFreeWeightKg(e.target.value)}
+                className="w-24"
+              />
             </Label>
             <Label className="flex flex-col items-start gap-1.5 text-xs">
               Extra fee / kg
-              <Input value={extraFeePerKg} onChange={(e) => setExtraFeePerKg(e.target.value)} className="w-28" />
+              <Input
+                value={extraFeePerKg}
+                onChange={(e) => setExtraFeePerKg(e.target.value)}
+                className="w-28"
+              />
             </Label>
             <Button type="submit" size="sm">
               Set current rule

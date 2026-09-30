@@ -7,6 +7,7 @@ import (
 )
 
 type MaintenanceRepository interface {
+	InvalidateStock(context.Context, []string) error
 	Stats(context.Context) (map[string]int64, error)
 	Replay(context.Context, string, string, string, string) error
 }
@@ -29,4 +30,8 @@ func (m Maintenance) Replay(ctx context.Context, actor, kind, id, reason string)
 		return apperror.Validation("Replay requires a valid kind and reason (maximum 500 bytes)")
 	}
 	return m.Repository.Replay(ctx, actor, kind, id, reason)
+}
+
+func (m Maintenance) InvalidateStock(ctx context.Context, ids []string) error {
+	return m.Repository.InvalidateStock(ctx, ids)
 }

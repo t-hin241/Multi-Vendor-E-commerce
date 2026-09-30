@@ -6,6 +6,7 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { RestockStatusBadge } from "@/components/vendor/status-badges";
+import { StockCountForm } from "@/components/vendor/stock-count-form";
 import { VariantGenerator } from "@/components/vendor/variant-generator";
 import * as api from "@/lib/api-client";
 import { useAuth } from "@/lib/auth-context";
@@ -182,7 +183,12 @@ export function PlainStockEditor({
   return (
     <div className="flex flex-col items-start gap-1">
       <div className="flex items-center gap-2">
-        {item && <span className="text-sm">Tồn kho: {item.available_quantity}</span>}
+        {item && (
+          <span className="text-sm">
+            Tồn kho: {item.available_quantity}
+            {item.reserved_quantity > 0 && ` (đang giữ cho đơn: ${item.reserved_quantity})`}
+          </span>
+        )}
         <Input
           type="number"
           min={item ? 1 : 0}
@@ -198,6 +204,7 @@ export function PlainStockEditor({
       {message && <p className="text-xs text-success">{message}</p>}
       {error && <p className="text-xs text-destructive">{error}</p>}
       <RestockRequestStatusList requests={pendingRequests} />
+      {item && <StockCountForm item={item} onRecorded={onChanged} />}
     </div>
   );
 }
@@ -276,6 +283,7 @@ export function VariantStockRow({
       <div className="flex flex-wrap items-center gap-2">
         <span>
           {variant.sku} — {label} — Tồn kho: {item?.available_quantity ?? 0}
+          {item && item.reserved_quantity > 0 && ` (đang giữ cho đơn: ${item.reserved_quantity})`}
         </span>
         <Input
           type="number"
@@ -291,6 +299,7 @@ export function VariantStockRow({
         {error && <span className="text-xs text-destructive">{error}</span>}
       </div>
       <RestockRequestStatusList requests={pendingRequests} />
+      {item && <StockCountForm item={item} onRecorded={onChanged} />}
     </li>
   );
 }

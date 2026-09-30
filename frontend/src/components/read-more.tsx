@@ -41,10 +41,7 @@ export function ReadMore({
     <div className={className}>
       <div
         ref={contentRef}
-        className={cn(
-          "relative overflow-hidden",
-          !expanded && overflows && FADE_CLASSES[fadeFrom],
-        )}
+        className={cn("relative overflow-hidden", !expanded && overflows && FADE_CLASSES[fadeFrom])}
         style={!expanded && overflows ? { maxHeight: COLLAPSED_MAX_HEIGHT } : undefined}
       >
         {children}

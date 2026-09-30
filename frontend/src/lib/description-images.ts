@@ -29,7 +29,10 @@ const CONTEXT_HOPS = 2;
 // between real content blocks, so the literal previous/next sibling is often
 // empty -- walk past those (without walking arbitrarily far) to find the
 // nearest block that actually has text.
-function nearbyText(start: Element, direction: "previousElementSibling" | "nextElementSibling"): string {
+function nearbyText(
+  start: Element,
+  direction: "previousElementSibling" | "nextElementSibling",
+): string {
   const parts: string[] = [];
   let el = start[direction];
   let hops = 0;

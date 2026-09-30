@@ -11,6 +11,7 @@ import (
 )
 
 type CreateIntentInput struct {
+	ExpiresAt *time.Time
 	OrderID   string
 	Amount    int64
 	Currency  string

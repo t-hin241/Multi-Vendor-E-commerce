@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"net/url"
+	"time"
 
 	"github.com/rs/zerolog"
 
@@ -64,6 +65,10 @@ func (uc *PaymentUseCase) CreateIntent(ctx context.Context, buyerID, orderID str
 		return nil, apperror.Conflict("This order is not awaiting payment")
 	}
 
+	if order.InventoryStatus != "held" || order.ReservationExpiresAt == nil || !order.ReservationExpiresAt.After(time.Now()) {
+		return nil, apperror.Conflict("Order has no active payment reservation window")
+	}
+
 	existing, err := uc.intents.FindPendingByOrderID(ctx, orderID)
 	if err == nil {
 		return existing, nil
@@ -77,10 +82,14 @@ func (uc *PaymentUseCase) CreateIntent(ctx context.Context, buyerID, orderID str
 	}
 
 	result, err := uc.paymentProvider.CreateIntent(ctx, provider.CreateIntentInput{
-		OrderID: orderID, Amount: order.TotalAmount, Currency: order.Currency, ReturnURL: paymentReturnURL(uc.returnURL, orderID), CancelURL: paymentReturnURL(uc.cancelURL, orderID),
+		ExpiresAt: order.ReservationExpiresAt, OrderID: orderID, Amount: order.TotalAmount, Currency: order.Currency, ReturnURL: paymentReturnURL(uc.returnURL, orderID), CancelURL: paymentReturnURL(uc.cancelURL, orderID),
 	})
 	if err != nil {
 		return nil, apperror.Internal(err)
+	}
+
+	if result.ExpiresAt == nil || result.ExpiresAt.After(*order.ReservationExpiresAt) {
+		result.ExpiresAt = order.ReservationExpiresAt
 	}
 
 	intent := &domain.PaymentIntent{

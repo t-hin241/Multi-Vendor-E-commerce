@@ -3,11 +3,12 @@ package usecase_test
 import (
 	"bytes"
 	"errors"
-	"github.com/rs/zerolog"
 	"image"
 	"image/jpeg"
 	"slices"
 	"testing"
+
+	"github.com/rs/zerolog"
 
 	"shopee/backend/pkg/apperror"
 	"shopee/backend/services/catalog/internal/domain"

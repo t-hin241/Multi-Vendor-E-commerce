@@ -10,18 +10,18 @@ import (
 // the handler, not via binding, since Gin can't express an XOR of two
 // optional fields declaratively).
 type createItemRequest struct {
-	ProductID       *string `json:"product_id"`
-	VariantID       *string `json:"variant_id"`
+	ProductID       *string `json:"product_id" binding:"omitempty,uuid"`
+	VariantID       *string `json:"variant_id" binding:"omitempty,uuid"`
 	InitialQuantity int64   `json:"initial_quantity"`
 }
 
 type restockRequest struct {
-	Quantity int64 `json:"quantity" binding:"required"`
+	Quantity int64 `json:"quantity" binding:"required,gt=0"`
 }
 
 type itemResponse struct {
 	ID                string    `json:"id"`
-	ProductID         string    `json:"product_id"`
+	ProductID         string    `json:"product_id" binding:"omitempty,uuid"`
 	VariantID         *string   `json:"variant_id,omitempty"`
 	VendorID          string    `json:"vendor_id"`
 	AvailableQuantity int64     `json:"available_quantity"`
@@ -52,43 +52,22 @@ func toItemResponseList(items []*domain.InventoryItem) []itemResponse {
 }
 
 type reserveLineRequest struct {
-	ProductID string  `json:"product_id" binding:"required"`
-	VariantID *string `json:"variant_id"`
-	Quantity  int64   `json:"quantity" binding:"required"`
+	ProductID string  `json:"product_id" binding:"required,uuid"`
+	VariantID *string `json:"variant_id" binding:"omitempty,uuid"`
+	Quantity  int64   `json:"quantity" binding:"required,gt=0"`
 }
 
 type reserveRequest struct {
-	OrderID string               `json:"order_id" binding:"required"`
-	Items   []reserveLineRequest `json:"items" binding:"required,min=1"`
+	OrderID string               `json:"order_id" binding:"required,uuid"`
+	Items   []reserveLineRequest `json:"items" binding:"required,min=1,max=100,dive"`
 }
 
 type releaseRequest struct {
-	OrderID string `json:"order_id" binding:"required"`
-}
-
-type reservationResponse struct {
-	ID        string    `json:"id"`
-	ProductID string    `json:"product_id"`
-	VariantID *string   `json:"variant_id,omitempty"`
-	OrderID   string    `json:"order_id"`
-	Quantity  int64     `json:"quantity"`
-	Status    string    `json:"status"`
-	ExpiresAt time.Time `json:"expires_at"`
-}
-
-func toReservationResponseList(reservations []*domain.Reservation) []reservationResponse {
-	out := make([]reservationResponse, 0, len(reservations))
-	for _, r := range reservations {
-		out = append(out, reservationResponse{
-			ID: r.ID, ProductID: r.ProductID, VariantID: r.VariantID, OrderID: r.OrderID,
-			Quantity: r.Quantity, Status: string(r.Status), ExpiresAt: r.ExpiresAt,
-		})
-	}
-	return out
+	OrderID string `json:"order_id" binding:"required,uuid"`
 }
 
 type variantStockResponse struct {
-	VariantID         string `json:"variant_id"`
+	VariantID         string `json:"variant_id" binding:"omitempty,uuid"`
 	AvailableQuantity int64  `json:"available_quantity"`
 }
 
@@ -102,7 +81,7 @@ func toVariantStockResponseList(stock map[string]int64) []variantStockResponse {
 
 type restockRequestResponse struct {
 	ID                string     `json:"id"`
-	ProductID         string     `json:"product_id"`
+	ProductID         string     `json:"product_id" binding:"omitempty,uuid"`
 	VariantID         *string    `json:"variant_id,omitempty"`
 	VendorID          string     `json:"vendor_id"`
 	RequestedQuantity int64      `json:"requested_quantity"`

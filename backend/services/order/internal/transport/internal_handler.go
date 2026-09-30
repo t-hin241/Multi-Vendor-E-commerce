@@ -1,11 +1,12 @@
 package transport
 
 import (
-	"github.com/google/uuid"
 	"net/http"
 	"shopee/backend/pkg/apperror"
 	"strings"
 	"time"
+
+	"github.com/google/uuid"
 
 	"github.com/gin-gonic/gin"
 	"github.com/rs/zerolog"
@@ -35,7 +36,17 @@ func (h *InternalHandler) Get(c *gin.Context) {
 		return
 	}
 
-	httpresponse.OK(c, http.StatusOK, toInternalOrderResponse(order))
+	response := toInternalOrderResponse(order)
+	if string(order.Status) == "pending_payment" {
+		receipt, err := h.orders.Reservation(c.Request.Context(), order.ID)
+		if err != nil {
+			httpresponse.HandleError(c, h.log, err)
+			return
+		}
+		response.InventoryStatus = receipt.Status
+		response.ReservationExpiresAt = &receipt.ExpiresAt
+	}
+	httpresponse.OK(c, http.StatusOK, response)
 }
 
 // internalVendorOrderResponse is deliberately separate from the general
@@ -167,4 +178,29 @@ func (h *InternalHandler) MarkPaymentFailed(c *gin.Context) {
 	}
 
 	httpresponse.OK(c, http.StatusOK, toOrderResponse(order))
+}
+
+func (h *InternalHandler) InventoryStatus(c *gin.Context) {
+	o, err := h.orders.GetForInternal(c.Request.Context(), c.Param("id"))
+	if err != nil {
+		httpresponse.HandleError(c, h.log, err)
+		return
+	}
+	httpresponse.OK(c, 200, gin.H{"order_id": o.ID, "status": o.Status})
+}
+func (h *InternalHandler) InventoryEvent(c *gin.Context) {
+	var event struct {
+		ID      string `json:"id" binding:"required,uuid"`
+		OrderID string `json:"order_id" binding:"required,uuid"`
+		Type    string `json:"type" binding:"required,eq=ReservationExpired"`
+	}
+	if err := c.ShouldBindJSON(&event); err != nil {
+		httpresponse.Error(c, 400, "validation_error", "Invalid inventory event")
+		return
+	}
+	if err := h.orders.ReservationExpired(c.Request.Context(), event.OrderID); err != nil {
+		httpresponse.HandleError(c, h.log, err)
+		return
+	}
+	httpresponse.OK(c, 200, gin.H{"received": true})
 }

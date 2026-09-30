@@ -3,9 +3,10 @@ package usecase
 import (
 	"context"
 	"errors"
-	"github.com/rs/zerolog"
 	"shopee/backend/pkg/apperror"
 	"shopee/backend/pkg/middleware"
+
+	"github.com/rs/zerolog"
 )
 
 type Transactions interface {

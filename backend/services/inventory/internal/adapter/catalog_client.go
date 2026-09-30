@@ -1,6 +1,7 @@
 package adapter
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -134,4 +135,26 @@ func (c *HTTPCatalogClient) GetVariantOwner(ctx context.Context, variantID strin
 	}
 
 	return body.Data.VendorID, body.Data.ProductID, nil
+}
+
+func (c *HTTPCatalogClient) InvalidateStock(ctx context.Context, ids []string) error {
+	data, err := json.Marshal(map[string]any{"variant_ids": ids})
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, "POST", c.baseURL+"/internal/stock-cache/invalidate", bytes.NewReader(data))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	serviceauth.SetRequestHeaders(req, c.key)
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return fmt.Errorf("catalog cache invalidation unavailable")
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		return fmt.Errorf("catalog cache invalidation returned %d", resp.StatusCode)
+	}
+	return nil
 }

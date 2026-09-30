@@ -84,7 +84,11 @@ export default function OrdersPage() {
               </div>
             ))}
           </Card>
-          <Pagination currentPage={page} hasNextPage={hasNextPage} onPageChange={handlePageChange} />
+          <Pagination
+            currentPage={page}
+            hasNextPage={hasNextPage}
+            onPageChange={handlePageChange}
+          />
         </>
       )}
     </PageShell>

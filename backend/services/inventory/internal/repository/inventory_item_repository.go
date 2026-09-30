@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"errors"
+	"shopee/backend/pkg/apperror"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -20,12 +21,15 @@ func NewInventoryItemRepository(pool *pgxpool.Pool) *InventoryItemRepository {
 }
 
 func (r *InventoryItemRepository) Create(ctx context.Context, item *domain.InventoryItem) error {
+	return (Transactions{Pool: r.pool}).Run(ctx, func(ctx context.Context) error { return r.create(ctx, item) })
+}
+func (r *InventoryItemRepository) create(ctx context.Context, item *domain.InventoryItem) error {
 	const query = `
 		INSERT INTO inventory_items (product_id, variant_id, vendor_id, available_quantity)
 		VALUES ($1, $2, $3, $4)
 		RETURNING id, reserved_quantity, created_at, updated_at`
 
-	err := r.pool.QueryRow(ctx, query, item.ProductID, item.VariantID, item.VendorID, item.AvailableQuantity).
+	err := connection(ctx, r.pool).QueryRow(ctx, query, item.ProductID, item.VariantID, item.VendorID, item.AvailableQuantity).
 		Scan(&item.ID, &item.ReservedQuantity, &item.CreatedAt, &item.UpdatedAt)
 	if err != nil {
 		var pgErr *pgconn.PgError
@@ -35,8 +39,8 @@ func (r *InventoryItemRepository) Create(ctx context.Context, item *domain.Inven
 		return err
 	}
 
-	const movementQuery = `INSERT INTO stock_movements (inventory_item_id, change_quantity, reason) VALUES ($1, $2, 'initial_stock')`
-	_, err = r.pool.Exec(ctx, movementQuery, item.ID, item.AvailableQuantity)
+	const movementQuery = `INSERT INTO stock_movements (inventory_item_id, change_quantity, reason,actor_user_id,reference_id,operation_key) VALUES ($1, $2, 'initial_stock',NULLIF($3,'')::uuid,$1::uuid::text,'initial:'||$1::uuid::text)`
+	_, err = connection(ctx, r.pool).Exec(ctx, movementQuery, item.ID, item.AvailableQuantity, item.ActorUserID)
 	return err
 }
 
@@ -46,7 +50,7 @@ func (r *InventoryItemRepository) FindByProductID(ctx context.Context, productID
 		FROM inventory_items WHERE product_id = $1 AND variant_id IS NULL`
 
 	var item domain.InventoryItem
-	err := r.pool.QueryRow(ctx, query, productID).Scan(
+	err := connection(ctx, r.pool).QueryRow(ctx, query, productID).Scan(
 		&item.ID, &item.ProductID, &item.VariantID, &item.VendorID, &item.AvailableQuantity, &item.ReservedQuantity, &item.CreatedAt, &item.UpdatedAt)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -63,7 +67,7 @@ func (r *InventoryItemRepository) FindByVariantID(ctx context.Context, variantID
 		FROM inventory_items WHERE variant_id = $1`
 
 	var item domain.InventoryItem
-	err := r.pool.QueryRow(ctx, query, variantID).Scan(
+	err := connection(ctx, r.pool).QueryRow(ctx, query, variantID).Scan(
 		&item.ID, &item.ProductID, &item.VariantID, &item.VendorID, &item.AvailableQuantity, &item.ReservedQuantity, &item.CreatedAt, &item.UpdatedAt)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -83,7 +87,7 @@ func (r *InventoryItemRepository) ListByVariantIDs(ctx context.Context, variantI
 		return map[string]int64{}, nil
 	}
 	const query = `SELECT variant_id, available_quantity FROM inventory_items WHERE variant_id = ANY($1)`
-	rows, err := r.pool.Query(ctx, query, variantIDs)
+	rows, err := connection(ctx, r.pool).Query(ctx, query, variantIDs)
 	if err != nil {
 		return nil, err
 	}
@@ -104,9 +108,9 @@ func (r *InventoryItemRepository) ListByVariantIDs(ctx context.Context, variantI
 func (r *InventoryItemRepository) ListByVendor(ctx context.Context, vendorID string, limit, offset int) ([]*domain.InventoryItem, error) {
 	const query = `
 		SELECT id, product_id, variant_id, vendor_id, available_quantity, reserved_quantity, created_at, updated_at
-		FROM inventory_items WHERE vendor_id = $1 ORDER BY created_at DESC LIMIT $2 OFFSET $3`
+		FROM inventory_items WHERE vendor_id = $1 ORDER BY created_at DESC,id DESC LIMIT $2 OFFSET $3`
 
-	rows, err := r.pool.Query(ctx, query, vendorID, limit, offset)
+	rows, err := connection(ctx, r.pool).Query(ctx, query, vendorID, limit, offset)
 	if err != nil {
 		return nil, err
 	}
@@ -125,12 +129,19 @@ func (r *InventoryItemRepository) ListByVendor(ctx context.Context, vendorID str
 
 // Restock adds quantity to available stock and records the movement in one
 // transaction, so the ledger and the balance can never drift apart.
-func (r *InventoryItemRepository) Restock(ctx context.Context, productID string, quantity int64) error {
-	tx, err := r.pool.Begin(ctx)
+func (r *InventoryItemRepository) Restock(ctx context.Context, productID string, quantity int64, audit ...string) (err error) {
+	actor, reference := "", ""
+	if len(audit) == 2 {
+		actor, reference = audit[0], audit[1]
+	}
+	if quantity <= 0 || actor == "" || reference == "" {
+		return apperror.Validation("Restock requires quantity, actor and request reference")
+	}
+	tx, err := begin(ctx, r.pool)
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback(ctx)
+	defer rollbackTransaction(ctx, tx, &err)
 
 	var itemID string
 	err = tx.QueryRow(ctx, `SELECT id FROM inventory_items WHERE product_id = $1 AND variant_id IS NULL FOR UPDATE`, productID).Scan(&itemID)
@@ -141,10 +152,14 @@ func (r *InventoryItemRepository) Restock(ctx context.Context, productID string,
 		return err
 	}
 
-	if _, err := tx.Exec(ctx, `UPDATE inventory_items SET available_quantity = available_quantity + $1, updated_at = now() WHERE id = $2`, quantity, itemID); err != nil {
+	tag, err := tx.Exec(ctx, `UPDATE inventory_items SET available_quantity = available_quantity + $1, updated_at = now() WHERE id = $2 AND available_quantity::numeric+reserved_quantity::numeric+$1::numeric<=9223372036854775807`, quantity, itemID)
+	if err != nil {
 		return err
 	}
-	if _, err := tx.Exec(ctx, `INSERT INTO stock_movements (inventory_item_id, change_quantity, reason) VALUES ($1, $2, 'restock')`, itemID, quantity); err != nil {
+	if tag.RowsAffected() != 1 {
+		return apperror.Validation("Stock quantity exceeds the supported maximum")
+	}
+	if _, err := tx.Exec(ctx, `INSERT INTO stock_movements (inventory_item_id, change_quantity, reason,actor_user_id,reference_id,operation_key) VALUES ($1, $2, 'restock',$3,$4,'restock:'||$4)`, itemID, quantity, actor, reference); err != nil {
 		return err
 	}
 
@@ -152,12 +167,19 @@ func (r *InventoryItemRepository) Restock(ctx context.Context, productID string,
 }
 
 // RestockVariant is Restock's sibling for a variant-scoped stock item.
-func (r *InventoryItemRepository) RestockVariant(ctx context.Context, variantID string, quantity int64) error {
-	tx, err := r.pool.Begin(ctx)
+func (r *InventoryItemRepository) RestockVariant(ctx context.Context, variantID string, quantity int64, audit ...string) (err error) {
+	actor, reference := "", ""
+	if len(audit) == 2 {
+		actor, reference = audit[0], audit[1]
+	}
+	if quantity <= 0 || actor == "" || reference == "" {
+		return apperror.Validation("Restock requires quantity, actor and request reference")
+	}
+	tx, err := begin(ctx, r.pool)
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback(ctx)
+	defer rollbackTransaction(ctx, tx, &err)
 
 	var itemID string
 	err = tx.QueryRow(ctx, `SELECT id FROM inventory_items WHERE variant_id = $1 FOR UPDATE`, variantID).Scan(&itemID)
@@ -168,10 +190,14 @@ func (r *InventoryItemRepository) RestockVariant(ctx context.Context, variantID 
 		return err
 	}
 
-	if _, err := tx.Exec(ctx, `UPDATE inventory_items SET available_quantity = available_quantity + $1, updated_at = now() WHERE id = $2`, quantity, itemID); err != nil {
+	tag, err := tx.Exec(ctx, `UPDATE inventory_items SET available_quantity = available_quantity + $1, updated_at = now() WHERE id = $2 AND available_quantity::numeric+reserved_quantity::numeric+$1::numeric<=9223372036854775807`, quantity, itemID)
+	if err != nil {
 		return err
 	}
-	if _, err := tx.Exec(ctx, `INSERT INTO stock_movements (inventory_item_id, change_quantity, reason) VALUES ($1, $2, 'restock')`, itemID, quantity); err != nil {
+	if tag.RowsAffected() != 1 {
+		return apperror.Validation("Stock quantity exceeds the supported maximum")
+	}
+	if _, err := tx.Exec(ctx, `INSERT INTO stock_movements (inventory_item_id, change_quantity, reason,actor_user_id,reference_id,operation_key) VALUES ($1, $2, 'restock',$3,$4,'restock:'||$4)`, itemID, quantity, actor, reference); err != nil {
 		return err
 	}
 

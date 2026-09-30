@@ -1,11 +1,12 @@
 package transport
 
 import (
-	"github.com/gin-gonic/gin"
-	"github.com/rs/zerolog"
 	"shopee/backend/pkg/httpresponse"
 	"shopee/backend/pkg/middleware"
 	"shopee/backend/services/catalog/internal/usecase"
+
+	"github.com/gin-gonic/gin"
+	"github.com/rs/zerolog"
 )
 
 type MaintenanceHandler struct {
@@ -36,4 +37,19 @@ func (h MaintenanceHandler) Replay(c *gin.Context) {
 		return
 	}
 	httpresponse.OK(c, 202, gin.H{"queued": true})
+}
+
+func (h MaintenanceHandler) InvalidateStock(c *gin.Context) {
+	var req struct {
+		IDs []string `json:"variant_ids" binding:"required,min=1,max=100,dive,uuid"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		httpresponse.Error(c, 400, "validation_error", "Invalid stock cache batch")
+		return
+	}
+	if err := h.Service.InvalidateStock(c.Request.Context(), req.IDs); err != nil {
+		httpresponse.HandleError(c, h.Log, err)
+		return
+	}
+	httpresponse.OK(c, 200, gin.H{"invalidated": true})
 }

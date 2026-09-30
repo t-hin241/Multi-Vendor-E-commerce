@@ -6,8 +6,10 @@ package usecase
 import (
 	"context"
 	"errors"
+	"net/http"
 	"strings"
 
+	"github.com/google/uuid"
 	"github.com/rs/zerolog"
 
 	"shopee/backend/pkg/apperror"
@@ -31,6 +33,7 @@ type OrderUseCase struct {
 	vendorOrders    VendorOrderRepositoryPort
 	buyerAddresses  BuyerAddressRepositoryPort
 	commissionRules CommissionRuleRepositoryPort
+	cartConsumption CartConsumptionRepositoryPort
 	cart            CartGateway
 	catalog         CatalogGateway
 	vendors         VendorGateway
@@ -53,6 +56,7 @@ func NewOrderUseCase(
 	vendorOrders VendorOrderRepositoryPort,
 	buyerAddresses BuyerAddressRepositoryPort,
 	commissionRules CommissionRuleRepositoryPort,
+	cartConsumption CartConsumptionRepositoryPort,
 	cart CartGateway,
 	catalog CatalogGateway,
 	vendors VendorGateway,
@@ -63,7 +67,7 @@ func NewOrderUseCase(
 ) *OrderUseCase {
 	return &OrderUseCase{
 		orders: orders, vendorOrders: vendorOrders, buyerAddresses: buyerAddresses, commissionRules: commissionRules,
-		cart: cart, catalog: catalog, vendors: vendors, inventory: inventory, shipments: shipments,
+		cartConsumption: cartConsumption, cart: cart, catalog: catalog, vendors: vendors, inventory: inventory, shipments: shipments,
 		notifications: notifications, log: log,
 	}
 }
@@ -90,24 +94,36 @@ func (uc *OrderUseCase) notify(ctx context.Context, userID, notifType, reference
 }
 
 // Checkout is the buyer-checkout saga:
-//  1. read the cart (selection only — never trust its displayed price),
+//  0. refuse while an earlier order of this buyer is still waiting for its
+//     cart lines to be consumed, so a refresh cannot buy the same cart twice,
+//  1. snapshot the cart under a new checkout operation (selection only —
+//     never trust its displayed price); a cart changed since the buyer last
+//     reviewed version cartVersion is rejected with cart_changed,
 //  2. resolve the buyer's chosen shipping address,
-//  3. re-price and validate every line against Catalog right now, and sum
-//     each vendor's package weight along the way,
-//  4. persist the order locally (the only step with a real DB transaction),
+//  3. re-price and validate every line against Catalog right now, reject a
+//     price the buyer has not accepted in the cart, and sum each vendor's
+//     package weight along the way,
+//  4. persist the order and its held cart-consume task in one transaction,
 //  5. reserve stock in Inventory — if this fails, cancel the order we just
-//     created and surface why,
+//     created (and its consume task) and surface why,
 //  6. best-effort create a shipment (with its fee already quoted) per
 //     vendor sub-order, then snapshot each fee and recompute the order's
 //     total — a briefly unreachable Shipment never fails the checkout; the
 //     vendor's own manual "create shipment" endpoint is the fallback,
-//  7. best-effort clear the cart, since the order and its reservation are
-//     already the source of truth at this point.
-func (uc *OrderUseCase) Checkout(ctx context.Context, buyerID, bearerToken, addressID string) (*domain.Order, error) {
-	cartLines, err := uc.cart.GetItems(ctx, bearerToken)
+//  7. release the consume task and try it once inline; if Cart is down the
+//     worker retries it durably. Only the purchased lines/units leave the
+//     cart; anything the buyer added meanwhile stays.
+func (uc *OrderUseCase) Checkout(ctx context.Context, buyerID, addressID string, cartVersion *int64) (*domain.Order, error) {
+	if err := uc.settleOpenCartConsumptions(ctx, buyerID); err != nil {
+		return nil, err
+	}
+
+	operationID := uuid.NewString()
+	snapshot, err := uc.cart.Snapshot(ctx, buyerID, operationID, cartVersion)
 	if err != nil {
 		return nil, err
 	}
+	cartLines := snapshot.Lines
 	if len(cartLines) == 0 {
 		return nil, apperror.Validation("Your cart is empty")
 	}
@@ -134,6 +150,10 @@ func (uc *OrderUseCase) Checkout(ctx context.Context, buyerID, bearerToken, addr
 		}
 		if product.HasVariants && line.VariantID == nil {
 			return nil, apperror.Validation("\"" + product.Name + "\" requires selecting an option; please update your cart")
+		}
+		if line.SeenPriceAmount != nil && line.SeenCurrency != nil &&
+			(*line.SeenPriceAmount != product.PriceAmount || *line.SeenCurrency != product.Currency) {
+			return nil, cartChanged("The price of \"" + product.Name + "\" changed; please review your cart before checking out")
 		}
 
 		if previous, exists := productVersions[product.ID]; exists && previous != product.Version {
@@ -179,6 +199,11 @@ func (uc *OrderUseCase) Checkout(ctx context.Context, buyerID, bearerToken, addr
 		return nil, err
 	}
 	plan.ProductVersions = productVersions
+	consumeLines := make([]domain.CartConsumeLine, 0, len(cartLines))
+	for _, line := range cartLines {
+		consumeLines = append(consumeLines, domain.CartConsumeLine{LineID: line.LineID, Quantity: line.Quantity})
+	}
+	plan.CartConsumption = &domain.CartConsumption{BuyerID: buyerID, OperationID: operationID, Lines: consumeLines}
 	plan.Order.RecipientName, plan.Order.Phone = address.RecipientName, address.Phone
 	plan.Order.Province, plan.Order.District, plan.Order.Ward, plan.Order.StreetAddress =
 		address.Province, address.District, address.Ward, address.StreetAddress
@@ -211,19 +236,36 @@ func (uc *OrderUseCase) Checkout(ctx context.Context, buyerID, bearerToken, addr
 		if errors.As(err, &appErr) {
 			reason = appErr.Message
 		}
+		if releaseErr := uc.inventory.Release(ctx, order.ID); releaseErr != nil {
+			uc.log.Error().Err(releaseErr).Str("order_id", order.ID).Msg("checkout_reservation_release_pending")
+		}
 		if cancelErr := uc.orders.UpdateStatus(ctx, order.ID, domain.StatusCancelled, &reason); cancelErr != nil {
 			uc.log.Error().Err(cancelErr).Str("order_id", order.ID).Msg("failed to cancel order after reservation failure")
+		}
+		if cancelErr := uc.cartConsumption.Cancel(ctx, order.ID); cancelErr != nil {
+			// Left held: the worker resolves it from the order/reservation state.
+			uc.log.Error().Err(cancelErr).Str("order_id", order.ID).Msg("order_cart_consume_cancel_failed")
 		}
 		return nil, err
 	}
 
 	order.TotalAmount = uc.createShipmentsAndApplyFees(ctx, order, plan, address, weightByVendor)
 
-	if err := uc.cart.Clear(ctx, bearerToken); err != nil {
-		uc.log.Error().Err(err).Str("order_id", order.ID).Msg("checkout succeeded but clearing the cart failed")
+	if err := uc.cartConsumption.Activate(ctx, order.ID); err != nil {
+		// Left held: the worker promotes it once it confirms the reservation.
+		uc.log.Error().Err(err).Str("order_id", order.ID).Msg("order_cart_consume_activate_failed")
+		return order, nil
 	}
+	plan.CartConsumption.OrderID = order.ID
+	uc.consumeCart(ctx, plan.CartConsumption)
 
 	return order, nil
+}
+
+// cartChanged mirrors Cart's own cart_changed conflict so the client
+// handles "review your cart again" the same way wherever it comes from.
+func cartChanged(message string) *apperror.Error {
+	return &apperror.Error{Code: "cart_changed", Message: message, Status: http.StatusConflict}
 }
 
 // resolveCheckoutAddress looks up and verifies ownership of the buyer's
@@ -283,7 +325,7 @@ func (uc *OrderUseCase) createShipmentsAndApplyFees(ctx context.Context, order *
 	return total
 }
 
-func (uc *OrderUseCase) Cancel(ctx context.Context, buyerID, orderID string) (*domain.Order, error) {
+func (uc *OrderUseCase) cancelBuyer(ctx context.Context, buyerID, orderID string) (*domain.Order, error) {
 	order, err := uc.findOwnedByBuyer(ctx, buyerID, orderID)
 	if err != nil {
 		return nil, err
@@ -297,11 +339,11 @@ func (uc *OrderUseCase) Cancel(ctx context.Context, buyerID, orderID string) (*d
 }
 
 func (uc *OrderUseCase) cancel(ctx context.Context, order *domain.Order, reason string) (*domain.Order, error) {
+	if err := uc.inventory.Release(ctx, order.ID); err != nil {
+		return nil, err
+	}
 	if err := uc.orders.UpdateStatus(ctx, order.ID, domain.StatusCancelled, &reason); err != nil {
 		return nil, apperror.Internal(err)
-	}
-	if err := uc.inventory.Release(ctx, order.ID); err != nil {
-		uc.log.Error().Err(err).Str("order_id", order.ID).Msg("failed to release inventory for a cancelled order")
 	}
 	uc.cancelShipments(ctx, order.ID)
 
@@ -334,7 +376,7 @@ func (uc *OrderUseCase) cancelShipments(ctx context.Context, orderID string) {
 // only job here is validating and applying the resulting lifecycle
 // transition, and finalizing the stock hold into a real sale. It is
 // idempotent so a retried webhook delivery is a safe no-op.
-func (uc *OrderUseCase) MarkPaid(ctx context.Context, orderID string) (*domain.Order, error) {
+func (uc *OrderUseCase) markPaid(ctx context.Context, orderID string) (*domain.Order, error) {
 	order, err := uc.orders.FindByID(ctx, orderID)
 	if err != nil {
 		if errors.Is(err, repository.ErrOrderNotFound) {
@@ -342,7 +384,13 @@ func (uc *OrderUseCase) MarkPaid(ctx context.Context, orderID string) (*domain.O
 		}
 		return nil, apperror.Internal(err)
 	}
-	if order.Status == domain.StatusPaid {
+	paidReceipt := order.Status == domain.StatusPaid || order.Status == domain.StatusProcessing || order.Status == domain.StatusShipped || order.Status == domain.StatusCompleted || order.Status == domain.StatusRefunded
+	if order.Status == domain.StatusPendingPayment || paidReceipt {
+		if err := uc.inventory.Commit(ctx, orderID); err != nil {
+			return nil, err
+		}
+	}
+	if paidReceipt {
 		return order, nil
 	}
 	if !domain.CanTransition(order.Status, domain.StatusPaid) {
@@ -355,32 +403,27 @@ func (uc *OrderUseCase) MarkPaid(ctx context.Context, orderID string) (*domain.O
 
 	rule, ruleErr := uc.commissionRules.FindCurrent(ctx)
 	if ruleErr != nil {
-		uc.log.Error().Err(ruleErr).Str("order_id", orderID).Msg("failed to load the current commission rule; vendor orders will be marked paid without a commission snapshot")
+		return nil, apperror.Internal(ruleErr)
 	}
 
 	vendorOrders, err := uc.vendorOrders.ListByOrderID(ctx, orderID)
 	if err != nil {
-		uc.log.Error().Err(err).Str("order_id", orderID).Msg("failed to list vendor orders while marking order paid")
+		return nil, apperror.Internal(err)
 	}
 	for _, vo := range vendorOrders {
 		if vo.Status != domain.StatusPendingPayment {
 			continue
 		}
 		if err := uc.vendorOrders.UpdateStatus(ctx, vo.ID, domain.StatusPaid); err != nil {
-			uc.log.Error().Err(err).Str("vendor_order_id", vo.ID).Msg("failed to mark vendor order paid")
-			continue
+			return nil, apperror.Internal(err)
 		}
 		if rule == nil {
 			continue
 		}
 		commissionAmount, netAmount := domain.ComputeCommission(vo.SubtotalAmount, rule.RateBps)
 		if err := uc.vendorOrders.SetCommission(ctx, vo.ID, rule.RateBps, commissionAmount, netAmount); err != nil {
-			uc.log.Error().Err(err).Str("vendor_order_id", vo.ID).Msg("failed to snapshot commission for a paid vendor order")
+			return nil, apperror.Internal(err)
 		}
-	}
-
-	if err := uc.inventory.Commit(ctx, orderID); err != nil {
-		uc.log.Error().Err(err).Str("order_id", orderID).Msg("failed to commit inventory reservation after payment")
 	}
 
 	order.Status = domain.StatusPaid
@@ -392,7 +435,7 @@ func (uc *OrderUseCase) MarkPaid(ctx context.Context, orderID string) (*domain.O
 // treats it exactly like any other cancellation — releasing the stock hold —
 // since a pending_payment order with no successful payment has nothing left
 // to fulfill.
-func (uc *OrderUseCase) MarkPaymentFailed(ctx context.Context, orderID, reason string) (*domain.Order, error) {
+func (uc *OrderUseCase) markPaymentFailed(ctx context.Context, orderID, reason string) (*domain.Order, error) {
 	order, err := uc.orders.FindByID(ctx, orderID)
 	if err != nil {
 		if errors.Is(err, repository.ErrOrderNotFound) {
@@ -559,7 +602,7 @@ func (uc *OrderUseCase) AdminList(ctx context.Context, status string, limit, off
 // change, it is validated against the same state machine everyone else
 // uses — admin does not bypass the rule that a shipped order can't jump
 // straight to cancelled, only to refunded.
-func (uc *OrderUseCase) AdminTransition(ctx context.Context, orderID string, newStatus domain.Status, reason string) (*domain.Order, error) {
+func (uc *OrderUseCase) adminTransition(ctx context.Context, orderID string, newStatus domain.Status, reason string) (*domain.Order, error) {
 	if !adminAllowedTargets[newStatus] {
 		return nil, apperror.Validation("Admin can only cancel or refund an order")
 	}
@@ -578,14 +621,11 @@ func (uc *OrderUseCase) AdminTransition(ctx context.Context, orderID string, new
 		return nil, apperror.Conflict("Cannot move this order from " + string(order.Status) + " to " + string(newStatus))
 	}
 
+	if newStatus == domain.StatusCancelled {
+		return uc.cancel(ctx, order, reason)
+	}
 	if err := uc.orders.UpdateStatus(ctx, orderID, newStatus, &reason); err != nil {
 		return nil, apperror.Internal(err)
-	}
-	if newStatus == domain.StatusCancelled {
-		if err := uc.inventory.Release(ctx, orderID); err != nil {
-			uc.log.Error().Err(err).Str("order_id", orderID).Msg("failed to release inventory for an admin-cancelled order")
-		}
-		uc.cancelShipments(ctx, orderID)
 	}
 
 	order.Status = newStatus
@@ -716,4 +756,65 @@ func (uc *OrderUseCase) findOwnedByBuyer(ctx context.Context, buyerID, orderID s
 		return nil, apperror.Forbidden("You do not have access to this order")
 	}
 	return order, nil
+}
+
+func (uc *OrderUseCase) MarkPaid(ctx context.Context, orderID string) (o *domain.Order, err error) {
+	err = uc.orders.WithLockedOrder(ctx, orderID, func(ctx context.Context) error { var e error; o, e = uc.markPaid(ctx, orderID); return e })
+	if err != nil {
+		var app *apperror.Error
+		if !errors.As(err, &app) {
+			err = apperror.Internal(err)
+		}
+	}
+	return
+}
+
+func (uc *OrderUseCase) Cancel(ctx context.Context, buyerID, orderID string) (o *domain.Order, err error) {
+	err = uc.orders.WithLockedOrder(ctx, orderID, func(ctx context.Context) error { var e error; o, e = uc.cancelBuyer(ctx, buyerID, orderID); return e })
+	if err != nil {
+		var app *apperror.Error
+		if !errors.As(err, &app) {
+			err = apperror.Internal(err)
+		}
+	}
+	return
+}
+
+func (uc *OrderUseCase) MarkPaymentFailed(ctx context.Context, orderID, reason string) (o *domain.Order, err error) {
+	err = uc.orders.WithLockedOrder(ctx, orderID, func(ctx context.Context) error {
+		var e error
+		o, e = uc.markPaymentFailed(ctx, orderID, reason)
+		return e
+	})
+	if err != nil {
+		var app *apperror.Error
+		if !errors.As(err, &app) {
+			err = apperror.Internal(err)
+		}
+	}
+	return
+}
+
+func (uc *OrderUseCase) Reservation(ctx context.Context, id string) (*adapter.ReservationReceipt, error) {
+	return uc.inventory.Operation(ctx, id)
+}
+
+func (uc *OrderUseCase) AdminTransition(ctx context.Context, orderID string, status domain.Status, reason string) (o *domain.Order, err error) {
+	err = uc.orders.WithLockedOrder(ctx, orderID, func(ctx context.Context) error {
+		var e error
+		o, e = uc.adminTransition(ctx, orderID, status, reason)
+		return e
+	})
+	return
+}
+func (uc *OrderUseCase) ReservationExpired(ctx context.Context, id string) error {
+	receipt, err := uc.inventory.Operation(ctx, id)
+	if err != nil {
+		return err
+	}
+	if receipt.Status != "expired" {
+		return apperror.Conflict("Reservation expiry is not confirmed")
+	}
+	_, err = uc.MarkPaymentFailed(ctx, id, "Stock reservation expired")
+	return err
 }

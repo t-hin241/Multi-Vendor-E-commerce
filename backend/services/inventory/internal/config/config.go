@@ -5,11 +5,14 @@ package config
 import (
 	"fmt"
 	"os"
+	"strconv"
 
 	"shopee/backend/pkg/config"
 )
 
 type Config struct {
+	OrderServiceURL   string
+	ExpiryEnabled     bool
 	Base              config.Base
 	JWTSecret         string
 	VendorServiceURL  string
@@ -37,7 +40,19 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 
-	return Config{
+	orderURL := os.Getenv("ORDER_SERVICE_URL")
+	if orderURL == "" {
+		orderURL = "http://order:8086"
+	}
+	expiry := false
+	if raw := os.Getenv("INVENTORY_EXPIRY_ENABLED"); raw != "" {
+		var e error
+		expiry, e = strconv.ParseBool(raw)
+		if e != nil {
+			return Config{}, fmt.Errorf("INVENTORY_EXPIRY_ENABLED must be a boolean")
+		}
+	}
+	return Config{OrderServiceURL: orderURL, ExpiryEnabled: expiry,
 		Base:              base,
 		JWTSecret:         jwtSecret,
 		VendorServiceURL:  vendorServiceURL,

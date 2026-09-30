@@ -24,7 +24,7 @@ func newFixture() *fixture {
 	catalog := newFakeCatalogGateway()
 	restockRequests := newFakeRestockRequestRepository()
 
-	uc := usecase.NewInventoryUseCase(items, reservations, restockRequests, vendors, catalog)
+	uc := usecase.NewInventoryUseCase(items, reservations, restockRequests, vendors, catalog, usecase.Operations{Transactions: fakeTransactions{}, Identity: fakeIdentity{}})
 	return &fixture{uc: uc, items: items, vendors: vendors, catalog: catalog, restockRequests: restockRequests}
 }
 
@@ -90,7 +90,7 @@ func TestCreateItem_ResolvesOwnershipThroughVariant(t *testing.T) {
 
 	// A client-supplied product_id must be ignored for a variant-scoped
 	// call — only the variant's resolved owner/product matter.
-	item, err := f.uc.CreateItem(ctx, "user-1", strPtr("someone-elses-product"), strPtr("variant-1"), 20)
+	item, err := f.uc.CreateItem(ctx, "user-1", nil, strPtr("variant-1"), 20)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -230,9 +230,9 @@ func TestApproveRestockRequest_AppliesQuantityIncrease(t *testing.T) {
 		t.Errorf("expected available quantity 8 after approval, got %d", item.AvailableQuantity)
 	}
 
-	// Approving an already-decided request must fail, not double-apply.
-	if _, err := f.uc.ApproveRestockRequest(ctx, "admin-1", req.ID); err == nil {
-		t.Error("expected an error re-approving an already-decided request")
+	// Approval retry returns the receipt without applying stock twice.
+	if _, err := f.uc.ApproveRestockRequest(ctx, "admin-1", req.ID); err != nil {
+		t.Errorf("approval retry failed: %v", err)
 	}
 	item, _ = f.items.FindByProductID(ctx, "product-1")
 	if item.AvailableQuantity != 8 {

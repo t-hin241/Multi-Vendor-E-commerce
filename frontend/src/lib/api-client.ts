@@ -435,6 +435,33 @@ export function requestRestockVariant(
   });
 }
 
+export type StockCount = {
+  id: string;
+  inventory_item_id: string;
+  counted_on_hand: number;
+  previous_available: number;
+  new_available: number;
+  reserved_at_count: number;
+  reason: string;
+  created_at: string;
+};
+
+// recordStockCount records a physical count (kiểm kê) of one stock item.
+// countedOnHand includes units held for pending orders; the count can only
+// lower available stock. Reuse the same countId when retrying one
+// submission so it is never applied twice.
+export function recordStockCount(
+  token: string,
+  itemId: string,
+  body: { count_id: string; counted_on_hand: number; reason: string },
+): Promise<StockCount> {
+  return request<StockCount>(`/api/inventory/items/${itemId}/stock-counts`, {
+    method: "POST",
+    token,
+    json: body,
+  });
+}
+
 // listMyRestockRequests lets a vendor see the status of their own
 // stock-increase requests — requesting one no longer has any other visible
 // effect until an admin decides it.
@@ -841,20 +868,63 @@ export function getVendorAuditLog(
 
 // ---------- Cart ----------
 
+// Why a line cannot be checked out right now; decided by the Cart service.
+export type CartLineState =
+  | "available"
+  | "removed"
+  | "under_review"
+  | "not_for_sale"
+  | "option_required"
+  | "option_unavailable"
+  | "out_of_stock"
+  | "insufficient_stock"
+  | "unverified";
+
+export type CartStockStatus = "unknown" | "in_stock" | "insufficient" | "out_of_stock";
+
 export type CartLine = {
+  line_id: string;
+  line_version: number;
   product_id: string;
   product_name?: string;
   variant_id?: string;
   variant_sku?: string;
   variant_label?: string;
   quantity: number;
-  price_amount: number;
+  // Live Catalog price; null when Catalog could not be reached.
+  price_amount: number | null;
   currency?: string;
-  subtotal: number;
+  // The price the buyer last accepted for this line (display reference only).
+  seen_price_amount?: number;
+  seen_currency?: string;
+  price_changed: boolean;
+  subtotal: number | null;
+  state: CartLineState;
+  stock_status: CartStockStatus;
+  available_quantity?: number;
   available: boolean;
 };
 
-export type Cart = { items: CartLine[]; total: number };
+export type Money = { amount: number; currency: string };
+
+export type Cart = {
+  version: number;
+  items: CartLine[];
+  // Estimate at current prices for purchasable lines; Order computes the final amount.
+  subtotal: Money | null;
+  total: number;
+  currency?: string;
+  mixed_currency: boolean;
+  item_count: number;
+  line_count: number;
+  unavailable_lines: number;
+  price_changed_lines: number;
+  over_line_limit: boolean;
+  checkout_ready: boolean;
+  degraded: { catalog: boolean; inventory: boolean };
+  limits: { max_lines: number; max_quantity_per_line: number };
+  page: { limit: number; offset: number; total: number };
+};
 
 export function getCart(token: string): Promise<Cart> {
   return request<Cart>("/api/cart", { token });
@@ -865,11 +935,17 @@ export function addCartItem(
   productId: string,
   quantity: number,
   variantId?: string,
+  expectedVersion?: number,
 ): Promise<Cart> {
   return request<Cart>("/api/cart/items", {
     method: "POST",
     token,
-    json: { product_id: productId, variant_id: variantId ?? null, quantity },
+    json: {
+      product_id: productId,
+      variant_id: variantId ?? null,
+      quantity,
+      expected_version: expectedVersion,
+    },
   });
 }
 
@@ -878,11 +954,12 @@ export function setCartItemQuantity(
   productId: string,
   quantity: number,
   variantId?: string,
+  expectedVersion?: number,
 ): Promise<Cart> {
   return request<Cart>(`/api/cart/items/${productId}`, {
     method: "PATCH",
     token,
-    json: { quantity },
+    json: { quantity, expected_version: expectedVersion },
     query: { variant_id: variantId },
   });
 }
@@ -891,16 +968,35 @@ export function removeCartItem(
   token: string,
   productId: string,
   variantId?: string,
+  expectedVersion?: number,
 ): Promise<{ removed: boolean }> {
   return request(`/api/cart/items/${productId}`, {
     method: "DELETE",
     token,
-    query: { variant_id: variantId },
+    query: { variant_id: variantId, expected_version: expectedVersion },
   });
 }
 
-export function clearCart(token: string): Promise<{ cleared: boolean }> {
-  return request("/api/cart", { method: "DELETE", token });
+export function clearCart(token: string, expectedVersion?: number): Promise<{ cleared: boolean }> {
+  return request("/api/cart", {
+    method: "DELETE",
+    token,
+    query: { expected_version: expectedVersion },
+  });
+}
+
+// Accepts the current price of the given lines exactly as the buyer was shown
+// it. Cart rejects it (409 cart_changed) if the price moved again meanwhile.
+export function confirmCartPrices(
+  token: string,
+  expectedVersion: number,
+  lines: { line_id: string; price_amount: number; currency: string }[],
+): Promise<Cart> {
+  return request<Cart>("/api/cart/price-confirmations", {
+    method: "POST",
+    token,
+    json: { expected_version: expectedVersion, lines },
+  });
 }
 
 // ---------- Orders ----------
@@ -981,11 +1077,13 @@ export type Order = {
   updated_at: string;
 };
 
-export function checkout(token: string, addressId: string): Promise<Order> {
+// cartVersion is the cart version the buyer reviewed; the order is refused
+// with 409 cart_changed if the cart changed since.
+export function checkout(token: string, addressId: string, cartVersion?: number): Promise<Order> {
   return request<Order>("/api/orders/checkout", {
     method: "POST",
     token,
-    json: { address_id: addressId },
+    json: { address_id: addressId, cart_version: cartVersion },
   });
 }
 
@@ -1747,6 +1845,27 @@ export function updateProductContent(
   return request(`/api/catalog/products/${productId}/content`, {
     token,
     method: "PATCH",
+    json: input,
+  });
+}
+
+export function getInventoryOperations(token: string): Promise<Record<string, number>> {
+  return request<Record<string, number>>("/api/inventory/admin/operations", { token });
+}
+export type InventoryIssue = { order_id: string; status: string; issue: string; legacy: boolean };
+export function getInventoryIssues(token: string, offset = 0): Promise<InventoryIssue[]> {
+  return request<InventoryIssue[]>("/api/inventory/admin/operations/issues", {
+    token,
+    query: { limit: 20, offset },
+  });
+}
+export function repairInventoryOperation(
+  token: string,
+  input: { order_id: string; action: string; reason: string },
+): Promise<{ accepted: boolean }> {
+  return request<{ accepted: boolean }>("/api/inventory/admin/operations/repair", {
+    token,
+    method: "POST",
     json: input,
   });
 }

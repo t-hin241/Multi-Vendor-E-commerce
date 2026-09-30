@@ -22,7 +22,7 @@ func NewCommissionRuleRepository(pool *pgxpool.Pool) *CommissionRuleRepository {
 
 func (r *CommissionRuleRepository) Create(ctx context.Context, rule *domain.CommissionRule) error {
 	const query = `INSERT INTO commission_rules (rate_bps, created_by) VALUES ($1, $2) RETURNING id, created_at`
-	return r.pool.QueryRow(ctx, query, rule.RateBps, rule.CreatedBy).Scan(&rule.ID, &rule.CreatedAt)
+	return connection(ctx, r.pool).QueryRow(ctx, query, rule.RateBps, rule.CreatedBy).Scan(&rule.ID, &rule.CreatedAt)
 }
 
 // FindCurrent returns the most recently created rule — the one that
@@ -31,7 +31,7 @@ func (r *CommissionRuleRepository) FindCurrent(ctx context.Context) (*domain.Com
 	const query = `SELECT id, rate_bps, created_by, created_at FROM commission_rules ORDER BY created_at DESC LIMIT 1`
 
 	var rule domain.CommissionRule
-	err := r.pool.QueryRow(ctx, query).Scan(&rule.ID, &rule.RateBps, &rule.CreatedBy, &rule.CreatedAt)
+	err := connection(ctx, r.pool).QueryRow(ctx, query).Scan(&rule.ID, &rule.RateBps, &rule.CreatedBy, &rule.CreatedAt)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrCommissionRuleNotFound
@@ -44,7 +44,7 @@ func (r *CommissionRuleRepository) FindCurrent(ctx context.Context) (*domain.Com
 func (r *CommissionRuleRepository) List(ctx context.Context, limit, offset int) ([]*domain.CommissionRule, error) {
 	const query = `SELECT id, rate_bps, created_by, created_at FROM commission_rules ORDER BY created_at DESC LIMIT $1 OFFSET $2`
 
-	rows, err := r.pool.Query(ctx, query, limit, offset)
+	rows, err := connection(ctx, r.pool).Query(ctx, query, limit, offset)
 	if err != nil {
 		return nil, err
 	}

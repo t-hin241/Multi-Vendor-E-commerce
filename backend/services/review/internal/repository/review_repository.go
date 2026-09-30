@@ -6,9 +6,10 @@ import (
 	"fmt"
 	"strings"
 
+	"shopee/backend/services/review/internal/domain"
+
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"shopee/backend/services/review/internal/domain"
 )
 
 var ErrNotFound = errors.New("review repository: not found")

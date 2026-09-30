@@ -10,6 +10,7 @@ import (
 	"shopee/backend/pkg/authjwt"
 	sessionconfig "shopee/backend/pkg/config"
 	"shopee/backend/pkg/health"
+	"shopee/backend/pkg/identityclient"
 	"shopee/backend/pkg/logger"
 	"shopee/backend/pkg/platform/natsclient"
 	"shopee/backend/pkg/platform/postgres"
@@ -71,13 +72,13 @@ func main() {
 	reservationRepo := repository.NewReservationRepository(dbPool)
 	restockRequestRepo := repository.NewRestockRequestRepository(dbPool)
 
-	inventoryUseCase := usecase.NewInventoryUseCase(itemRepo, reservationRepo, restockRequestRepo, vendorClient, catalogClient)
+	inventoryUseCase := usecase.NewInventoryUseCase(itemRepo, reservationRepo, restockRequestRepo, vendorClient, catalogClient, usecase.Operations{Transactions: repository.Transactions{Pool: dbPool}, Identity: identityclient.Client{URL: internalServices.IdentityURL, Key: internalServices.Key}})
 
 	itemHandler := transport.NewItemHandler(inventoryUseCase, log)
 	internalHandler := transport.NewInternalHandler(inventoryUseCase, log)
 	adminHandler := transport.NewAdminHandler(inventoryUseCase, log)
 
-	router := transport.NewRouter(cfg.Base.Env, log, jwtManager, itemHandler, internalHandler, adminHandler,
+	router := transport.NewRouter(cfg.Base.Env, log, jwtManager, itemHandler, internalHandler, adminHandler, internalServices.Key,
 		health.Checker{Name: "postgres", Ping: func(ctx context.Context) error { return dbPool.Ping(ctx) }},
 		health.Checker{Name: "redis", Ping: func(ctx context.Context) error { return redisClient.Ping(ctx).Err() }},
 		health.Checker{Name: "nats", Ping: func(ctx context.Context) error {
@@ -88,6 +89,11 @@ func main() {
 		}},
 	)
 
+	workerCtx, stopWorker := context.WithCancel(ctx)
+	defer stopWorker()
+	maintenance := usecase.Maintenance{InvalidateStock: catalogClient.InvalidateStock, Repository: repository.Maintenance{Pool: dbPool}, Reservations: reservationRepo, Orders: adapter.OrderClient{URL: cfg.OrderServiceURL, Key: internalServices.Key}, Identity: identityclient.Client{URL: internalServices.IdentityURL, Key: internalServices.Key}, Log: log, ExpiryEnabled: cfg.ExpiryEnabled}
+	transport.RegisterOperations(router, jwtManager, maintenance, log)
+	go maintenance.Run(workerCtx)
 	srv := &http.Server{
 		Addr:              ":" + cfg.Base.Port,
 		Handler:           router,

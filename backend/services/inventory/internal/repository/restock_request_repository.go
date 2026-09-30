@@ -31,12 +31,12 @@ func (r *RestockRequestRepository) Create(ctx context.Context, req *domain.Resto
 		VALUES ($1, $2, $3, $4, $5, $6)
 		RETURNING id, status, created_at, updated_at`
 
-	return r.pool.QueryRow(ctx, query, req.InventoryItemID, req.ProductID, req.VariantID, req.VendorID, req.RequestedQuantity, req.RequestedBy).
+	return connection(ctx, r.pool).QueryRow(ctx, query, req.InventoryItemID, req.ProductID, req.VariantID, req.VendorID, req.RequestedQuantity, req.RequestedBy).
 		Scan(&req.ID, &req.Status, &req.CreatedAt, &req.UpdatedAt)
 }
 
 func (r *RestockRequestRepository) FindByID(ctx context.Context, id string) (*domain.RestockRequest, error) {
-	return scanRestockRequest(r.pool.QueryRow(ctx, restockRequestSelectColumns+`FROM restock_requests WHERE id = $1`, id))
+	return scanRestockRequest(connection(ctx, r.pool).QueryRow(ctx, restockRequestSelectColumns+`FROM restock_requests WHERE id = $1`+lockRow(ctx), id))
 }
 
 func (r *RestockRequestRepository) ListByStatus(ctx context.Context, status string, limit, offset int) ([]*domain.RestockRequest, error) {
@@ -45,9 +45,9 @@ func (r *RestockRequestRepository) ListByStatus(ctx context.Context, status stri
 		err  error
 	)
 	if status == "" {
-		rows, err = r.pool.Query(ctx, restockRequestSelectColumns+`FROM restock_requests ORDER BY created_at DESC LIMIT $1 OFFSET $2`, limit, offset)
+		rows, err = connection(ctx, r.pool).Query(ctx, restockRequestSelectColumns+`FROM restock_requests ORDER BY created_at DESC,id DESC LIMIT $1 OFFSET $2`, limit, offset)
 	} else {
-		rows, err = r.pool.Query(ctx, restockRequestSelectColumns+`FROM restock_requests WHERE status = $1 ORDER BY created_at DESC LIMIT $2 OFFSET $3`, status, limit, offset)
+		rows, err = connection(ctx, r.pool).Query(ctx, restockRequestSelectColumns+`FROM restock_requests WHERE status = $1 ORDER BY created_at DESC,id DESC LIMIT $2 OFFSET $3`, status, limit, offset)
 	}
 	if err != nil {
 		return nil, err
@@ -57,8 +57,8 @@ func (r *RestockRequestRepository) ListByStatus(ctx context.Context, status stri
 }
 
 func (r *RestockRequestRepository) ListByVendor(ctx context.Context, vendorID string, limit, offset int) ([]*domain.RestockRequest, error) {
-	rows, err := r.pool.Query(ctx,
-		restockRequestSelectColumns+`FROM restock_requests WHERE vendor_id = $1 ORDER BY created_at DESC LIMIT $2 OFFSET $3`,
+	rows, err := connection(ctx, r.pool).Query(ctx,
+		restockRequestSelectColumns+`FROM restock_requests WHERE vendor_id = $1 ORDER BY created_at DESC,id DESC LIMIT $2 OFFSET $3`,
 		vendorID, limit, offset)
 	if err != nil {
 		return nil, err
@@ -72,7 +72,7 @@ func (r *RestockRequestRepository) UpdateStatus(ctx context.Context, id string, 
 		UPDATE restock_requests
 		SET status = $1, rejection_reason = $2, decided_by = $3, decided_at = now(), updated_at = now()
 		WHERE id = $4`
-	tag, err := r.pool.Exec(ctx, query, status, reason, adminUserID, id)
+	tag, err := connection(ctx, r.pool).Exec(ctx, query, status, reason, adminUserID, id)
 	if err != nil {
 		return err
 	}
