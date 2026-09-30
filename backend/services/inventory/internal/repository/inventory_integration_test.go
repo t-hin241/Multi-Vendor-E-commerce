@@ -486,3 +486,37 @@ func TestInventoryRestockOverflowAndCacheDelivery(t *testing.T) {
 		t.Fatal("cache ACK lost")
 	}
 }
+
+func TestInventoryReturnRestockHappensOncePerReturn(t *testing.T) {
+	pool := inventoryDB(t)
+	ctx := t.Context()
+	items := repository.NewInventoryItemRepository(pool)
+	plain := stock(t, pool, 2, false)
+	variant := stock(t, pool, 0, true)
+	returnID := uuid.NewString()
+
+	for i := 0; i < 3; i++ {
+		replayed, err := items.RestockReturn(ctx, returnID, plain.ProductID, nil, 3)
+		if err != nil || replayed != (i > 0) {
+			t.Fatalf("attempt %d: replayed=%v err=%v", i, replayed, err)
+		}
+	}
+	current, err := items.FindByProductID(ctx, plain.ProductID)
+	if err != nil || current.AvailableQuantity != 5 {
+		t.Fatalf("a retried return restock must add stock once, got %+v", current)
+	}
+	if _, err := items.RestockReturn(ctx, returnID, plain.ProductID, nil, 4); err == nil {
+		t.Fatal("a different quantity under the same return id must conflict")
+	}
+	if _, err := items.RestockReturn(ctx, uuid.NewString(), plain.ProductID, variant.VariantID, 1); err == nil {
+		t.Fatal("a variant of another product must be refused")
+	}
+	if _, err := items.RestockReturn(ctx, uuid.NewString(), variant.ProductID, variant.VariantID, 2); err != nil {
+		t.Fatal(err)
+	}
+	var reason string
+	if err := pool.QueryRow(ctx, `SELECT reason FROM stock_movements WHERE operation_key=$1`, "return:"+returnID).Scan(&reason); err != nil || reason != "return_restock" {
+		t.Fatalf("return restock must leave a movement, got %q %v", reason, err)
+	}
+	assertBalance(t, pool)
+}

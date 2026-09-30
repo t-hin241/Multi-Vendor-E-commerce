@@ -19,7 +19,7 @@ type PayoutHandler struct {
 	Log     zerolog.Logger
 }
 
-func (h PayoutHandler) Register(r *gin.Engine, auth gin.HandlerFunc, payoutKey string) {
+func (h PayoutHandler) Register(r *gin.Engine, auth gin.HandlerFunc, payoutKey, internalKey string) {
 	owner := r.Group("/api/vendor/:vendorId/payout-accounts", auth, middleware.RequireRole("vendor"))
 	owner.Use(payoutNoStore())
 	owner.POST("", h.Submit)
@@ -30,6 +30,8 @@ func (h PayoutHandler) Register(r *gin.Engine, auth gin.HandlerFunc, payoutKey s
 	admin.POST("/:id/decision", h.Decide)
 	admin.POST("/:id/details", func(c *gin.Context) { h.Details(c, false) })
 	r.POST("/internal/payout-destinations/:vendorId/:id", serviceauth.Require(payoutKey, "X-Vendor-Payout-Key"), func(c *gin.Context) { h.Details(c, true) })
+	// Masked reference only; the full account needs the payout scope key.
+	r.GET("/internal/payout-destinations/:vendorId/default", serviceauth.Require(internalKey, serviceauth.Header), h.DefaultDestination)
 }
 func payoutNoStore() gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -62,6 +64,15 @@ func (h PayoutHandler) List(c *gin.Context, admin bool) {
 		return
 	}
 	httpresponse.OK(c, http.StatusOK, a)
+}
+func (h PayoutHandler) DefaultDestination(c *gin.Context) {
+	d, err := h.UseCase.DefaultDestination(c.Request.Context(), c.Param("vendorId"))
+	if err != nil {
+		httpresponse.HandleError(c, h.Log, err)
+		return
+	}
+	c.Header("Cache-Control", "no-store")
+	httpresponse.OK(c, http.StatusOK, d)
 }
 func (h PayoutHandler) Decide(c *gin.Context) {
 	var in struct {

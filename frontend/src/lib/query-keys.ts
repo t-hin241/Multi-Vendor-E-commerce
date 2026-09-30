@@ -15,6 +15,11 @@ export const queryKeys = {
   ordersMine: (page?: number) =>
     page === undefined ? (["orders-mine"] as const) : (["orders-mine", page] as const),
   order: (id: string) => ["order", id] as const,
+  checkoutPreviewAll: () => ["checkout-preview"] as const,
+  checkoutPreview: (addressId: string, cartVersion: number) =>
+    ["checkout-preview", addressId, cartVersion] as const,
+  vendorReturns: (vendorId: string, status: string) =>
+    ["vendor-returns", vendorId, status] as const,
   paymentIntent: (id: string) => ["payment-intent", id] as const,
   myShipments: () => ["my-shipments"] as const,
   shipmentEvents: (shipmentId: string) => ["shipment-events", shipmentId] as const,

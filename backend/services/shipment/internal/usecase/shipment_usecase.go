@@ -79,6 +79,44 @@ type CreateShipmentInput struct {
 	District           string
 	Ward               string
 	StreetAddress      string
+	// Quote, when set, is the fee Order snapshotted at checkout; the
+	// shipment keeps it instead of re-pricing with a newer rule.
+	Quote *domain.QuotedFee
+}
+
+// Quote prices a vendor's package to a destination without creating a
+// shipment. A shop without a shipping method, a destination outside every
+// zone or a missing fee rule is reported as unavailable, never as free.
+func (uc *ShipmentUseCase) Quote(ctx context.Context, vendorID, province string, weightGrams int64) (*domain.Quote, error) {
+	if err := domain.ValidateQuoteInput(vendorID, province, weightGrams); err != nil {
+		return nil, err
+	}
+	method, err := uc.vendorMethods.FindDefaultForVendor(ctx, vendorID)
+	if err != nil {
+		if errors.Is(err, repository.ErrVendorShippingMethodNotFound) {
+			return nil, apperror.Validation("This shop has not set up a shipping method yet")
+		}
+		return nil, apperror.Internal(err)
+	}
+	zone, err := uc.zones.FindZoneByProvinceCode(ctx, province)
+	if err != nil {
+		if errors.Is(err, repository.ErrZoneNotFound) {
+			return nil, apperror.Validation("Shipping is not available for this destination yet")
+		}
+		return nil, apperror.Internal(err)
+	}
+	rule, err := uc.feeRules.FindCurrent(ctx, method.CarrierID, zone.ID)
+	if err != nil {
+		if errors.Is(err, repository.ErrFeeRuleNotFound) {
+			return nil, apperror.Validation("Shipping fee is not configured for this destination yet")
+		}
+		return nil, apperror.Internal(err)
+	}
+	return &domain.Quote{
+		VendorID: vendorID, FeeAmount: domain.ComputeShippingFee(*rule, weightGrams), Currency: domain.FeeCurrency,
+		CarrierID: method.CarrierID, ZoneID: zone.ID, ZoneName: zone.Name, FeeRuleID: rule.ID, FeeRuleVersion: rule.Version,
+		PackageWeightGrams: weightGrams, QuotedAt: time.Now().UTC(),
+	}, nil
 }
 
 // CreateAuto is the automatic entry point Order calls right after
@@ -101,35 +139,24 @@ func (uc *ShipmentUseCase) resolveAndCreate(ctx context.Context, in CreateShipme
 		return nil, apperror.Internal(err)
 	}
 
-	method, err := uc.vendorMethods.FindDefaultForVendor(ctx, in.VendorID)
-	if err != nil {
-		if errors.Is(err, repository.ErrVendorShippingMethodNotFound) {
-			return nil, apperror.Validation("This shop has not set up a shipping method yet")
+	var quote *domain.Quote
+	if in.Quote != nil {
+		// Order's snapshot is what the buyer paid; keep it even if the fee
+		// rule changed since checkout.
+		quote = &domain.Quote{FeeAmount: in.Quote.FeeAmount, CarrierID: in.Quote.CarrierID, ZoneID: in.Quote.ZoneID, FeeRuleID: in.Quote.FeeRuleID}
+		if zone, err := uc.zones.FindByID(ctx, in.Quote.ZoneID); err == nil {
+			quote.ZoneName = zone.Name
 		}
-		return nil, apperror.Internal(err)
-	}
-
-	zone, err := uc.zones.FindZoneByProvinceCode(ctx, in.Province)
-	if err != nil {
-		if errors.Is(err, repository.ErrZoneNotFound) {
-			return nil, apperror.Validation("Shipping is not available for this destination yet")
+	} else {
+		var err error
+		if quote, err = uc.Quote(ctx, in.VendorID, in.Province, in.PackageWeightGrams); err != nil {
+			return nil, err
 		}
-		return nil, apperror.Internal(err)
 	}
-
-	rule, err := uc.feeRules.FindCurrent(ctx, method.CarrierID, zone.ID)
-	if err != nil {
-		if errors.Is(err, repository.ErrFeeRuleNotFound) {
-			return nil, apperror.Validation("Shipping fee is not configured for this destination yet")
-		}
-		return nil, apperror.Internal(err)
-	}
-
-	feeAmount := domain.ComputeShippingFee(*rule, in.PackageWeightGrams)
 
 	shipment := &domain.Shipment{
 		VendorOrderID: in.VendorOrderID, VendorID: in.VendorID, BuyerID: in.BuyerID, Status: domain.StatusPending,
-		CarrierID: &method.CarrierID, ZoneID: &zone.ID, ZoneName: &zone.Name, FeeRuleID: &rule.ID, FeeAmount: feeAmount,
+		CarrierID: &quote.CarrierID, ZoneID: &quote.ZoneID, ZoneName: optionalString(quote.ZoneName), FeeRuleID: &quote.FeeRuleID, FeeAmount: quote.FeeAmount,
 		PackageWeightGrams: &in.PackageWeightGrams,
 		RecipientName:      &in.RecipientName, Phone: &in.Phone, Province: &in.Province,
 		District: &in.District, Ward: &in.Ward, StreetAddress: &in.StreetAddress,
@@ -286,6 +313,13 @@ func (uc *ShipmentUseCase) recordEvent(ctx context.Context, shipmentID string, s
 	return nil
 }
 
+func optionalString(s string) *string {
+	if s == "" {
+		return nil
+	}
+	return &s
+}
+
 func derefString(s *string) string {
 	if s == nil {
 		return ""
@@ -313,14 +347,16 @@ func (uc *ShipmentUseCase) CreateOrGet(ctx context.Context, userID, vendorOrderI
 	if err != nil {
 		return nil, apperror.Forbidden("You do not have access to this order")
 	}
-	if notShippableStatuses[vo.Status] {
+	// Only a verified capture (which is also when stock was committed) opens
+	// fulfillment; Order decides that, Shipment never infers it.
+	if notShippableStatuses[vo.Status] || !vo.Fulfillable {
 		return nil, apperror.Conflict("This order is not ready to be shipped")
 	}
 
 	return uc.resolveAndCreate(ctx, CreateShipmentInput{
 		VendorOrderID: vendorOrderID, VendorID: vendorID, BuyerID: vo.BuyerID, PackageWeightGrams: vo.PackageWeightGrams,
 		RecipientName: vo.RecipientName, Phone: vo.Phone, Province: vo.Province,
-		District: vo.District, Ward: vo.Ward, StreetAddress: vo.StreetAddress,
+		District: vo.District, Ward: vo.Ward, StreetAddress: vo.StreetAddress, Quote: vo.Quote,
 	})
 }
 

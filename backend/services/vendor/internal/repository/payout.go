@@ -29,6 +29,12 @@ func (r PayoutRepository) Create(ctx context.Context, a *domain.PayoutAccount) e
 func (r PayoutRepository) Find(ctx context.Context, vendorID, id string, version int64) (*domain.PayoutAccount, error) {
 	return scanPayout(connection(ctx, r.Pool).QueryRow(ctx, `SELECT `+payoutColumns+` FROM vendor_payout_accounts WHERE vendor_id=$1 AND id=$2 AND version=$3`, vendorID, id, version))
 }
+
+// FindDefaultVerified returns the vendor's verified default account.
+func (r PayoutRepository) FindDefaultVerified(ctx context.Context, vendorID string) (*domain.PayoutAccount, error) {
+	return scanPayout(connection(ctx, r.Pool).QueryRow(ctx, `SELECT `+payoutColumns+` FROM vendor_payout_accounts
+		WHERE vendor_id=$1 AND is_default AND status='verified' ORDER BY version DESC LIMIT 1`, vendorID))
+}
 func (r PayoutRepository) List(ctx context.Context, vendorID string, limit, offset int) ([]*domain.PayoutAccount, error) {
 	rows, err := connection(ctx, r.Pool).Query(ctx, `SELECT `+payoutColumns+` FROM vendor_payout_accounts WHERE vendor_id=$1 ORDER BY version DESC LIMIT $2 OFFSET $3`, vendorID, limit, offset)
 	if err != nil {

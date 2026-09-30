@@ -1,12 +1,12 @@
-# syntax=docker/dockerfile:1
 FROM golang:1.25-alpine AS builder
 WORKDIR /src
 ENV GOWORK=off
 COPY pkg ./pkg
 COPY services/vendor/go.mod services/vendor/go.sum ./services/vendor/
-RUN cd services/vendor && go mod download
+RUN --mount=type=cache,target=/go/pkg/mod cd services/vendor && go mod download
 COPY services/vendor ./services/vendor
-RUN cd services/vendor && CGO_ENABLED=0 go build -o /out/server ./cmd/server
+RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache/go-build \
+    cd services/vendor && CGO_ENABLED=0 go build -o /out/server ./cmd/server
 
 FROM alpine:3.20
 RUN addgroup -S app && adduser -S app -G app && apk add --no-cache ca-certificates wget

@@ -55,7 +55,7 @@ func main() {
 	if err != nil {
 		log.Fatal().Err(err).Msg("object storage connection failed")
 	}
-	uc := usecase.NewReviewUseCase(repository.NewReviewRepository(db), adapter.NewHTTPOrderClient(cfg.OrderServiceURL), adapter.NewHTTPVendorClient(cfg.VendorServiceURL, internalServices.Key), adapter.NewHTTPIdentityClient(cfg.IdentityServiceURL, cfg.IdentityServiceKey), store)
+	uc := usecase.NewReviewUseCase(repository.NewReviewRepository(db), adapter.NewHTTPOrderClient(cfg.OrderServiceURL, internalServices.Key), adapter.NewHTTPVendorClient(cfg.VendorServiceURL, internalServices.Key), adapter.NewHTTPIdentityClient(cfg.IdentityServiceURL, cfg.IdentityServiceKey), store)
 	jwtManager := authjwt.NewManager(cfg.JWTSecret)
 	verifier, err := sessionconfig.LoadSessionVerifier()
 	if err != nil {

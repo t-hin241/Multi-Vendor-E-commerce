@@ -13,8 +13,8 @@ import { useAuth } from "@/lib/auth-context";
 
 // CommissionRuleManager lets admin set the marketplace's commission
 // percentage. Rules are insert-only on the backend — setting a new one
-// never edits history, so past vendor orders keep the rate they were
-// snapshotted with when paid.
+// never edits history: each vendor order keeps the rule version it was
+// snapshotted with at checkout.
 export function CommissionRuleManager() {
   const { callWithAuth } = useAuth();
   const queryClient = useQueryClient();

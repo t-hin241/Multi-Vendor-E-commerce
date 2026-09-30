@@ -141,6 +141,28 @@ func (h *InternalHandler) Release(c *gin.Context) {
 	h.operationResponse(c, req.OrderID, http.StatusOK)
 }
 
+// RestockReturn puts a received return's units back into stock: 201 the
+// first time, 200 for a replay of the same return.
+func (h *InternalHandler) RestockReturn(c *gin.Context) {
+	var req returnRestockRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		httpresponse.Error(c, http.StatusBadRequest, "validation_error", "return_id, product_id and a positive quantity are required")
+		return
+	}
+	replayed, err := h.inventory.RestockReturn(c.Request.Context(), req.ReturnID, req.ProductID, req.VariantID, req.Quantity)
+	if err != nil {
+		httpresponse.HandleError(c, h.log, err)
+		return
+	}
+	status := http.StatusCreated
+	if replayed {
+		status = http.StatusOK
+	} else {
+		h.log.Info().Str("return_id", req.ReturnID).Str("product_id", req.ProductID).Int64("quantity", req.Quantity).Msg("inventory_return_restocked")
+	}
+	httpresponse.OK(c, status, gin.H{"return_id": req.ReturnID, "replayed": replayed})
+}
+
 func (h *InternalHandler) Commit(c *gin.Context) {
 	var req releaseRequest // same {order_id} shape
 	if err := c.ShouldBindJSON(&req); err != nil {

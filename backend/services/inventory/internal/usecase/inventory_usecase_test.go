@@ -516,3 +516,23 @@ func TestListMine_RejectsAVendorIDTheCallerDoesNotOwn(t *testing.T) {
 		t.Errorf("expected forbidden when naming a vendor id the caller does not own, got %v", appErr.Code)
 	}
 }
+
+func TestRestockReturnIsIdempotentAndValidated(t *testing.T) {
+	f := newFixture()
+	ctx := t.Context()
+	f.items.byProduct["p-1"] = &domain.InventoryItem{ProductID: "p-1", AvailableQuantity: 1}
+	if _, err := f.uc.RestockReturn(ctx, "r-1", "p-1", nil, 0); err == nil {
+		t.Fatal("zero quantity must be refused")
+	}
+	for i := 0; i < 2; i++ {
+		if _, err := f.uc.RestockReturn(ctx, "r-1", "p-1", nil, 2); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := f.items.byProduct["p-1"].AvailableQuantity; got != 3 {
+		t.Fatalf("expected one restock, got %d", got)
+	}
+	if err := mustAppError(t, func() error { _, err := f.uc.RestockReturn(ctx, "r-2", "missing", nil, 1); return err }()); err.Code != apperror.CodeConflict {
+		t.Fatalf("unstocked product must be a conflict, got %v", err)
+	}
+}

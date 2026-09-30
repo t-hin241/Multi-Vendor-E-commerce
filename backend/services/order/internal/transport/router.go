@@ -1,8 +1,13 @@
 // Package transport wires Order's HTTP router: middleware, health checks,
-// checkout, the buyer's own orders, and the vendor's own sub-orders.
+// buyer checkout/orders/returns, the vendor's own sub-orders and returns,
+// admin operations, and the service-authenticated internal contracts.
 package transport
 
 import (
+	"context"
+	"net/http"
+	"time"
+
 	"github.com/gin-gonic/gin"
 	"github.com/rs/zerolog"
 
@@ -32,6 +37,7 @@ func NewRouter(
 	r.Use(middleware.RequestID())
 	r.Use(middleware.StructuredLogging(log))
 	r.Use(middleware.Recovery(log))
+	r.Use(boundRequest())
 
 	health.RegisterRoutes(r, checkers...)
 
@@ -40,6 +46,7 @@ func NewRouter(
 	buyerGroup := r.Group("/api/orders", requireAuth, middleware.RequireRole("buyer"))
 	{
 		buyerGroup.POST("/checkout", orderHandler.Checkout)
+		buyerGroup.POST("/checkout/preview", orderHandler.Preview)
 		buyerGroup.GET("/mine", orderHandler.ListMine)
 		buyerGroup.GET("/:id", orderHandler.Get)
 		buyerGroup.POST("/:id/cancel", orderHandler.Cancel)
@@ -55,7 +62,9 @@ func NewRouter(
 
 	vendorGroup := r.Group("/api/orders/vendor", requireAuth, middleware.RequireRole("vendor"))
 	{
+		vendorGroup.GET("/return-requests", returnHandler.VendorList)
 		vendorGroup.POST("/return-requests/:id/confirm", returnHandler.ConfirmByVendor)
+		vendorGroup.POST("/return-requests/:id/receive", returnHandler.Receive)
 		vendorGroup.GET("/mine", orderHandler.ListVendorMine)
 		vendorGroup.GET("/summary", orderHandler.Summary)
 		vendorGroup.GET("/export.csv", orderHandler.ExportCSV)
@@ -65,26 +74,51 @@ func NewRouter(
 	adminGroup := r.Group("/api/orders/admin", requireAuth, middleware.RequireRole("admin"))
 	{
 		adminGroup.GET("", adminHandler.List)
-		adminGroup.POST("/:id/transition", adminHandler.Transition)
+		adminGroup.GET("/refunds", adminHandler.ListRefunds)
+		adminGroup.GET("/payment-exceptions", adminHandler.PaymentExceptions)
+		adminGroup.GET("/operations", adminHandler.Operations)
+		adminGroup.POST("/operations/effects/:effectID/replay", adminHandler.ReplayEffect)
 		adminGroup.GET("/return-requests", returnHandler.AdminList)
+		adminGroup.GET("/return-requests/:id/history", returnHandler.History)
 		adminGroup.POST("/return-requests/:id/decision", returnHandler.Decide)
+		adminGroup.POST("/return-requests/:id/receive", returnHandler.Receive)
+		adminGroup.POST("/return-requests/:id/retry-refund", returnHandler.RetryRefund)
 		adminGroup.GET("/commission-rules", adminHandler.ListCommissionRules)
 		adminGroup.POST("/commission-rules", adminHandler.SetCommissionRule)
+		adminGroup.GET("/:id", adminHandler.Get)
+		adminGroup.POST("/:id/transition", adminHandler.Transition)
+		adminGroup.POST("/:id/refunds", adminHandler.CreateRefund)
 	}
 
-	internalGroup := r.Group("/internal/orders")
+	// Every internal route requires the service key: they expose buyer
+	// addresses, totals and payment transitions.
+	requireService := serviceauth.Require(internalKey, serviceauth.Header)
+	internalGroup := r.Group("/internal", requireService)
 	{
-		internalGroup.GET("/:id", internalHandler.Get)
-		internalGroup.POST("/:id/mark-paid", serviceauth.Require(internalKey, serviceauth.Header), internalHandler.MarkPaid)
-		internalGroup.POST("/:id/mark-payment-failed", serviceauth.Require(internalKey, serviceauth.Header), internalHandler.MarkPaymentFailed)
-		internalGroup.GET("/products/quantity-sold", internalHandler.QuantitySoldByProductIDs)
-		internalGroup.GET("/review-eligibility", internalHandler.ListReviewEligibility)
-	}
-
-	internalVendorOrderGroup := r.Group("/internal/vendor-orders")
-	{
-		internalVendorOrderGroup.GET("/:id", internalHandler.GetVendorOrder)
+		internalGroup.GET("/orders/:id", internalHandler.Get)
+		internalGroup.POST("/orders/:id/mark-paid", internalHandler.MarkPaid)
+		internalGroup.POST("/orders/:id/mark-payment-failed", internalHandler.MarkPaymentFailed)
+		internalGroup.GET("/orders/:id/inventory-status", internalHandler.InventoryStatus)
+		internalGroup.GET("/orders/products/quantity-sold", internalHandler.QuantitySoldByProductIDs)
+		internalGroup.GET("/orders/review-eligibility", internalHandler.ListReviewEligibility)
+		internalGroup.GET("/vendor-orders/:id", internalHandler.GetVendorOrder)
+		internalGroup.POST("/inventory-events", internalHandler.InventoryEvent)
+		internalGroup.POST("/refund-events", internalHandler.RefundEvent)
+		internalGroup.POST("/settlements/holds", internalHandler.SettlementHolds)
 	}
 
 	return r
+}
+
+// boundRequest caps request body size and processing time.
+func boundRequest() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		ctx, cancel := context.WithTimeout(c.Request.Context(), 30*time.Second)
+		defer cancel()
+		c.Request = c.Request.WithContext(ctx)
+		if c.Request.Body != nil {
+			c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 1<<20)
+		}
+		c.Next()
+	}
 }

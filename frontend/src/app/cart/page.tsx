@@ -12,6 +12,7 @@ import {
   ShippingFeeNote,
   linePrice,
 } from "@/components/cart/cart-notices";
+import { CheckoutQuote } from "@/components/cart/checkout-quote";
 import { PageShell } from "@/components/page-shell";
 import { QuantityStepper } from "@/components/quantity-stepper";
 import { SectionHeader } from "@/components/section-header";
@@ -31,7 +32,8 @@ import { useAuth } from "@/lib/auth-context";
 import { formatMoney } from "@/lib/format";
 import { useAddresses } from "@/lib/hooks/use-addresses";
 import { useCart, useConfirmCartPrices, useSetCartItemQuantity } from "@/lib/hooks/use-cart";
-import { useCheckout } from "@/lib/hooks/use-checkout";
+import { useCheckout, useCheckoutPreview } from "@/lib/hooks/use-checkout";
+import { canPlaceOrder } from "@/lib/order-workflow";
 
 export default function CartPage() {
   const { user, isReady } = useAuth();
@@ -55,11 +57,18 @@ export default function CartPage() {
   const defaultAddressId = addresses.find((a) => a.is_default)?.id ?? addresses[0]?.id ?? "";
   const effectiveAddressId = selectedAddressId || defaultAddressId;
   const selectedAddress = addresses.find((a) => a.id === effectiveAddressId);
+  const preview = useCheckoutPreview(
+    effectiveAddressId,
+    cartQuery.data?.version ?? 0,
+    Boolean(enabled && cartQuery.data?.checkout_ready && cartQuery.data.items.length > 0),
+  );
 
   if (!user || user.role !== "buyer") return null;
 
   const cart = cartQuery.data;
-  const busy = setQuantity.isPending || confirmPrices.isPending || cartQuery.isFetching;
+  const busy =
+    setQuantity.isPending || confirmPrices.isPending || cartQuery.isFetching || preview.isFetching;
+  const quote = preview.data;
 
   return (
     <PageShell maxWidth="lg">
@@ -202,14 +211,39 @@ export default function CartPage() {
               <CardTitle className="text-base">Tóm tắt đơn hàng</CardTitle>
             </CardHeader>
             <CardContent className="flex flex-col gap-4">
-              <CartSubtotal cart={cart} />
-              <ShippingFeeNote />
+              {quote && quote.cart_version === cart.version ? (
+                <CheckoutQuote preview={quote} />
+              ) : (
+                <>
+                  <CartSubtotal cart={cart} />
+                  <ShippingFeeNote />
+                </>
+              )}
+              {preview.error && (
+                <p className="text-sm text-destructive">
+                  Chưa tính được phí vận chuyển.{" "}
+                  <button className="underline" onClick={() => preview.refetch()}>
+                    Thử lại
+                  </button>
+                </p>
+              )}
               <Button
                 size="lg"
-                onClick={() =>
-                  checkout.mutate({ addressId: effectiveAddressId, cartVersion: cart.version })
+                onClick={() => {
+                  if (!canPlaceOrder(quote, cart.version)) return;
+                  checkout.mutate({
+                    addressId: effectiveAddressId,
+                    cartVersion: quote.cart_version,
+                    expectedTotalAmount: quote.total_amount,
+                  });
+                }}
+                disabled={
+                  checkout.isPending ||
+                  busy ||
+                  !effectiveAddressId ||
+                  !cart.checkout_ready ||
+                  !canPlaceOrder(quote, cart.version)
                 }
-                disabled={checkout.isPending || busy || !effectiveAddressId || !cart.checkout_ready}
               >
                 {!effectiveAddressId
                   ? "Cần địa chỉ giao hàng"
@@ -217,7 +251,11 @@ export default function CartPage() {
                     ? "Cần xử lý giỏ hàng"
                     : checkout.isPending
                       ? "Đang tạo đơn…"
-                      : "Đặt hàng"}
+                      : quote && !quote.ready
+                        ? "Chưa giao được đến địa chỉ này"
+                        : canPlaceOrder(quote, cart.version)
+                          ? `Đặt hàng · ${formatMoney(quote.total_amount, quote.currency)}`
+                          : "Đang báo giá…"}
               </Button>
             </CardContent>
           </Card>

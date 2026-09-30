@@ -3,6 +3,7 @@ package usecase_test
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strconv"
 	"sync"
 	"time"
@@ -13,55 +14,76 @@ import (
 	"shopee/backend/services/order/internal/repository"
 )
 
+// In-memory fakes of Order's repositories and gateways. Transactions have
+// no rollback here; atomicity is covered by the PostgreSQL integration
+// tests. WithLockedOrder serializes like the order row lock.
+
 type fakeOrderRepository struct {
 	mu           sync.Mutex
+	txMu         sync.Mutex
 	byID         map[string]*domain.Order
 	items        map[string][]*domain.OrderItem
 	nextID       int
 	vendorOrders *fakeVendorOrderRepository
 	consumptions *fakeCartConsumptionRepository
+	checkoutOps  *fakeCheckoutOpRepository
+	createErr    error
 }
 
-// newFakeOrderRepository takes the same fakeVendorOrderRepository the use
-// case is wired with, since CreateFromPlan inserts an order's vendor
-// sub-orders in the same transaction as the order itself in the real
-// repository — the fake mirrors that by writing into the shared store.
 func newFakeOrderRepository(vendorOrders *fakeVendorOrderRepository) *fakeOrderRepository {
-	return &fakeOrderRepository{byID: make(map[string]*domain.Order), items: make(map[string][]*domain.OrderItem), vendorOrders: vendorOrders}
+	return &fakeOrderRepository{byID: map[string]*domain.Order{}, items: map[string][]*domain.OrderItem{}, vendorOrders: vendorOrders}
+}
+
+func (f *fakeOrderRepository) WithLockedOrder(ctx context.Context, id string, fn func(context.Context) error) error {
+	f.txMu.Lock()
+	defer f.txMu.Unlock()
+	f.mu.Lock()
+	_, ok := f.byID[id]
+	f.mu.Unlock()
+	if !ok {
+		return apperror.NotFound("Order not found")
+	}
+	return fn(ctx)
 }
 
 func (f *fakeOrderRepository) CreateFromPlan(_ context.Context, plan *domain.Plan) (*domain.Order, error) {
+	if f.createErr != nil {
+		return nil, f.createErr
+	}
 	f.mu.Lock()
-	defer f.mu.Unlock()
-
 	f.nextID++
 	order := plan.Order
-	order.ID = "order-" + strconv.Itoa(f.nextID)
-	f.byID[order.ID] = &order
-
+	order.ID = fmt.Sprintf("00000000-0000-0000-0000-%012d", f.nextID)
+	order.Version, order.CreatedAt, order.UpdatedAt = 1, time.Now(), time.Now()
+	if order.CheckoutState == "" {
+		order.CheckoutState = domain.CheckoutReady
+	}
+	stored := order
+	f.byID[order.ID] = &stored
 	vendorOrderIDs := make([]string, len(plan.VendorOrders))
 	for i, vo := range plan.VendorOrders {
-		id := "vo-" + strconv.Itoa(f.nextID) + "-" + strconv.Itoa(i)
-		vendorOrderIDs[i] = id
-		voCopy := vo
-		voCopy.ID = id
-		voCopy.OrderID = order.ID
-		f.vendorOrders.create(&voCopy)
+		vendorOrderIDs[i] = "vo-" + strconv.Itoa(f.nextID) + "-" + strconv.Itoa(i)
+		cp := vo
+		cp.ID, cp.OrderID, cp.Version, cp.CreatedAt = vendorOrderIDs[i], order.ID, 1, time.Now()
+		if cp.Commission != nil {
+			cp.CommissionRateBps, cp.CommissionAmount, cp.NetAmount = &cp.Commission.RateBps, &cp.Commission.Amount, &cp.Commission.NetAmount
+		}
+		f.vendorOrders.create(&cp)
 	}
-
-	for _, item := range plan.Items {
+	for i, item := range plan.Items {
 		idx, _ := strconv.Atoi(item.VendorOrderID)
-		itemCopy := item
-		itemCopy.OrderID = order.ID
-		itemCopy.VendorOrderID = vendorOrderIDs[idx]
-		f.items[order.ID] = append(f.items[order.ID], &itemCopy)
-		f.vendorOrders.addItem(&itemCopy)
+		cp := item
+		cp.ID, cp.OrderID, cp.VendorOrderID = fmt.Sprintf("item-%d-%d", f.nextID, i), order.ID, vendorOrderIDs[idx]
+		f.items[order.ID] = append(f.items[order.ID], &cp)
+		f.vendorOrders.addItem(&cp)
 	}
-
+	f.mu.Unlock()
 	if plan.CartConsumption != nil && f.consumptions != nil {
 		f.consumptions.insert(order.ID, plan.CartConsumption)
 	}
-
+	if plan.CheckoutOperationID != "" && f.checkoutOps != nil {
+		f.checkoutOps.link(plan.CheckoutOperationID, order.ID)
+	}
 	return &order, nil
 }
 
@@ -72,32 +94,68 @@ func (f *fakeOrderRepository) FindByID(_ context.Context, id string) (*domain.Or
 	if !ok {
 		return nil, repository.ErrOrderNotFound
 	}
-	copyO := *o
-	return &copyO, nil
+	cp := *o
+	return &cp, nil
 }
 
-func (f *fakeOrderRepository) ListByBuyer(_ context.Context, buyerID string, _, _ int) ([]*domain.Order, error) {
+func (f *fakeOrderRepository) get(id string) *domain.Order {
+	o, _ := f.FindByID(context.Background(), id)
+	return o
+}
+
+func (f *fakeOrderRepository) List(_ context.Context, filter repository.OrderFilter, limit, offset int) ([]*domain.Order, int64, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	var out []*domain.Order
 	for _, o := range f.byID {
-		if o.BuyerID == buyerID {
-			copyO := *o
-			out = append(out, &copyO)
+		if (filter.BuyerID == "" || o.BuyerID == filter.BuyerID) && (filter.Status == "" || string(o.Status) == filter.Status) {
+			cp := *o
+			out = append(out, &cp)
 		}
 	}
-	return out, nil
+	sort.Slice(out, func(i, j int) bool { return out[i].ID > out[j].ID })
+	total := int64(len(out))
+	if offset > len(out) {
+		offset = len(out)
+	}
+	end := min(offset+limit, len(out))
+	return out[offset:end], total, nil
 }
 
-func (f *fakeOrderRepository) UpdateStatus(_ context.Context, id string, status domain.Status, reason *string) error {
+func (f *fakeOrderRepository) TransitionStatus(_ context.Context, id string, from, to domain.Status, reason *string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	o, ok := f.byID[id]
-	if !ok {
-		return repository.ErrOrderNotFound
+	if !ok || o.Status != from {
+		return repository.ErrStaleState
 	}
-	o.Status = status
-	o.CancellationReason = reason
+	o.Status = to
+	o.Version++
+	if reason != nil {
+		o.CancellationReason = reason
+	}
+	if to == domain.StatusPaid {
+		now := time.Now()
+		o.PaidAt = &now
+	}
+	return nil
+}
+
+func (f *fakeOrderRepository) SetCheckoutState(_ context.Context, id string, state domain.CheckoutState) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	o, ok := f.byID[id]
+	if !ok || o.CheckoutState != domain.CheckoutPreparing {
+		return repository.ErrStaleState
+	}
+	o.CheckoutState = state
+	return nil
+}
+
+func (f *fakeOrderRepository) AddRefunded(_ context.Context, id string, amount int64) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.byID[id].RefundedAmount += amount
 	return nil
 }
 
@@ -107,50 +165,20 @@ func (f *fakeOrderRepository) ListItemsByOrder(_ context.Context, orderID string
 	return f.items[orderID], nil
 }
 
-func (f *fakeOrderRepository) ListReviewEligibility(_ context.Context, buyerID, productID string) ([]*domain.ReviewEligibility, error) {
+func (f *fakeOrderRepository) FindItem(_ context.Context, orderID, itemID string) (*domain.OrderItem, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	var out []*domain.ReviewEligibility
-	for orderID, order := range f.byID {
-		if order.BuyerID != buyerID {
-			continue
-		}
-		for _, item := range f.items[orderID] {
-			if productID != "" && item.ProductID != productID {
-				continue
-			}
-			vo, err := f.vendorOrders.FindByID(context.Background(), item.VendorOrderID)
-			if err != nil || vo.Status != domain.StatusCompleted {
-				continue
-			}
-			out = append(out, &domain.ReviewEligibility{OrderItemID: item.ID, VendorOrderID: item.VendorOrderID, ProductID: item.ProductID, VendorID: vo.VendorID, ProductName: item.ProductName, VariantLabel: item.VariantLabel, CompletedAt: vo.UpdatedAt})
+	for _, item := range f.items[orderID] {
+		if item.ID == itemID {
+			cp := *item
+			return &cp, nil
 		}
 	}
-	return out, nil
+	return nil, repository.ErrOrderNotFound
 }
 
-func (f *fakeOrderRepository) ListByStatus(_ context.Context, status string, _, _ int) ([]*domain.Order, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	var out []*domain.Order
-	for _, o := range f.byID {
-		if status == "" || string(o.Status) == status {
-			cp := *o
-			out = append(out, &cp)
-		}
-	}
-	return out, nil
-}
-
-func (f *fakeOrderRepository) UpdateTotalAmount(_ context.Context, id string, totalAmount int64) error {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	o, ok := f.byID[id]
-	if !ok {
-		return repository.ErrOrderNotFound
-	}
-	o.TotalAmount = totalAmount
-	return nil
+func (f *fakeOrderRepository) ListReviewEligibility(context.Context, string, string) ([]*domain.ReviewEligibility, error) {
+	return nil, nil
 }
 
 type fakeVendorOrderRepository struct {
@@ -160,37 +188,19 @@ type fakeVendorOrderRepository struct {
 }
 
 func newFakeVendorOrderRepository() *fakeVendorOrderRepository {
-	return &fakeVendorOrderRepository{byID: make(map[string]*domain.VendorOrder), items: make(map[string][]*domain.OrderItem)}
+	return &fakeVendorOrderRepository{byID: map[string]*domain.VendorOrder{}, items: map[string][]*domain.OrderItem{}}
 }
 
-// addItem mirrors the insert order_items' real counterpart performs as part
-// of OrderRepository.CreateFromPlan's transaction; only
-// fakeOrderRepository.CreateFromPlan calls it.
-func (f *fakeVendorOrderRepository) addItem(item *domain.OrderItem) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.items[item.VendorOrderID] = append(f.items[item.VendorOrderID], item)
-}
-
-func (f *fakeVendorOrderRepository) ListItemsByVendorOrderIDs(_ context.Context, vendorOrderIDs []string) (map[string][]*domain.OrderItem, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	out := make(map[string][]*domain.OrderItem, len(vendorOrderIDs))
-	for _, id := range vendorOrderIDs {
-		if items, ok := f.items[id]; ok {
-			out[id] = items
-		}
-	}
-	return out, nil
-}
-
-// create mirrors the insert VendorOrderRepository.FindByID's real
-// counterpart performs as part of OrderRepository.CreateFromPlan's
-// transaction; only fakeOrderRepository.CreateFromPlan calls it.
 func (f *fakeVendorOrderRepository) create(vo *domain.VendorOrder) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.byID[vo.ID] = vo
+}
+
+func (f *fakeVendorOrderRepository) addItem(item *domain.OrderItem) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.items[item.VendorOrderID] = append(f.items[item.VendorOrderID], item)
 }
 
 func (f *fakeVendorOrderRepository) FindByID(_ context.Context, id string) (*domain.VendorOrder, error) {
@@ -204,12 +214,12 @@ func (f *fakeVendorOrderRepository) FindByID(_ context.Context, id string) (*dom
 	return &cp, nil
 }
 
-func (f *fakeVendorOrderRepository) ListByVendor(_ context.Context, vendorID string, _, _ int) ([]*domain.VendorOrder, error) {
+func (f *fakeVendorOrderRepository) ListByVendor(_ context.Context, vendorID, status string, _, _ int) ([]*domain.VendorOrder, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	var out []*domain.VendorOrder
 	for _, vo := range f.byID {
-		if vo.VendorID == vendorID {
+		if vo.VendorID == vendorID && (status == "" || string(vo.Status) == status) {
 			cp := *vo
 			out = append(out, &cp)
 		}
@@ -227,40 +237,60 @@ func (f *fakeVendorOrderRepository) ListByOrderID(_ context.Context, orderID str
 			out = append(out, &cp)
 		}
 	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	return out, nil
 }
 
-func (f *fakeVendorOrderRepository) UpdateStatus(_ context.Context, id string, status domain.Status) error {
+func (f *fakeVendorOrderRepository) TransitionStatus(_ context.Context, id string, from, to domain.Status) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	vo, ok := f.byID[id]
-	if !ok {
-		return repository.ErrVendorOrderNotFound
+	if !ok || vo.Status != from {
+		return repository.ErrStaleState
 	}
-	vo.Status = status
+	vo.Status = to
+	if to == domain.StatusCompleted {
+		now := time.Now()
+		vo.CompletedAt = &now
+	}
 	return nil
 }
 
-func (f *fakeVendorOrderRepository) SetCommission(_ context.Context, id string, rateBps int, commissionAmount, netAmount int64) error {
+func (f *fakeVendorOrderRepository) TransitionAllForOrder(_ context.Context, orderID string, from, to domain.Status) (int64, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	vo, ok := f.byID[id]
-	if !ok {
-		return repository.ErrVendorOrderNotFound
+	var n int64
+	for _, vo := range f.byID {
+		if vo.OrderID == orderID && vo.Status == from {
+			vo.Status = to
+			n++
+		}
 	}
-	vo.CommissionRateBps, vo.CommissionAmount, vo.NetAmount = &rateBps, &commissionAmount, &netAmount
+	return n, nil
+}
+
+func (f *fakeVendorOrderRepository) SetLegacyCommission(_ context.Context, id string, rule *domain.CommissionRule, amount, net, base int64) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	vo := f.byID[id]
+	if vo.CommissionRateBps != nil {
+		return nil
+	}
+	rate := rule.RateBps
+	vo.CommissionRateBps, vo.CommissionAmount, vo.NetAmount = &rate, &amount, &net
+	vo.Commission = &domain.CommissionSnapshot{RuleID: &rule.ID, RuleVersion: &rule.Version, RateBps: rate, BaseAmount: base, Amount: amount, NetAmount: net, Source: domain.CommissionSourceLegacy}
 	return nil
 }
 
-func (f *fakeVendorOrderRepository) SetShippingFee(_ context.Context, id string, feeAmount int64) error {
+func (f *fakeVendorOrderRepository) AddRefunded(_ context.Context, id string, amount int64) (int64, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	vo, ok := f.byID[id]
-	if !ok {
-		return repository.ErrVendorOrderNotFound
-	}
-	vo.ShippingFeeAmount = feeAmount
-	return nil
+	f.byID[id].RefundedAmount += amount
+	return f.byID[id].RefundedAmount, nil
+}
+
+func (f *fakeVendorOrderRepository) HeldForSettlement(context.Context, []string) (map[string]string, error) {
+	return map[string]string{}, nil
 }
 
 func (f *fakeVendorOrderRepository) SummaryByVendor(_ context.Context, vendorID string) (*domain.VendorSummary, error) {
@@ -268,39 +298,45 @@ func (f *fakeVendorOrderRepository) SummaryByVendor(_ context.Context, vendorID 
 	defer f.mu.Unlock()
 	s := &domain.VendorSummary{}
 	for _, vo := range f.byID {
-		if vo.VendorID != vendorID || vo.Status == domain.StatusPendingPayment {
+		if vo.VendorID != vendorID || !vo.Status.PaidOrFurther() {
 			continue
 		}
 		s.TotalOrders++
 		s.TotalRevenue += vo.SubtotalAmount
-		if vo.CommissionAmount != nil {
-			s.TotalCommission += *vo.CommissionAmount
-		}
-		if vo.NetAmount != nil {
-			s.TotalNet += *vo.NetAmount
-		}
+		s.TotalRefunded += vo.RefundedAmount
 	}
 	return s, nil
 }
 
-func (f *fakeVendorOrderRepository) TopProductsByVendor(_ context.Context, _ string, _ int) ([]*domain.TopProduct, error) {
+func (f *fakeVendorOrderRepository) TopProductsByVendor(context.Context, string, int) ([]*domain.TopProduct, error) {
 	return nil, nil
 }
 
-func (f *fakeVendorOrderRepository) QuantitySoldByProductIDs(_ context.Context, _ []string) (map[string]int64, error) {
+func (f *fakeVendorOrderRepository) QuantitySoldByProductIDs(context.Context, []string) (map[string]int64, error) {
 	return nil, nil
+}
+
+func (f *fakeVendorOrderRepository) ListItemsByVendorOrderIDs(_ context.Context, ids []string) (map[string][]*domain.OrderItem, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := map[string][]*domain.OrderItem{}
+	for _, id := range ids {
+		if items, ok := f.items[id]; ok {
+			out[id] = items
+		}
+	}
+	return out, nil
 }
 
 type fakeCommissionRuleRepository struct {
-	mu     sync.Mutex
-	rules  []*domain.CommissionRule
-	nextID int
+	mu    sync.Mutex
+	rules []*domain.CommissionRule
 }
 
 func newFakeCommissionRuleRepository(defaultRateBps int) *fakeCommissionRuleRepository {
 	f := &fakeCommissionRuleRepository{}
 	if defaultRateBps >= 0 {
-		f.rules = append(f.rules, &domain.CommissionRule{ID: "rule-0", RateBps: defaultRateBps})
+		f.rules = append(f.rules, &domain.CommissionRule{ID: "rule-1", Version: 1, RateBps: defaultRateBps})
 	}
 	return f
 }
@@ -308,13 +344,13 @@ func newFakeCommissionRuleRepository(defaultRateBps int) *fakeCommissionRuleRepo
 func (f *fakeCommissionRuleRepository) Create(_ context.Context, rule *domain.CommissionRule) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.nextID++
-	rule.ID = fmt.Sprintf("rule-%d", f.nextID)
+	rule.Version = int64(len(f.rules) + 1)
+	rule.ID = fmt.Sprintf("rule-%d", rule.Version)
 	f.rules = append(f.rules, rule)
 	return nil
 }
 
-func (f *fakeCommissionRuleRepository) FindCurrent(_ context.Context) (*domain.CommissionRule, error) {
+func (f *fakeCommissionRuleRepository) FindCurrent(context.Context) (*domain.CommissionRule, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if len(f.rules) == 0 {
@@ -323,20 +359,529 @@ func (f *fakeCommissionRuleRepository) FindCurrent(_ context.Context) (*domain.C
 	return f.rules[len(f.rules)-1], nil
 }
 
-func (f *fakeCommissionRuleRepository) List(_ context.Context, _, _ int) ([]*domain.CommissionRule, error) {
+func (f *fakeCommissionRuleRepository) List(context.Context, int, int) ([]*domain.CommissionRule, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.rules, nil
 }
 
-// fakeCartGateway simulates Cart's internal checkout contract: byBuyer holds
-// each buyer's cart lines; Snapshot freezes them per operation (replaying
-// the same operation id), Consume records what was purchased.
+type fakeCheckoutOpRepository struct {
+	mu  sync.Mutex
+	ops map[string]*domain.CheckoutOperation // by id
+	seq int
+}
+
+func newFakeCheckoutOpRepository() *fakeCheckoutOpRepository {
+	return &fakeCheckoutOpRepository{ops: map[string]*domain.CheckoutOperation{}}
+}
+
+func (f *fakeCheckoutOpRepository) link(id, orderID string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.ops[id].OrderID = &orderID
+}
+
+func (f *fakeCheckoutOpRepository) Begin(_ context.Context, buyerID, key, hash string, ttl time.Duration) (*domain.CheckoutOperation, bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, op := range f.ops {
+		if op.BuyerID == buyerID && op.IdempotencyKey == key {
+			restart := op.RequestHash == hash && op.Status == domain.CheckoutOpFailed && !domain.ReplayableFailure(op.StoredError())
+			if !restart {
+				cp := *op
+				return &cp, false, nil
+			}
+			op.Status, op.OrderID, op.ErrorCode, op.ErrorMessage, op.ErrorStatus = domain.CheckoutOpPreparing, nil, nil, nil, nil
+			cp := *op
+			return &cp, true, nil
+		}
+	}
+	f.seq++
+	op := &domain.CheckoutOperation{ID: fmt.Sprintf("op-%d", f.seq), BuyerID: buyerID, IdempotencyKey: key, RequestHash: hash,
+		Status: domain.CheckoutOpPreparing, ExpiresAt: time.Now().Add(ttl), CreatedAt: time.Now(), UpdatedAt: time.Now()}
+	f.ops[op.ID] = op
+	cp := *op
+	return &cp, true, nil
+}
+
+func (f *fakeCheckoutOpRepository) Complete(_ context.Context, id, orderID string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	op := f.ops[id]
+	if op.Status != domain.CheckoutOpPreparing {
+		return repository.ErrStaleState
+	}
+	op.Status, op.OrderID = domain.CheckoutOpCompleted, &orderID
+	return nil
+}
+
+func (f *fakeCheckoutOpRepository) Fail(_ context.Context, id string, cause *apperror.Error) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	op := f.ops[id]
+	if op.Status != domain.CheckoutOpPreparing {
+		return nil
+	}
+	code, msg, status := string(cause.Code), cause.Message, cause.Status
+	op.Status, op.ErrorCode, op.ErrorMessage, op.ErrorStatus = domain.CheckoutOpFailed, &code, &msg, &status
+	return nil
+}
+
+func (f *fakeCheckoutOpRepository) FindByID(_ context.Context, id string) (*domain.CheckoutOperation, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if op, ok := f.ops[id]; ok {
+		cp := *op
+		return &cp, nil
+	}
+	return nil, nil
+}
+
+func (f *fakeCheckoutOpRepository) ListStalePreparing(_ context.Context, olderThan time.Time, limit int) ([]*domain.CheckoutOperation, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var out []*domain.CheckoutOperation
+	for _, op := range f.ops {
+		if op.Status == domain.CheckoutOpPreparing && op.UpdatedAt.Before(olderThan) && len(out) < limit {
+			cp := *op
+			out = append(out, &cp)
+		}
+	}
+	return out, nil
+}
+
+func (f *fakeCheckoutOpRepository) PurgeExpired(context.Context, int) (int64, error) { return 0, nil }
+
+type fakePaymentRecordRepository struct {
+	mu       sync.Mutex
+	payments map[string]*domain.OrderPayment
+}
+
+func newFakePaymentRecordRepository() *fakePaymentRecordRepository {
+	return &fakePaymentRecordRepository{payments: map[string]*domain.OrderPayment{}}
+}
+
+func (f *fakePaymentRecordRepository) Find(_ context.Context, id string) (*domain.OrderPayment, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if p, ok := f.payments[id]; ok {
+		cp := *p
+		return &cp, nil
+	}
+	return nil, nil
+}
+
+func (f *fakePaymentRecordRepository) Insert(_ context.Context, p *domain.OrderPayment) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	p.ReceivedAt = time.Now()
+	cp := *p
+	f.payments[p.PaymentID] = &cp
+	return nil
+}
+
+func (f *fakePaymentRecordRepository) ListByOrder(_ context.Context, orderID string) ([]*domain.OrderPayment, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var out []*domain.OrderPayment
+	for _, p := range f.payments {
+		if p.OrderID == orderID {
+			cp := *p
+			out = append(out, &cp)
+		}
+	}
+	return out, nil
+}
+
+func (f *fakePaymentRecordRepository) ListRejected(context.Context, int, int) ([]*domain.OrderPayment, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var out []*domain.OrderPayment
+	for _, p := range f.payments {
+		if p.Outcome == domain.PaymentRejected {
+			cp := *p
+			out = append(out, &cp)
+		}
+	}
+	return out, nil
+}
+
+type fakeEffectRepository struct {
+	mu      sync.Mutex
+	effects []*domain.Effect
+	seq     int
+}
+
+func (f *fakeEffectRepository) Enqueue(_ context.Context, effects ...domain.Effect) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, e := range effects {
+		dup := false
+		for _, existing := range f.effects {
+			dup = dup || (existing.OrderID == e.OrderID && existing.Kind == e.Kind && existing.Target == e.Target)
+		}
+		if dup {
+			continue
+		}
+		f.seq++
+		cp := e
+		cp.ID, cp.Status, cp.CreatedAt = fmt.Sprintf("effect-%d", f.seq), domain.EffectPending, time.Now()
+		f.effects = append(f.effects, &cp)
+	}
+	return nil
+}
+
+func (f *fakeEffectRepository) ClaimDue(_ context.Context, orderID string, limit int) ([]*domain.Effect, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var out []*domain.Effect
+	for _, e := range f.effects {
+		if e.Status == domain.EffectPending && (orderID == "" || e.OrderID == orderID) && len(out) < limit {
+			cp := *e
+			out = append(out, &cp)
+		}
+	}
+	return out, nil
+}
+
+func (f *fakeEffectRepository) find(id string) *domain.Effect {
+	for _, e := range f.effects {
+		if e.ID == id {
+			return e
+		}
+	}
+	return nil
+}
+
+func (f *fakeEffectRepository) MarkDone(_ context.Context, id string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.find(id).Status = domain.EffectDone
+	return nil
+}
+
+func (f *fakeEffectRepository) RecordFailure(_ context.Context, id, reason string, park bool) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	e := f.find(id)
+	e.Attempts++
+	e.LastError = &reason
+	if park || e.Attempts >= domain.MaxEffectAttempts {
+		e.Status = domain.EffectParked
+		return true, nil
+	}
+	return false, nil
+}
+
+func (f *fakeEffectRepository) Replay(_ context.Context, id string) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	e := f.find(id)
+	if e == nil || e.Status != domain.EffectParked {
+		return false, nil
+	}
+	e.Status, e.Attempts = domain.EffectPending, 0
+	return true, nil
+}
+
+func (f *fakeEffectRepository) ListByOrder(_ context.Context, orderID string) ([]*domain.Effect, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var out []*domain.Effect
+	for _, e := range f.effects {
+		if e.OrderID == orderID {
+			cp := *e
+			out = append(out, &cp)
+		}
+	}
+	return out, nil
+}
+
+func (f *fakeEffectRepository) ListParked(context.Context, int, int) ([]*domain.Effect, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var out []*domain.Effect
+	for _, e := range f.effects {
+		if e.Status == domain.EffectParked {
+			cp := *e
+			out = append(out, &cp)
+		}
+	}
+	return out, nil
+}
+
+func (f *fakeEffectRepository) Stats(context.Context) (domain.EffectStats, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var s domain.EffectStats
+	for _, e := range f.effects {
+		switch e.Status {
+		case domain.EffectPending:
+			s.Pending++
+		case domain.EffectParked:
+			s.Parked++
+		}
+	}
+	return s, nil
+}
+
+// count returns how many effects of a kind (and status, if given) exist.
+func (f *fakeEffectRepository) count(kind domain.EffectKind, status string) int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	n := 0
+	for _, e := range f.effects {
+		if e.Kind == kind && (status == "" || e.Status == status) {
+			n++
+		}
+	}
+	return n
+}
+
+type fakeRefundRepository struct {
+	mu      sync.Mutex
+	refunds map[string]*domain.Refund
+	seq     int
+}
+
+func newFakeRefundRepository() *fakeRefundRepository {
+	return &fakeRefundRepository{refunds: map[string]*domain.Refund{}}
+}
+
+func (f *fakeRefundRepository) Create(_ context.Context, r *domain.Refund) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, existing := range f.refunds {
+		if !existing.Status.Open() {
+			continue
+		}
+		if (r.ReturnRequestID != nil && existing.ReturnRequestID != nil && *r.ReturnRequestID == *existing.ReturnRequestID) ||
+			(r.PaymentID != nil && existing.PaymentID != nil && *r.PaymentID == *existing.PaymentID) {
+			return apperror.Conflict("A refund is already open for this return or payment")
+		}
+	}
+	f.seq++
+	r.ID, r.Status, r.CreatedAt = fmt.Sprintf("00000000-0000-0000-0001-%012d", f.seq), domain.RefundRequested, time.Now()
+	cp := *r
+	f.refunds[r.ID] = &cp
+	return nil
+}
+
+func (f *fakeRefundRepository) FindByID(_ context.Context, id string) (*domain.Refund, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	r, ok := f.refunds[id]
+	if !ok {
+		return nil, repository.ErrRefundNotFound
+	}
+	cp := *r
+	return &cp, nil
+}
+
+func (f *fakeRefundRepository) Transition(_ context.Context, id string, from, to domain.RefundStatus, paymentRefundID, failure *string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	r := f.refunds[id]
+	if r.Status != from {
+		return repository.ErrStaleState
+	}
+	r.Status = to
+	if paymentRefundID != nil {
+		r.PaymentRefundID = paymentRefundID
+	}
+	if failure != nil {
+		r.FailureReason = failure
+	}
+	return nil
+}
+
+func (f *fakeRefundRepository) OpenTotals(_ context.Context, orderID, vendorOrderID string) (int64, int64, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var order, vendor int64
+	for _, r := range f.refunds {
+		if r.OrderID != orderID || r.PaymentID != nil || !r.Status.Open() {
+			continue
+		}
+		order += r.Amount
+		if r.VendorOrderID != nil && *r.VendorOrderID == vendorOrderID {
+			vendor += r.Amount
+		}
+	}
+	return order, vendor, nil
+}
+
+func (f *fakeRefundRepository) ListByOrder(_ context.Context, orderID string) ([]*domain.Refund, error) {
+	all, _ := f.List(context.Background(), "", 100, 0)
+	var out []*domain.Refund
+	for _, r := range all {
+		if r.OrderID == orderID {
+			out = append(out, r)
+		}
+	}
+	return out, nil
+}
+
+func (f *fakeRefundRepository) List(_ context.Context, status string, _, _ int) ([]*domain.Refund, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var out []*domain.Refund
+	for _, r := range f.refunds {
+		if status == "" || string(r.Status) == status {
+			cp := *r
+			out = append(out, &cp)
+		}
+	}
+	return out, nil
+}
+
+func (f *fakeRefundRepository) only() *domain.Refund {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, r := range f.refunds {
+		cp := *r
+		return &cp
+	}
+	return nil
+}
+
+type fakeReturnRepository struct {
+	mu        sync.Mutex
+	returns   map[string]*domain.ReturnRequest
+	events    []*domain.ReturnEvent
+	seq       int
+	vendorsOf func(itemID string) (string, string)
+}
+
+func newFakeReturnRepository() *fakeReturnRepository {
+	return &fakeReturnRepository{returns: map[string]*domain.ReturnRequest{}}
+}
+
+func (f *fakeReturnRepository) Create(_ context.Context, rr *domain.ReturnRequest) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, existing := range f.returns {
+		if existing.OrderItemID == rr.OrderItemID && existing.Status != domain.ReturnRejected && existing.Status != domain.ReturnRefunded {
+			return apperror.Conflict("This item already has an open return request")
+		}
+	}
+	f.seq++
+	rr.ID, rr.Status, rr.Version, rr.CreatedAt = fmt.Sprintf("00000000-0000-0000-0002-%012d", f.seq), domain.ReturnRequested, 1, time.Now()
+	cp := *rr
+	f.returns[rr.ID] = &cp
+	return nil
+}
+
+func (f *fakeReturnRepository) ReturnedQuantity(_ context.Context, itemID string) (int64, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var n int64
+	for _, rr := range f.returns {
+		if rr.OrderItemID == itemID && rr.Status != domain.ReturnRejected {
+			n += rr.Quantity
+		}
+	}
+	return n, nil
+}
+
+func (f *fakeReturnRepository) FindByID(_ context.Context, id string) (*domain.ReturnRequest, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	rr, ok := f.returns[id]
+	if !ok {
+		return nil, repository.ErrReturnRequestNotFound
+	}
+	cp := *rr
+	return &cp, nil
+}
+
+func (f *fakeReturnRepository) VendorOf(_ context.Context, id string) (string, string, error) {
+	f.mu.Lock()
+	rr, ok := f.returns[id]
+	f.mu.Unlock()
+	if !ok {
+		return "", "", repository.ErrReturnRequestNotFound
+	}
+	vo, vendor := f.vendorsOf(rr.OrderItemID)
+	return vo, vendor, nil
+}
+
+func (f *fakeReturnRepository) Transition(_ context.Context, rr *domain.ReturnRequest, to domain.ReturnRequestStatus, u repository.ReturnUpdate) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	stored := f.returns[rr.ID]
+	if stored.Status != rr.Status || stored.Version != rr.Version {
+		return repository.ErrStaleState
+	}
+	stored.Status, stored.Version = to, stored.Version+1
+	if u.Restock != nil {
+		stored.Restock = u.Restock
+	}
+	if u.DecisionNote != nil {
+		stored.DecisionNote = u.DecisionNote
+	}
+	rr.Status, rr.Version = to, stored.Version
+	return nil
+}
+
+func (f *fakeReturnRepository) AddEvent(_ context.Context, e *domain.ReturnEvent) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	cp := *e
+	f.events = append(f.events, &cp)
+	return nil
+}
+
+func (f *fakeReturnRepository) ListEvents(_ context.Context, returnID string) ([]*domain.ReturnEvent, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var out []*domain.ReturnEvent
+	for _, e := range f.events {
+		if e.ReturnID == returnID {
+			out = append(out, e)
+		}
+	}
+	return out, nil
+}
+
+func (f *fakeReturnRepository) list(match func(*domain.ReturnRequest) bool) []*domain.ReturnRequest {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var out []*domain.ReturnRequest
+	for _, rr := range f.returns {
+		if match(rr) {
+			cp := *rr
+			out = append(out, &cp)
+		}
+	}
+	return out
+}
+
+func (f *fakeReturnRepository) ListByBuyer(_ context.Context, buyerID string, _, _ int) ([]*domain.ReturnRequest, error) {
+	return f.list(func(r *domain.ReturnRequest) bool { return r.BuyerID == buyerID }), nil
+}
+
+func (f *fakeReturnRepository) ListByOrder(_ context.Context, orderID string) ([]*domain.ReturnRequest, error) {
+	return f.list(func(r *domain.ReturnRequest) bool { return r.OrderID == orderID }), nil
+}
+
+func (f *fakeReturnRepository) ListByStatus(_ context.Context, status string, _, _ int) ([]*domain.ReturnRequest, error) {
+	return f.list(func(r *domain.ReturnRequest) bool { return status == "" || string(r.Status) == status }), nil
+}
+
+func (f *fakeReturnRepository) ListForVendor(_ context.Context, vendorID, status string, _, _ int) ([]*domain.ReturnRequest, error) {
+	return f.list(func(r *domain.ReturnRequest) bool {
+		_, v := f.vendorsOf(r.OrderItemID)
+		return v == vendorID && (status == "" || string(r.Status) == status)
+	}), nil
+}
+
+// fakeCartGateway simulates Cart's internal contract.
 type fakeCartGateway struct {
 	mu          sync.Mutex
 	byBuyer     map[string][]adapter.CartLine
 	snapshots   map[string]*adapter.CartSnapshot
-	consumed    map[string][]adapter.CartConsumeLine // by buyer
+	consumed    map[string][]adapter.CartConsumeLine
 	consumeErr  error
 	snapshotErr error
 	calls       int
@@ -344,6 +889,23 @@ type fakeCartGateway struct {
 
 func newFakeCartGateway() *fakeCartGateway {
 	return &fakeCartGateway{byBuyer: map[string][]adapter.CartLine{}, snapshots: map[string]*adapter.CartSnapshot{}, consumed: map[string][]adapter.CartConsumeLine{}}
+}
+
+func (f *fakeCartGateway) lines(buyerID string) []adapter.CartLine {
+	var out []adapter.CartLine
+	for i, line := range f.byBuyer[buyerID] {
+		if line.LineID == "" {
+			line.LineID = fmt.Sprintf("line-%d", i)
+		}
+		out = append(out, line)
+	}
+	return out
+}
+
+func (f *fakeCartGateway) Lines(_ context.Context, buyerID string) (*adapter.CartSnapshot, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return &adapter.CartSnapshot{CartVersion: 1, Lines: f.lines(buyerID)}, nil
 }
 
 func (f *fakeCartGateway) Snapshot(_ context.Context, buyerID, operationID string, _ *int64) (*adapter.CartSnapshot, error) {
@@ -355,13 +917,7 @@ func (f *fakeCartGateway) Snapshot(_ context.Context, buyerID, operationID strin
 	if snap, ok := f.snapshots[operationID]; ok {
 		return snap, nil
 	}
-	snap := &adapter.CartSnapshot{OperationID: operationID, CartVersion: 1}
-	for i, line := range f.byBuyer[buyerID] {
-		if line.LineID == "" {
-			line.LineID = fmt.Sprintf("line-%d", i)
-		}
-		snap.Lines = append(snap.Lines, line)
-	}
+	snap := &adapter.CartSnapshot{OperationID: operationID, CartVersion: 1, Lines: f.lines(buyerID)}
 	f.snapshots[operationID] = snap
 	return snap, nil
 }
@@ -377,8 +933,6 @@ func (f *fakeCartGateway) Consume(_ context.Context, buyerID, _ string, lines []
 	return nil
 }
 
-// fakeCartConsumptionRepository stores consume tasks; CreateFromPlan writes
-// into it like the real repository does in the order transaction.
 type fakeCartConsumptionRepository struct {
 	mu    sync.Mutex
 	tasks map[string]*domain.CartConsumption
@@ -391,17 +945,17 @@ func newFakeCartConsumptionRepository() *fakeCartConsumptionRepository {
 func (f *fakeCartConsumptionRepository) insert(orderID string, c *domain.CartConsumption) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	copyTask := *c
-	copyTask.OrderID, copyTask.Status, copyTask.CreatedAt = orderID, domain.CartConsumptionHeld, time.Now()
-	f.tasks[orderID] = &copyTask
+	cp := *c
+	cp.OrderID, cp.Status, cp.CreatedAt = orderID, domain.CartConsumptionHeld, time.Now()
+	f.tasks[orderID] = &cp
 }
 
 func (f *fakeCartConsumptionRepository) get(orderID string) *domain.CartConsumption {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if t, ok := f.tasks[orderID]; ok {
-		copyTask := *t
-		return &copyTask
+		cp := *t
+		return &cp
 	}
 	return nil
 }
@@ -425,8 +979,8 @@ func (f *fakeCartConsumptionRepository) ListOpenByBuyer(_ context.Context, buyer
 	var out []*domain.CartConsumption
 	for _, t := range f.tasks {
 		if t.BuyerID == buyerID && (t.Status == domain.CartConsumptionHeld || t.Status == domain.CartConsumptionPending) {
-			copyTask := *t
-			out = append(out, &copyTask)
+			cp := *t
+			out = append(out, &cp)
 		}
 	}
 	return out, nil
@@ -468,8 +1022,8 @@ func (f *fakeCartConsumptionRepository) ClaimDue(_ context.Context, limit int) (
 	var out []*domain.CartConsumption
 	for _, t := range f.tasks {
 		if t.Status == domain.CartConsumptionPending && len(out) < limit {
-			copyTask := *t
-			out = append(out, &copyTask)
+			cp := *t
+			out = append(out, &cp)
 		}
 	}
 	return out, nil
@@ -481,8 +1035,8 @@ func (f *fakeCartConsumptionRepository) ListStaleHeld(_ context.Context, olderTh
 	var out []*domain.CartConsumption
 	for _, t := range f.tasks {
 		if t.Status == domain.CartConsumptionHeld && t.CreatedAt.Before(olderThan) && len(out) < limit {
-			copyTask := *t
-			out = append(out, &copyTask)
+			cp := *t
+			out = append(out, &cp)
 		}
 	}
 	return out, nil
@@ -499,7 +1053,7 @@ type fakeCatalogGateway struct {
 }
 
 func newFakeCatalogGateway() *fakeCatalogGateway {
-	return &fakeCatalogGateway{products: make(map[string]*adapter.ProductInfo), variants: make(map[string]*adapter.VariantInfo)}
+	return &fakeCatalogGateway{products: map[string]*adapter.ProductInfo{}, variants: map[string]*adapter.VariantInfo{}}
 }
 
 func (f *fakeCatalogGateway) GetProduct(_ context.Context, productID string) (*adapter.ProductInfo, error) {
@@ -527,67 +1081,45 @@ type fakeVendorGateway struct {
 }
 
 func newFakeVendorGateway() *fakeVendorGateway {
-	return &fakeVendorGateway{approvedVendors: make(map[string]string)}
+	return &fakeVendorGateway{approvedVendors: map[string]string{}}
 }
 
 func (f *fakeVendorGateway) GetApprovedVendorID(_ context.Context, userID, vendorID string) (string, error) {
 	approved, ok := f.approvedVendors[userID]
-	if !ok || approved != vendorID {
+	if !ok || (vendorID != "" && approved != vendorID) {
 		return "", apperror.Forbidden("You must have an approved vendor account")
 	}
-	return vendorID, nil
+	return approved, nil
 }
 
-// fakeInventoryGateway simulates Inventory: shortProduct forces a
-// reservation failure for a specific product id, so checkout's
-// compensating cancel path can be exercised without a real service.
+func (f *fakeVendorGateway) Approved(_ context.Context, ids []string) (map[string]int64, error) {
+	if f.saleErr != nil {
+		return nil, f.saleErr
+	}
+	out := map[string]int64{}
+	for _, id := range ids {
+		out[id] = 1
+	}
+	return out, nil
+}
+
+// fakeInventoryGateway simulates Inventory. shortProduct forces a
+// reservation failure; receiptStatus overrides Operation's answer.
 type fakeInventoryGateway struct {
-	commitError     error
 	mu              sync.Mutex
+	commitError     error
+	releaseError    error
 	shortProduct    string
+	receiptStatus   string
 	reservedOrders  map[string][]adapter.ReserveLine
 	releasedOrders  map[string]bool
 	committedOrders map[string]bool
+	restocked       map[string]int64
 }
 
 func newFakeInventoryGateway() *fakeInventoryGateway {
-	return &fakeInventoryGateway{
-		reservedOrders:  make(map[string][]adapter.ReserveLine),
-		releasedOrders:  make(map[string]bool),
-		committedOrders: make(map[string]bool),
-	}
-}
-
-func (f *fakeInventoryGateway) Commit(_ context.Context, orderID string) error {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	if f.commitError != nil {
-		return f.commitError
-	}
-	f.committedOrders[orderID] = true
-	return nil
-}
-
-type sentNotification struct {
-	userID      string
-	notifType   string
-	referenceID string
-}
-
-type fakeNotificationGateway struct {
-	mu   sync.Mutex
-	sent []sentNotification
-}
-
-func newFakeNotificationGateway() *fakeNotificationGateway {
-	return &fakeNotificationGateway{}
-}
-
-func (f *fakeNotificationGateway) Notify(_ context.Context, userID, notifType, referenceID string) error {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.sent = append(f.sent, sentNotification{userID: userID, notifType: notifType, referenceID: referenceID})
-	return nil
+	return &fakeInventoryGateway{reservedOrders: map[string][]adapter.ReserveLine{}, releasedOrders: map[string]bool{},
+		committedOrders: map[string]bool{}, restocked: map[string]int64{}}
 }
 
 func (f *fakeInventoryGateway) Reserve(_ context.Context, orderID string, lines []adapter.ReserveLine) error {
@@ -605,7 +1137,155 @@ func (f *fakeInventoryGateway) Reserve(_ context.Context, orderID string, lines 
 func (f *fakeInventoryGateway) Release(_ context.Context, orderID string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.releaseError != nil {
+		return f.releaseError
+	}
 	f.releasedOrders[orderID] = true
+	return nil
+}
+
+func (f *fakeInventoryGateway) Commit(_ context.Context, orderID string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.commitError != nil {
+		return f.commitError
+	}
+	f.committedOrders[orderID] = true
+	return nil
+}
+
+func (f *fakeInventoryGateway) Operation(_ context.Context, id string) (*adapter.ReservationReceipt, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	status := f.receiptStatus
+	if status == "" {
+		if _, ok := f.reservedOrders[id]; !ok {
+			return nil, apperror.NotFound("Reservation operation not found")
+		}
+		status = "held"
+	}
+	return &adapter.ReservationReceipt{OrderID: id, OperationID: id, Status: status, ExpiresAt: time.Now().Add(30 * time.Minute)}, nil
+}
+
+func (f *fakeInventoryGateway) RestockReturn(_ context.Context, returnID, _ string, _ *string, quantity int64) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.restocked[returnID] += quantity
+	return nil
+}
+
+type sentNotification struct {
+	userID, notifType, referenceID string
+}
+
+type fakeNotificationGateway struct {
+	mu   sync.Mutex
+	sent []sentNotification
+}
+
+func (f *fakeNotificationGateway) Notify(_ context.Context, userID, notifType, referenceID string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.sent = append(f.sent, sentNotification{userID, notifType, referenceID})
+	return nil
+}
+
+func (f *fakeNotificationGateway) types() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	var out []string
+	for _, n := range f.sent {
+		out = append(out, n.notifType)
+	}
+	return out
+}
+
+// fakeShipmentGateway quotes feeByVendor (default fee otherwise) and
+// reports unavailable for vendors in unavailable.
+type fakeShipmentGateway struct {
+	mu          sync.Mutex
+	fee         int64
+	feeByVendor map[string]int64
+	unavailable map[string]bool
+	quoteErr    error
+	createErr   error
+	created     map[string]adapter.CreateShipmentInput
+	cancelled   map[string]bool
+}
+
+func newFakeShipmentGateway(fee int64) *fakeShipmentGateway {
+	return &fakeShipmentGateway{fee: fee, feeByVendor: map[string]int64{}, unavailable: map[string]bool{}, created: map[string]adapter.CreateShipmentInput{}, cancelled: map[string]bool{}}
+}
+
+func (f *fakeShipmentGateway) Quote(_ context.Context, vendorID, _ string, weight int64) (*domain.ShippingQuote, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.quoteErr != nil {
+		return nil, f.quoteErr
+	}
+	if f.unavailable[vendorID] {
+		return nil, domain.ShippingUnavailable("Shipping is not available for this destination yet")
+	}
+	fee := f.fee
+	if v, ok := f.feeByVendor[vendorID]; ok {
+		fee = v
+	}
+	return &domain.ShippingQuote{VendorID: vendorID, FeeAmount: fee, Currency: "VND", CarrierID: "carrier-1", ZoneID: "zone-1",
+		FeeRuleID: "fee-rule-" + vendorID, FeeRuleVersion: 1, PackageWeightGrams: weight, QuotedAt: time.Now()}, nil
+}
+
+func (f *fakeShipmentGateway) CreateShipment(_ context.Context, in adapter.CreateShipmentInput) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.createErr != nil {
+		return "", f.createErr
+	}
+	f.created[in.VendorOrderID] = in
+	return "shipment-" + in.VendorOrderID, nil
+}
+
+func (f *fakeShipmentGateway) CancelForVendorOrder(_ context.Context, vendorOrderID string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.cancelled[vendorOrderID] = true
+	return nil
+}
+
+type fakePaymentGateway struct {
+	mu          sync.Mutex
+	err         error
+	requests    []adapter.RefundRequest
+	settlements []adapter.SettlementReport
+}
+
+func (f *fakePaymentGateway) SettleVendorOrder(_ context.Context, r adapter.SettlementReport) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.err != nil {
+		return f.err
+	}
+	f.settlements = append(f.settlements, r)
+	return nil
+}
+
+func (f *fakePaymentGateway) RequestRefund(_ context.Context, r adapter.RefundRequest) (*adapter.RefundReceipt, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.err != nil {
+		return nil, f.err
+	}
+	f.requests = append(f.requests, r)
+	return &adapter.RefundReceipt{PaymentRefundID: "pr-" + r.RefundID, Status: "awaiting_provider_refund"}, nil
+}
+
+type fakeIdentityGateway struct {
+	denied map[string]bool
+}
+
+func (f fakeIdentityGateway) RequireRole(_ context.Context, userID, _ string) error {
+	if f.denied[userID] {
+		return apperror.Forbidden("Role no longer granted")
+	}
 	return nil
 }
 
@@ -623,7 +1303,7 @@ func (f *fakeBuyerAddressRepository) Create(_ context.Context, a *domain.BuyerAd
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.nextID++
-	a.ID = fmt.Sprintf("address-%d", f.nextID)
+	a.ID = fmt.Sprintf("00000000-0000-0000-0003-%012d", f.nextID)
 	cp := *a
 	f.byID[a.ID] = &cp
 	return nil
@@ -692,9 +1372,7 @@ func (f *fakeBuyerAddressRepository) SetDefault(_ context.Context, buyerID, addr
 	defer f.mu.Unlock()
 	found := false
 	for _, a := range f.byID {
-		if a.ID == addressID && a.BuyerID == buyerID {
-			found = true
-		}
+		found = found || (a.ID == addressID && a.BuyerID == buyerID)
 	}
 	if !found {
 		return repository.ErrBuyerAddressNotFound
@@ -705,54 +1383,4 @@ func (f *fakeBuyerAddressRepository) SetDefault(_ context.Context, buyerID, addr
 		}
 	}
 	return nil
-}
-
-// fakeShipmentGateway simulates Shipment: every CreateShipment call
-// succeeds with a fixed fee unless failVendorOrder matches, letting tests
-// exercise the best-effort failure path without a real service.
-type fakeShipmentGateway struct {
-	mu        sync.Mutex
-	feeAmount int64
-	failAll   bool
-	created   map[string]adapter.CreateShipmentInput
-	cancelled map[string]bool
-}
-
-func newFakeShipmentGateway(feeAmount int64) *fakeShipmentGateway {
-	return &fakeShipmentGateway{feeAmount: feeAmount, created: map[string]adapter.CreateShipmentInput{}, cancelled: map[string]bool{}}
-}
-
-func (f *fakeShipmentGateway) CreateShipment(_ context.Context, in adapter.CreateShipmentInput) (string, int64, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	if f.failAll {
-		return "", 0, apperror.Internal(fmt.Errorf("shipment service unreachable"))
-	}
-	f.created[in.VendorOrderID] = in
-	return "shipment-" + in.VendorOrderID, f.feeAmount, nil
-}
-
-func (f *fakeShipmentGateway) CancelForVendorOrder(_ context.Context, vendorOrderID string) error {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.cancelled[vendorOrderID] = true
-	return nil
-}
-
-func (f *fakeVendorGateway) Approved(ctx context.Context, ids []string) (map[string]int64, error) {
-	if f.saleErr != nil {
-		return nil, f.saleErr
-	}
-	out := map[string]int64{}
-	for _, id := range ids {
-		out[id] = 1
-	}
-	return out, nil
-}
-
-func (f *fakeOrderRepository) WithLockedOrder(ctx context.Context, id string, fn func(context.Context) error) error {
-	return fn(ctx)
-}
-func (f *fakeInventoryGateway) Operation(ctx context.Context, id string) (*adapter.ReservationReceipt, error) {
-	return &adapter.ReservationReceipt{OrderID: id, OperationID: id, Status: "held", ExpiresAt: time.Now().Add(30 * time.Minute)}, nil
 }

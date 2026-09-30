@@ -4,6 +4,7 @@ import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
 import { OrderStatusBadge } from "@/components/order-status-badge";
+import { ReturnRequestDialog } from "@/components/orders/return-request-dialog";
 import { PageShell } from "@/components/page-shell";
 import { PaymentSection } from "@/components/payment-section";
 import { ShipmentTimeline } from "@/components/shipment-timeline";
@@ -26,6 +27,11 @@ import { useAuth } from "@/lib/auth-context";
 import { formatMoney } from "@/lib/format";
 import { useCancelOrder, useCreateReturnRequest, useOrder } from "@/lib/hooks/use-orders";
 import { useMyShipments } from "@/lib/hooks/use-shipments";
+import {
+  orderRefundStatusLabels,
+  returnStatusLabel,
+  returnableQuantity,
+} from "@/lib/order-workflow";
 
 export default function OrderDetailPage() {
   const params = useParams<{ id: string }>();
@@ -111,20 +117,47 @@ export default function OrderDetailPage() {
           </CardHeader>
           <CardContent className="flex flex-wrap gap-2">
             {order.items.map((item) => (
-              <Button
+              <ReturnRequestDialog
                 key={item.id}
-                variant="outline"
-                size="sm"
-                disabled={createReturn.isPending}
-                onClick={() => {
-                  const reason = window.prompt(`Lý do trả hàng cho ${item.product_name}:`);
-                  if (reason?.trim())
-                    createReturn.mutate({ orderItemId: item.id, reason: reason.trim() });
-                }}
-              >
-                Yêu cầu trả: {item.product_name}
-              </Button>
+                item={item}
+                currency={order.currency}
+                maxQuantity={returnableQuantity(item, order.returns)}
+                pending={createReturn.isPending}
+                onSubmit={(input) => createReturn.mutateAsync({ orderItemId: item.id, ...input })}
+              />
             ))}
+          </CardContent>
+        </Card>
+      )}
+
+      {order.returns && order.returns.length > 0 && (
+        <Card className="mt-4">
+          <CardHeader>
+            <CardTitle className="text-base">Yêu cầu trả hàng</CardTitle>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-3 text-sm">
+            {order.returns.map((r) => {
+              const item = order.items?.find((i) => i.id === r.order_item_id);
+              return (
+                <div key={r.id} className="rounded-md border p-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <p className="font-medium">
+                      {item?.product_name ?? "Sản phẩm"} × {r.quantity}
+                    </p>
+                    <span className="text-xs font-medium">{returnStatusLabel(r.status)}</span>
+                  </div>
+                  <p className="text-muted-foreground">
+                    Hoàn dự kiến {formatMoney(r.refund_amount, order.currency)}
+                  </p>
+                  {r.vendor_note && (
+                    <p className="text-muted-foreground">Người bán: {r.vendor_note}</p>
+                  )}
+                  {r.decision_note && (
+                    <p className="text-muted-foreground">Sàn: {r.decision_note}</p>
+                  )}
+                </div>
+              );
+            })}
           </CardContent>
         </Card>
       )}
@@ -133,8 +166,35 @@ export default function OrderDetailPage() {
         <CardHeader>
           <CardTitle className="text-base">Tổng cộng</CardTitle>
         </CardHeader>
-        <CardContent className="text-lg font-semibold">
-          {formatMoney(order.total_amount, order.currency)}
+        <CardContent className="flex flex-col gap-1 text-sm">
+          {order.subtotal_amount !== undefined && (
+            <div className="flex justify-between">
+              <span className="text-muted-foreground">Tiền hàng</span>
+              <span>{formatMoney(order.subtotal_amount, order.currency)}</span>
+            </div>
+          )}
+          {order.shipping_amount !== undefined && (
+            <div className="flex justify-between">
+              <span className="text-muted-foreground">Phí vận chuyển</span>
+              <span>{formatMoney(order.shipping_amount, order.currency)}</span>
+            </div>
+          )}
+          <div className="flex justify-between text-lg font-semibold">
+            <span>Tổng thanh toán</span>
+            <span>{formatMoney(order.total_amount, order.currency)}</span>
+          </div>
+          {Boolean(order.refunded_amount) && (
+            <div className="flex justify-between text-success">
+              <span>Đã hoàn tiền</span>
+              <span>{formatMoney(order.refunded_amount ?? 0, order.currency)}</span>
+            </div>
+          )}
+          {order.refunds?.map((refund) => (
+            <p key={refund.id} className="text-xs text-muted-foreground">
+              Hoàn {formatMoney(refund.amount, refund.currency)}:{" "}
+              {orderRefundStatusLabels[refund.status] ?? refund.status}
+            </p>
+          ))}
         </CardContent>
       </Card>
 
@@ -200,7 +260,13 @@ export default function OrderDetailPage() {
         </div>
       )}
 
-      {order.status === "pending_payment" && (
+      {order.checkout_state === "preparing" && (
+        <p className="mt-4 text-sm text-muted-foreground">
+          Đơn hàng đang được giữ hàng. Bạn có thể thanh toán sau vài giây.
+        </p>
+      )}
+
+      {order.status === "pending_payment" && order.checkout_state !== "preparing" && (
         <Card className="mt-4">
           <CardHeader>
             <CardTitle className="text-base">Thanh toán</CardTitle>

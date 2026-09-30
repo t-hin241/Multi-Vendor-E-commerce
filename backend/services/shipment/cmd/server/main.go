@@ -66,7 +66,7 @@ func main() {
 	}
 	jwtManager.SetVerifier(verifier)
 	vendorClient := adapter.NewHTTPVendorClient(cfg.VendorServiceURL, internalServices.Key)
-	orderClient := adapter.NewHTTPOrderClient(cfg.OrderServiceURL)
+	orderClient := adapter.NewHTTPOrderClient(cfg.OrderServiceURL, internalServices.Key)
 
 	shipmentRepo := repository.NewShipmentRepository(dbPool)
 	carrierRepo := repository.NewCarrierRepository(dbPool)
@@ -95,7 +95,7 @@ func main() {
 	internalHandler := transport.NewInternalHandler(shipmentUseCase, log)
 	webhookHandler := transport.NewWebhookHandler(shipmentUseCase, log)
 
-	router := transport.NewRouter(cfg.Base.Env, log, jwtManager, shipmentHandler, adminHandler, vendorMethodHandler, internalHandler, webhookHandler,
+	router := transport.NewRouter(cfg.Base.Env, log, jwtManager, shipmentHandler, adminHandler, vendorMethodHandler, internalHandler, webhookHandler, internalServices.Key,
 		health.Checker{Name: "postgres", Ping: func(ctx context.Context) error { return dbPool.Ping(ctx) }},
 		health.Checker{Name: "redis", Ping: func(ctx context.Context) error { return redisClient.Ping(ctx).Err() }},
 		health.Checker{Name: "nats", Ping: func(ctx context.Context) error {

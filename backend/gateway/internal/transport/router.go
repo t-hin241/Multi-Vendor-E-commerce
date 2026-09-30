@@ -34,8 +34,8 @@ func NewRouter(cfg config.Config, log zerolog.Logger) (*gin.Engine, error) {
 	r.Use(cors.New(cors.Config{
 		AllowOrigins:     cfg.AllowedOrigins,
 		AllowMethods:     []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
-		AllowHeaders:     []string{"Origin", "Content-Type", "Authorization", "X-CSRF-Protection", middleware.RequestIDHeader},
-		ExposeHeaders:    []string{middleware.RequestIDHeader},
+		AllowHeaders:     []string{"Origin", "Content-Type", "Authorization", "X-CSRF-Protection", "Idempotency-Key", middleware.RequestIDHeader},
+		ExposeHeaders:    []string{middleware.RequestIDHeader, "X-Total-Count"},
 		AllowCredentials: true,
 		MaxAge:           12 * time.Hour,
 	}))

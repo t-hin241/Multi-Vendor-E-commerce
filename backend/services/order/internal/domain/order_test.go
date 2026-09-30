@@ -89,8 +89,8 @@ func TestComputeCommission(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		gotCommission, gotNet := domain.ComputeCommission(tt.subtotal, tt.rateBps)
-		if gotCommission != tt.wantCommission || gotNet != tt.wantNet {
+		gotCommission, gotNet, ok := domain.ComputeCommission(tt.subtotal, tt.rateBps)
+		if !ok || gotCommission != tt.wantCommission || gotNet != tt.wantNet {
 			t.Errorf("ComputeCommission(%d, %d) = (%d, %d), want (%d, %d)", tt.subtotal, tt.rateBps, gotCommission, gotNet, tt.wantCommission, tt.wantNet)
 		}
 		if gotCommission+gotNet != tt.subtotal {

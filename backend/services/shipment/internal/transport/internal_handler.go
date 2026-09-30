@@ -2,18 +2,18 @@ package transport
 
 import (
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/rs/zerolog"
 
 	"shopee/backend/pkg/httpresponse"
+	"shopee/backend/services/shipment/internal/domain"
 	"shopee/backend/services/shipment/internal/usecase"
 )
 
-// InternalHandler serves the network-only, unauthenticated routes Order
-// calls to create and cancel shipments — same trust boundary as every
-// other /internal/... route in this codebase (Catalog's
-// /internal/products/:id, Inventory's /internal/inventory/reserve, etc.).
+// InternalHandler serves the service-authenticated routes Order calls to
+// quote, create and cancel shipments.
 type InternalHandler struct {
 	shipments *usecase.ShipmentUseCase
 	log       zerolog.Logger
@@ -30,18 +30,62 @@ func (h *InternalHandler) CreateShipment(c *gin.Context) {
 		return
 	}
 
-	shipment, err := h.shipments.CreateAuto(c.Request.Context(), usecase.CreateShipmentInput{
+	in := usecase.CreateShipmentInput{
 		VendorOrderID: req.VendorOrderID, VendorID: req.VendorID, BuyerID: req.BuyerID,
 		PackageWeightGrams: req.PackageWeightGrams,
 		RecipientName:      req.RecipientName, Phone: req.Phone, Province: req.Province,
 		District: req.District, Ward: req.Ward, StreetAddress: req.StreetAddress,
-	})
+	}
+	if req.Quote != nil {
+		in.Quote = &domain.QuotedFee{FeeAmount: req.Quote.FeeAmount, CarrierID: req.Quote.CarrierID, ZoneID: req.Quote.ZoneID, FeeRuleID: req.Quote.FeeRuleID}
+	}
+	shipment, err := h.shipments.CreateAuto(c.Request.Context(), in)
 	if err != nil {
 		httpresponse.HandleError(c, h.log, err)
 		return
 	}
 
 	httpresponse.OK(c, http.StatusCreated, toInternalShipmentResponse(shipment))
+}
+
+type quoteRequest struct {
+	VendorID           string `json:"vendor_id" binding:"required,uuid"`
+	Province           string `json:"province" binding:"required,max=100"`
+	PackageWeightGrams int64  `json:"package_weight_grams" binding:"min=0"`
+}
+
+type quoteResponse struct {
+	VendorID           string    `json:"vendor_id"`
+	FeeAmount          int64     `json:"fee_amount"`
+	Currency           string    `json:"currency"`
+	CarrierID          string    `json:"carrier_id"`
+	ZoneID             string    `json:"zone_id"`
+	ZoneName           string    `json:"zone_name"`
+	FeeRuleID          string    `json:"fee_rule_id"`
+	FeeRuleVersion     int       `json:"fee_rule_version"`
+	PackageWeightGrams int64     `json:"package_weight_grams"`
+	QuotedAt           time.Time `json:"quoted_at"`
+}
+
+// Quote: POST /internal/shipments/quotes. Prices one vendor's package to a
+// destination without creating anything. 400 means shipping is not
+// available (no method, zone or fee rule), never a zero fee.
+func (h *InternalHandler) Quote(c *gin.Context) {
+	var req quoteRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		httpresponse.Error(c, http.StatusBadRequest, "validation_error", "vendor_id, province and a non-negative package_weight_grams are required")
+		return
+	}
+	q, err := h.shipments.Quote(c.Request.Context(), req.VendorID, req.Province, req.PackageWeightGrams)
+	if err != nil {
+		httpresponse.HandleError(c, h.log, err)
+		return
+	}
+	httpresponse.OK(c, http.StatusOK, quoteResponse{
+		VendorID: q.VendorID, FeeAmount: q.FeeAmount, Currency: q.Currency, CarrierID: q.CarrierID, ZoneID: q.ZoneID,
+		ZoneName: q.ZoneName, FeeRuleID: q.FeeRuleID, FeeRuleVersion: q.FeeRuleVersion,
+		PackageWeightGrams: q.PackageWeightGrams, QuotedAt: q.QuotedAt,
+	})
 }
 
 func (h *InternalHandler) CancelForVendorOrder(c *gin.Context) {

@@ -16,6 +16,7 @@ type fakeItemRepository struct {
 	byProduct map[string]*domain.InventoryItem
 	byVariant map[string]*domain.InventoryItem
 	counts    map[string]*domain.StockCount
+	returns   map[string]int64
 	nextID    int
 }
 
@@ -96,6 +97,30 @@ func (f *fakeItemRepository) Restock(_ context.Context, productID string, quanti
 	}
 	item.AvailableQuantity += quantity
 	return nil
+}
+
+func (f *fakeItemRepository) RestockReturn(_ context.Context, returnID, productID string, variantID *string, quantity int64) (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.returns == nil {
+		f.returns = map[string]int64{}
+	}
+	if done, ok := f.returns[returnID]; ok {
+		if done != quantity {
+			return false, apperror.Conflict("This return was already restocked with different values")
+		}
+		return true, nil
+	}
+	item, ok := f.byProduct[productID]
+	if variantID != nil {
+		item, ok = f.byVariant[*variantID]
+	}
+	if !ok {
+		return false, &repository.ErrProductNotStocked{ProductID: productID}
+	}
+	item.AvailableQuantity += quantity
+	f.returns[returnID] = quantity
+	return false, nil
 }
 
 func (f *fakeItemRepository) RestockVariant(_ context.Context, variantID string, quantity int64, audit ...string) error {

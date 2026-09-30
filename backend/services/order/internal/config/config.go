@@ -6,6 +6,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"strconv"
 
 	"shopee/backend/pkg/config"
 )
@@ -19,6 +20,16 @@ type Config struct {
 	InventoryServiceURL    string
 	ShipmentServiceURL     string
 	NotificationServiceURL string
+	PaymentServiceURL      string
+	// ReturnWindowDays is how long after delivery (completion) an item may
+	// be returned; it is copied onto every return request with its version.
+	ReturnWindowDays int
+}
+
+// ReturnPolicyVersion names the policy in force, derived from its settings
+// so a changed window is always a new version.
+func (c Config) ReturnPolicyVersion() string {
+	return "window-" + strconv.Itoa(c.ReturnWindowDays) + "d"
 }
 
 func Load() (Config, error) {
@@ -56,6 +67,18 @@ func Load() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	paymentServiceURL, err := requireEnv("PAYMENT_SERVICE_URL")
+	if err != nil {
+		return Config{}, err
+	}
+	returnWindowDays := 7
+	if raw := os.Getenv("ORDER_RETURN_WINDOW_DAYS"); raw != "" {
+		v, err := strconv.Atoi(raw)
+		if err != nil || v < 1 || v > 365 {
+			return Config{}, fmt.Errorf("config: ORDER_RETURN_WINDOW_DAYS must be an integer between 1 and 365")
+		}
+		returnWindowDays = v
+	}
 
 	return Config{
 		Base:                   base,
@@ -66,6 +89,8 @@ func Load() (Config, error) {
 		InventoryServiceURL:    inventoryServiceURL,
 		ShipmentServiceURL:     shipmentServiceURL,
 		NotificationServiceURL: notificationServiceURL,
+		PaymentServiceURL:      paymentServiceURL,
+		ReturnWindowDays:       returnWindowDays,
 	}, nil
 }
 

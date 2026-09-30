@@ -67,6 +67,7 @@ func NewRouter(
 		internalGroup.POST("/reserve", internalHandler.Reserve)
 		internalGroup.POST("/release", internalHandler.Release)
 		internalGroup.POST("/commit", internalHandler.Commit)
+		internalGroup.POST("/returns", internalHandler.RestockReturn)
 		internalGroup.GET("/variants/stock", internalHandler.GetVariantStock)
 		internalGroup.GET("/products/:productID/readiness", internalHandler.CheckStockReadiness)
 		internalGroup.GET("/products/:productID/stock", internalHandler.GetProductStock)

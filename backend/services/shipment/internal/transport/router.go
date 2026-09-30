@@ -11,6 +11,7 @@ import (
 	"shopee/backend/pkg/authjwt"
 	"shopee/backend/pkg/health"
 	"shopee/backend/pkg/middleware"
+	"shopee/backend/pkg/serviceauth"
 )
 
 func NewRouter(
@@ -22,6 +23,7 @@ func NewRouter(
 	vendorMethodHandler *VendorShippingMethodHandler,
 	internalHandler *InternalHandler,
 	webhookHandler *WebhookHandler,
+	internalKey string,
 	checkers ...health.Checker,
 ) *gin.Engine {
 	if env == "production" {
@@ -80,9 +82,10 @@ func NewRouter(
 		adminGroup.GET("/fee-rules", adminHandler.ListFeeRules)
 	}
 
-	internalGroup := r.Group("/internal/shipments")
+	internalGroup := r.Group("/internal/shipments", serviceauth.Require(internalKey, serviceauth.Header))
 	{
 		internalGroup.POST("", internalHandler.CreateShipment)
+		internalGroup.POST("/quotes", internalHandler.Quote)
 		internalGroup.POST("/by-vendor-order/:id/cancel", internalHandler.CancelForVendorOrder)
 	}
 

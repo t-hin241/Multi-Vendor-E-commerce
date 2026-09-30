@@ -6,6 +6,7 @@ import Link from "next/link";
 import { useState } from "react";
 
 import { OrderStatusBadge } from "@/components/order-status-badge";
+import { ReceiveReturnDialog } from "@/components/orders/receive-return-dialog";
 import { SectionHeader } from "@/components/section-header";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -15,6 +16,8 @@ import { StatCard } from "@/components/vendor/stat-card";
 import * as api from "@/lib/api-client";
 import { useAuth } from "@/lib/auth-context";
 import { formatMoney } from "@/lib/format";
+import { canReceive, returnStatusLabel, vendorCanConfirm } from "@/lib/order-workflow";
+import { queryKeys } from "@/lib/query-keys";
 
 // A vendor order still needs a vendor action if it's paid (not started),
 // processing (not shipped), or shipped but the carrier's interception
@@ -78,6 +81,8 @@ export default function VendorOrdersPage() {
 
       <SummarySection vendorId={selectedVendorId} />
 
+      <VendorReturnsSection vendorId={selectedVendorId} />
+
       {ordersQuery.isPending && <p className="text-sm text-muted-foreground">Đang tải…</p>}
       {ordersQuery.data?.length === 0 && (
         <p className="text-sm text-muted-foreground">Chưa có đơn hàng nào.</p>
@@ -140,11 +145,12 @@ function SummarySection({ vendorId }: { vendorId: string }) {
 
   return (
     <div>
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
         <StatCard label="Đơn hàng" value={s.total_orders} />
         <StatCard label="Doanh thu" value={formatMoney(s.total_revenue)} />
         <StatCard label="Hoa hồng" value={formatMoney(s.total_commission)} />
         <StatCard label="Thực nhận" value={formatMoney(s.total_net)} />
+        <StatCard label="Đã hoàn tiền" value={formatMoney(s.total_refunded ?? 0)} />
       </div>
 
       {s.top_products.length > 0 && (
@@ -161,6 +167,115 @@ function SummarySection({ vendorId }: { vendorId: string }) {
           </CardContent>
         </Card>
       )}
+    </div>
+  );
+}
+
+// VendorReturnsSection: the vendor confirms a buyer's return request before
+// admin decides, and records the goods when they come back, which starts
+// the refund.
+function VendorReturnsSection({ vendorId }: { vendorId: string }) {
+  const { callWithAuth } = useAuth();
+  const queryClient = useQueryClient();
+  const [status, setStatus] = useState("");
+  const returnsQuery = useQuery({
+    queryKey: queryKeys.vendorReturns(vendorId, status),
+    queryFn: () =>
+      callWithAuth((token) =>
+        api.listVendorReturns(token, vendorId, { status: status || undefined, limit: 50 }),
+      ),
+  });
+  const open = (returnsQuery.data ?? []).filter(
+    (r) => status !== "" || !["refunded", "rejected"].includes(r.status),
+  );
+
+  async function refresh() {
+    await queryClient.invalidateQueries({ queryKey: ["vendor-returns", vendorId] });
+  }
+
+  return (
+    <div>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="text-sm font-medium">Yêu cầu trả hàng</p>
+        <div className="flex gap-1">
+          {(
+            [
+              ["", "Đang xử lý"],
+              ["refunded", "Đã hoàn"],
+              ["rejected", "Từ chối"],
+            ] as const
+          ).map(([value, label]) => (
+            <Button
+              key={value}
+              size="sm"
+              variant={status === value ? "default" : "outline"}
+              onClick={() => setStatus(value)}
+            >
+              {label}
+            </Button>
+          ))}
+        </div>
+      </div>
+      {returnsQuery.error && (
+        <p className="mt-2 text-sm text-destructive">Không thể tải yêu cầu trả hàng.</p>
+      )}
+      {returnsQuery.data && open.length === 0 && (
+        <p className="mt-2 text-sm text-muted-foreground">Không có yêu cầu nào.</p>
+      )}
+      <ul className="mt-2 flex flex-col gap-2">
+        {open.map((r) => (
+          <li key={r.id}>
+            <Card>
+              <CardContent className="flex flex-col gap-1 text-sm">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="font-medium">
+                    Đơn #{r.order_id.slice(0, 8)} · {r.quantity} sản phẩm ·{" "}
+                    {formatMoney(r.refund_amount)}
+                  </span>
+                  <span className="text-xs font-medium">{returnStatusLabel(r.status)}</span>
+                </div>
+                <p className="text-muted-foreground">Lý do: {r.reason}</p>
+                {r.evidence && <p className="text-muted-foreground">Bằng chứng: {r.evidence}</p>}
+                {r.decision_note && <p className="text-muted-foreground">Sàn: {r.decision_note}</p>}
+                <div className="mt-1 flex flex-wrap gap-2">
+                  {vendorCanConfirm(r) && (
+                    <Button
+                      size="sm"
+                      onClick={async () => {
+                        const note = window.prompt("Ghi chú cho sàn (không bắt buộc):") ?? "";
+                        await callWithAuth((token) => api.confirmReturnByVendor(token, r.id, note));
+                        await refresh();
+                      }}
+                    >
+                      Xác nhận yêu cầu
+                    </Button>
+                  )}
+                  {canReceive(r) && (
+                    <ReceiveReturnDialog
+                      labels={{
+                        trigger: "Đã nhận hàng trả",
+                        title: "Xác nhận đã nhận hàng trả?",
+                        description:
+                          "Việc này bắt đầu hoàn tiền cho người mua. Chỉ nhập lại kho hàng còn bán được.",
+                        restock: "Nhập lại kho",
+                        note: "Ghi chú kiểm tra hàng",
+                        cancel: "Đóng",
+                        confirm: "Xác nhận",
+                      }}
+                      onConfirm={async (input) => {
+                        await callWithAuth((token) =>
+                          api.receiveReturn(token, "vendor", r.id, input),
+                        );
+                        await refresh();
+                      }}
+                    />
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }

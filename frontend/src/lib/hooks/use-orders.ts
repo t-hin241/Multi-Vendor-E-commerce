@@ -54,12 +54,18 @@ export function useCancelOrder(orderId: string) {
 
 export function useCreateReturnRequest(orderId: string) {
   const { callWithAuth } = useAuth();
+  const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: (vars: { orderItemId: string; reason: string }) =>
-      callWithAuth((token) =>
-        api.createReturnRequest(token, orderId, vars.orderItemId, vars.reason),
-      ),
-    onSuccess: () => toast.success("Đã gửi yêu cầu trả hàng. Admin sẽ xem xét."),
+    mutationFn: (vars: {
+      orderItemId: string;
+      quantity: number;
+      reason: string;
+      evidence?: string;
+    }) => callWithAuth((token) => api.createReturnRequest(token, orderId, vars)),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.order(orderId) });
+      toast.success("Đã gửi yêu cầu trả hàng. Người bán sẽ xác nhận trước khi sàn duyệt.");
+    },
     onError: (err) => toast.error(describeApiError(err, "Không thể gửi yêu cầu trả hàng.")),
   });
 }

@@ -8,9 +8,9 @@ import {
   CartLineStatus,
   CartReadiness,
   CartSubtotal,
-  ShippingFeeNote,
   linePrice,
 } from "@/components/cart/cart-notices";
+import { CheckoutQuote } from "@/components/cart/checkout-quote";
 import { PageShell } from "@/components/page-shell";
 import { EmptyState, ErrorState, LoadingState } from "@/components/states/query-state";
 import { Button } from "@/components/ui/button";
@@ -27,7 +27,10 @@ import { Separator } from "@/components/ui/separator";
 import { useAuth } from "@/lib/auth-context";
 import { useAddresses } from "@/lib/hooks/use-addresses";
 import { useCart, useConfirmCartPrices } from "@/lib/hooks/use-cart";
-import { useCheckout } from "@/lib/hooks/use-checkout";
+import { describeApiError } from "@/lib/errors";
+import { formatMoney } from "@/lib/format";
+import { useCheckout, useCheckoutPreview } from "@/lib/hooks/use-checkout";
+import { canPlaceOrder } from "@/lib/order-workflow";
 
 export default function CheckoutPage() {
   const { user, isReady } = useAuth();
@@ -39,6 +42,16 @@ export default function CheckoutPage() {
   const checkout = useCheckout();
   const [selectedAddressId, setSelectedAddressId] = useState("");
   const [paymentMethod, setPaymentMethod] = useState("online");
+  const addresses = addressesQuery.data ?? [];
+  const addressId =
+    selectedAddressId ||
+    (addresses.find((address) => address.is_default)?.id ?? addresses[0]?.id ?? "");
+  const cartVersion = cart.data?.version ?? 0;
+  const preview = useCheckoutPreview(
+    addressId,
+    cartVersion,
+    Boolean(enabled && cart.data?.checkout_ready && cart.data.items.length > 0),
+  );
 
   useEffect(() => {
     if (isReady && !enabled) router.replace("/login");
@@ -74,11 +87,10 @@ export default function CheckoutPage() {
   }
 
   const data = cart.data;
-  const addresses = addressesQuery.data ?? [];
-  const defaultAddressId =
-    addresses.find((address) => address.is_default)?.id ?? addresses[0]?.id ?? "";
-  const addressId = selectedAddressId || defaultAddressId;
-  const blocked = !data.checkout_ready || cart.isFetching || confirmPrices.isPending;
+  const quote = preview.data;
+  const placeable = canPlaceOrder(quote, data.version);
+  const blocked =
+    !data.checkout_ready || cart.isFetching || confirmPrices.isPending || preview.isFetching;
 
   return (
     <PageShell maxWidth="lg">
@@ -174,13 +186,45 @@ export default function CheckoutPage() {
               </div>
             ))}
             <Separator />
-            <CartSubtotal cart={data} />
-            <ShippingFeeNote />
+            {quote && quote.cart_version === data.version ? (
+              <CheckoutQuote preview={quote} />
+            ) : (
+              <CartSubtotal cart={data} />
+            )}
+            {preview.isFetching && (
+              <p className="text-xs text-muted-foreground">Đang tính phí vận chuyển…</p>
+            )}
+            {preview.error && (
+              <div className="text-sm text-destructive">
+                <p>{describeApiError(preview.error, "Chưa tính được phí vận chuyển.")}</p>
+                <Button
+                  variant="link"
+                  size="sm"
+                  className="h-auto p-0"
+                  onClick={() => preview.refetch()}
+                >
+                  Thử lại
+                </Button>
+              </div>
+            )}
             <Button
               className="w-full"
               size="lg"
-              disabled={!addressId || checkout.isPending || paymentMethod !== "online" || blocked}
-              onClick={() => checkout.mutate({ addressId, cartVersion: data.version })}
+              disabled={
+                !addressId ||
+                checkout.isPending ||
+                paymentMethod !== "online" ||
+                blocked ||
+                !placeable
+              }
+              onClick={() => {
+                if (!canPlaceOrder(quote, data.version)) return;
+                checkout.mutate({
+                  addressId,
+                  cartVersion: quote.cart_version,
+                  expectedTotalAmount: quote.total_amount,
+                });
+              }}
             >
               {!addressId
                 ? "Cần địa chỉ giao hàng"
@@ -188,7 +232,11 @@ export default function CheckoutPage() {
                   ? "Cần xử lý giỏ hàng"
                   : checkout.isPending
                     ? "Đang tạo đơn…"
-                    : "Đặt hàng và thanh toán"}
+                    : quote && !quote.ready
+                      ? "Chưa giao được đến địa chỉ này"
+                      : placeable
+                        ? `Đặt hàng · ${formatMoney(quote.total_amount, quote.currency)}`
+                        : "Đang báo giá…"}
             </Button>
           </CardContent>
         </Card>

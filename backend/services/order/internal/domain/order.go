@@ -98,7 +98,12 @@ type Order struct {
 	ID                 string
 	BuyerID            string
 	Status             Status
+	Version            int64
+	CheckoutState      CheckoutState
+	SubtotalAmount     int64
+	ShippingAmount     int64
 	TotalAmount        int64
+	RefundedAmount     int64
 	Currency           string
 	CancellationReason *string
 	RecipientName      string
@@ -107,8 +112,28 @@ type Order struct {
 	District           string
 	Ward               string
 	StreetAddress      string
+	PaidAt             *time.Time
 	CreatedAt          time.Time
 	UpdatedAt          time.Time
+}
+
+// CheckoutState tracks whether an order finished being prepared at
+// checkout. Payment may only open an intent for a ready order.
+type CheckoutState string
+
+const (
+	CheckoutPreparing CheckoutState = "preparing"
+	CheckoutReady     CheckoutState = "ready"
+	CheckoutFailed    CheckoutState = "failed"
+)
+
+// PaidOrFurther reports whether the order has a confirmed payment behind it.
+func (s Status) PaidOrFurther() bool {
+	switch s {
+	case StatusPaid, StatusProcessing, StatusShipped, StatusCompleted, StatusRefunded:
+		return true
+	}
+	return false
 }
 
 // CommissionRateBps/CommissionAmount/NetAmount are nil until the vendor
@@ -122,14 +147,31 @@ type VendorOrder struct {
 	OrderID           string
 	VendorID          string
 	Status            Status
+	Version           int64
 	SubtotalAmount    int64
 	ShippingFeeAmount int64
+	RefundedAmount    int64
 	Currency          string
+	Shipping          *ShippingQuote
+	Commission        *CommissionSnapshot
 	CommissionRateBps *int
 	CommissionAmount  *int64
 	NetAmount         *int64
+	CompletedAt       *time.Time
 	CreatedAt         time.Time
 	UpdatedAt         time.Time
+}
+
+// Total is what the buyer paid for this vendor's part of the order.
+func (vo *VendorOrder) Total() int64 { return vo.SubtotalAmount + vo.ShippingFeeAmount }
+
+// Refundable is what can still be refunded for this vendor order.
+func (vo *VendorOrder) Refundable() int64 { return max(vo.Total()-vo.RefundedAmount, 0) }
+
+// Fulfillable reports whether the vendor may prepare and ship: only after a
+// verified capture, which is also when Inventory committed the stock.
+func (vo *VendorOrder) Fulfillable() bool {
+	return vo.Status == StatusPaid || vo.Status == StatusProcessing
 }
 
 // CommissionRule is one versioned commission percentage, expressed in basis
@@ -138,6 +180,7 @@ type VendorOrder struct {
 // a past vendor order's snapshot is never retroactively changed.
 type CommissionRule struct {
 	ID        string
+	Version   int64
 	RateBps   int
 	CreatedBy *string
 	CreatedAt time.Time
@@ -160,6 +203,8 @@ type VendorSummary struct {
 	TotalRevenue    int64
 	TotalCommission int64
 	TotalNet        int64
+	// TotalRefunded is refunds Payment confirmed; revenue is gross of it.
+	TotalRefunded int64
 }
 
 // TopProduct is one line of a vendor's best-sellers, computed from order
@@ -174,10 +219,55 @@ type TopProduct struct {
 // ComputeCommission splits a vendor order's subtotal into what the
 // marketplace keeps and what the vendor nets, using integer basis-point
 // math so no fractional currency unit is ever introduced by float rounding.
-func ComputeCommission(subtotalAmount int64, rateBps int) (commissionAmount, netAmount int64) {
-	commissionAmount = subtotalAmount * int64(rateBps) / maxCommissionRateBps
-	netAmount = subtotalAmount - commissionAmount
-	return commissionAmount, netAmount
+// The commission is rounded down (in the vendor's favor). ok is false when
+// the inputs are out of range or the product would overflow.
+func ComputeCommission(subtotalAmount int64, rateBps int) (commissionAmount, netAmount int64, ok bool) {
+	if subtotalAmount < 0 || rateBps < 0 || rateBps > maxCommissionRateBps {
+		return 0, 0, false
+	}
+	product, ok := MulAmount(subtotalAmount, int64(rateBps))
+	if !ok {
+		return 0, 0, false
+	}
+	commissionAmount = product / maxCommissionRateBps
+	return commissionAmount, subtotalAmount - commissionAmount, true
+}
+
+// CommissionRounding names how ComputeCommission rounds; it is stored with
+// every snapshot so a later rule change cannot reinterpret it.
+const CommissionRounding = "floor"
+
+// CommissionSnapshot is the commission split fixed when the order is
+// created, with the exact rule version used.
+type CommissionSnapshot struct {
+	RuleID      *string
+	RuleVersion *int64
+	RateBps     int
+	BaseAmount  int64
+	Amount      int64
+	NetAmount   int64
+	Rounding    string
+	Source      string
+}
+
+const (
+	CommissionSourceCheckout = "checkout"
+	CommissionSourceLegacy   = "payment_time_legacy"
+)
+
+// SnapshotCommission computes the commission for a vendor order's subtotal
+// (shipping is not commissioned) under rule.
+func SnapshotCommission(rule *CommissionRule, subtotalAmount int64) (*CommissionSnapshot, error) {
+	if rule == nil {
+		return nil, apperror.Internal(errMissingCommissionRule)
+	}
+	amount, net, ok := ComputeCommission(subtotalAmount, rule.RateBps)
+	if !ok {
+		return nil, apperror.Validation("Order amount is too large")
+	}
+	id, version := rule.ID, rule.Version
+	return &CommissionSnapshot{RuleID: &id, RuleVersion: &version, RateBps: rule.RateBps, BaseAmount: subtotalAmount,
+		Amount: amount, NetAmount: net, Rounding: CommissionRounding, Source: CommissionSourceCheckout}, nil
 }
 
 // OrderItem's PriceAmount and SubtotalAmount are a snapshot taken at

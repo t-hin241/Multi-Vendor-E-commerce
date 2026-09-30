@@ -10,6 +10,7 @@ import (
 	"shopee/backend/pkg/authjwt"
 	sessionconfig "shopee/backend/pkg/config"
 	"shopee/backend/pkg/health"
+	"shopee/backend/pkg/identityclient"
 	"shopee/backend/pkg/logger"
 	"shopee/backend/pkg/platform/natsclient"
 	"shopee/backend/pkg/platform/postgres"
@@ -21,6 +22,7 @@ import (
 	"shopee/backend/pkg/vendorsales"
 	"shopee/backend/services/order/internal/adapter"
 	"shopee/backend/services/order/internal/config"
+	"shopee/backend/services/order/internal/domain"
 	"shopee/backend/services/order/internal/repository"
 	"shopee/backend/services/order/internal/transport"
 	"shopee/backend/services/order/internal/usecase"
@@ -72,29 +74,41 @@ func main() {
 	catalogClient := adapter.NewHTTPCatalogClient(cfg.CatalogServiceURL, internalServices.Key)
 	vendorClient := adapter.NewHTTPVendorClient(cfg.VendorServiceURL, internalServices.Key)
 	inventoryClient := adapter.NewHTTPInventoryClient(cfg.InventoryServiceURL, internalServices.Key)
-	shipmentClient := adapter.NewHTTPShipmentClient(cfg.ShipmentServiceURL)
+	shipmentClient := adapter.NewHTTPShipmentClient(cfg.ShipmentServiceURL, internalServices.Key)
 	notificationClient := adapter.NewHTTPNotificationClient(cfg.NotificationServiceURL)
+	paymentClient := adapter.NewHTTPPaymentClient(cfg.PaymentServiceURL, internalServices.Key)
 
-	orderRepo := repository.NewOrderRepository(dbPool)
 	vendorOrderRepo := repository.NewVendorOrderRepository(dbPool)
-	buyerAddressRepo := repository.NewBuyerAddressRepository(dbPool)
-	commissionRuleRepo := repository.NewCommissionRuleRepository(dbPool)
-	returnRequestRepo := repository.NewReturnRequestRepository(dbPool)
-	cartConsumptionRepo := repository.NewCartConsumptionRepository(dbPool)
-
-	orderUseCase := usecase.NewOrderUseCase(
-		orderRepo, vendorOrderRepo, buyerAddressRepo, commissionRuleRepo, cartConsumptionRepo,
-		cartClient, catalogClient, vendorClient, inventoryClient, shipmentClient, notificationClient, log,
-	)
-	consumeCtx, stopConsume := context.WithCancel(ctx)
-	defer stopConsume()
-	go usecase.CartConsumptionWorker{UseCase: orderUseCase}.Run(consumeCtx)
+	orderUseCase := usecase.NewOrderUseCase(usecase.Deps{
+		Orders:          repository.NewOrderRepository(dbPool),
+		VendorOrders:    vendorOrderRepo,
+		BuyerAddresses:  repository.NewBuyerAddressRepository(dbPool),
+		CommissionRules: repository.NewCommissionRuleRepository(dbPool),
+		CartConsumption: repository.NewCartConsumptionRepository(dbPool),
+		CheckoutOps:     repository.NewCheckoutOperationRepository(dbPool),
+		Payments:        repository.NewPaymentRecordRepository(dbPool),
+		Effects:         repository.NewEffectRepository(dbPool),
+		Refunds:         repository.NewRefundRepository(dbPool),
+		Returns:         repository.NewReturnRequestRepository(dbPool),
+		Cart:            cartClient,
+		Catalog:         catalogClient,
+		Vendors:         vendorClient,
+		Inventory:       inventoryClient,
+		Shipments:       shipmentClient,
+		Notifications:   notificationClient,
+		Payment:         paymentClient,
+		Identity:        identityclient.Client{URL: internalServices.IdentityURL, Key: internalServices.Key},
+		ReturnPolicy:    domain.ReturnPolicy{Version: cfg.ReturnPolicyVersion(), WindowDays: cfg.ReturnWindowDays},
+		Log:             log,
+	})
+	workerCtx, stopWorker := context.WithCancel(ctx)
+	defer stopWorker()
+	go usecase.OrderWorker{UseCase: orderUseCase}.Run(workerCtx)
 	orderHandler := transport.NewOrderHandler(orderUseCase, log)
 	addressHandler := transport.NewBuyerAddressHandler(orderUseCase, log)
 	adminHandler := transport.NewAdminHandler(orderUseCase, log)
 	internalHandler := transport.NewInternalHandler(orderUseCase, log)
-	returnHandler := transport.NewReturnHandler(usecase.NewReturnUseCase(returnRequestRepo, vendorClient), log)
-
+	returnHandler := transport.NewReturnHandler(orderUseCase, log)
 	router := transport.NewRouter(cfg.Base.Env, log, jwtManager, orderHandler, addressHandler, adminHandler, internalHandler, returnHandler,
 		internalServices.Key,
 		health.Checker{Name: "postgres", Ping: func(ctx context.Context) error { return dbPool.Ping(ctx) }},

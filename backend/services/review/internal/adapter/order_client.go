@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"shopee/backend/pkg/apperror"
+	"shopee/backend/pkg/serviceauth"
 )
 
 type EligibleOrderItem struct {
@@ -20,11 +21,12 @@ type OrderGateway interface {
 }
 type HTTPOrderClient struct {
 	baseURL string
+	key     string
 	client  *http.Client
 }
 
-func NewHTTPOrderClient(baseURL string) *HTTPOrderClient {
-	return &HTTPOrderClient{baseURL: baseURL, client: &http.Client{Timeout: 5 * time.Second}}
+func NewHTTPOrderClient(baseURL, key string) *HTTPOrderClient {
+	return &HTTPOrderClient{baseURL: baseURL, key: key, client: &http.Client{Timeout: 5 * time.Second}}
 }
 func (c *HTTPOrderClient) ListEligible(ctx context.Context, buyerID, productID string) ([]EligibleOrderItem, error) {
 	v := url.Values{"buyer_id": {buyerID}}
@@ -35,6 +37,7 @@ func (c *HTTPOrderClient) ListEligible(ctx context.Context, buyerID, productID s
 	if err != nil {
 		return nil, apperror.Internal(err)
 	}
+	serviceauth.SetRequestHeaders(req, c.key)
 	resp, err := c.client.Do(req)
 	if err != nil {
 		return nil, apperror.Internal(err)

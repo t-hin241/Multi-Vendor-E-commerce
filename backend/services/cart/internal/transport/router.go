@@ -47,6 +47,7 @@ func NewRouter(env string, log zerolog.Logger, jwtManager *authjwt.Manager, cart
 
 	internalGroup := r.Group("/internal/carts", serviceauth.Require(internalKey, serviceauth.Header))
 	{
+		internalGroup.GET("/:buyerId/lines", internalHandler.Lines)
 		internalGroup.POST("/:buyerId/checkout-snapshots", internalHandler.CreateSnapshot)
 		internalGroup.POST("/:buyerId/checkout-snapshots/:operationId/consume", internalHandler.Consume)
 	}

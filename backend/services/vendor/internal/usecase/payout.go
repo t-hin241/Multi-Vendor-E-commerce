@@ -17,6 +17,7 @@ type PayoutRepository interface {
 	NextVersion(context.Context, string) (int64, error)
 	Create(context.Context, *domain.PayoutAccount) error
 	Find(context.Context, string, string, int64) (*domain.PayoutAccount, error)
+	FindDefaultVerified(context.Context, string) (*domain.PayoutAccount, error)
 	List(context.Context, string, int, int) ([]*domain.PayoutAccount, error)
 	Decide(context.Context, *domain.PayoutAccount, string, string, string) error
 	AuditRead(context.Context, string, string, string, string) error
@@ -134,6 +135,28 @@ func (u *PayoutUseCase) Decide(ctx context.Context, actor, vendor, id string, ve
 }
 
 // Details releases plaintext only after recording the authorized access.
+// PayoutDestination is a verified payout account without its number or
+// holder name: what Payment needs to reference it in a payout.
+type PayoutDestination struct {
+	AccountID string `json:"account_id"`
+	Version   int64  `json:"version"`
+	BankBIN   string `json:"bank_bin"`
+	Last4     string `json:"last4"`
+}
+
+// DefaultDestination returns a vendor's verified default payout account,
+// masked, for Payment's payout batches (service-to-service only).
+func (u *PayoutUseCase) DefaultDestination(ctx context.Context, vendor string) (*PayoutDestination, error) {
+	a, err := u.Accounts.FindDefaultVerified(ctx, vendor)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, apperror.NotFound("No verified payout destination")
+	}
+	if err != nil {
+		return nil, apperror.Internal(err)
+	}
+	return &PayoutDestination{AccountID: a.ID, Version: a.Version, BankBIN: a.BankBIN, Last4: a.Last4}, nil
+}
+
 func (u *PayoutUseCase) Details(ctx context.Context, actor, vendor, id string, version int64, purpose string, payment bool) (out *domain.PayoutDetails, err error) {
 	if !payment {
 		if err = u.Ops.Actors.RequireRole(ctx, actor, "admin"); err != nil {

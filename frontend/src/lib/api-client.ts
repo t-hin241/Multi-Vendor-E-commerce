@@ -22,6 +22,7 @@ type RequestOptions = {
   json?: unknown;
   form?: FormData;
   query?: Record<string, string | number | undefined>;
+  headers?: Record<string, string>;
 };
 
 function buildQuery(query?: Record<string, string | number | undefined>): string {
@@ -37,7 +38,7 @@ function buildQuery(query?: Record<string, string | number | undefined>): string
 export async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
   const { method = "GET", token, json, form, query } = options;
 
-  const headers: Record<string, string> = {};
+  const headers: Record<string, string> = { ...options.headers };
   if (token) headers.Authorization = `Bearer ${token}`;
   if (json !== undefined) headers["Content-Type"] = "application/json";
   if (method !== "GET" && method !== "HEAD") headers["X-CSRF-Protection"] = "1";
@@ -1006,6 +1007,7 @@ export type OrderStatus =
 
 export type OrderItem = {
   id: string;
+  vendor_order_id?: string;
   product_id: string;
   product_name: string;
   variant_id?: string;
@@ -1016,53 +1018,161 @@ export type OrderItem = {
   subtotal_amount: number;
 };
 
+// Return lifecycle: buyer requests, vendor confirms, admin approves or
+// rejects, the goods are received and inspected, then Payment refunds.
+// "approved" means the goods may be sent back, not that money was returned.
+export type ReturnStatus =
+  | "requested"
+  | "vendor_confirmed"
+  | "rejected"
+  | "approved"
+  | "received"
+  | "refund_pending"
+  | "refunded"
+  | "refund_failed";
+
 export type ReturnRequest = {
   id: string;
   order_id: string;
   order_item_id: string;
   reason: string;
-  status:
-    | "requested"
-    | "vendor_confirmed"
-    | "rejected"
-    | "approved_awaiting_provider_refund"
-    | "refunded";
+  status: ReturnStatus;
+  quantity: number;
+  refund_amount: number;
+  policy_version: string;
+  return_window_days?: number;
+  evidence?: string;
+  vendor_note?: string;
   decision_note?: string;
   decided_at?: string;
+  received_at?: string;
+  inspection_note?: string;
+  restock?: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
+export type ReturnEvent = {
+  action: string;
+  actor_role: string;
+  from_status?: string;
+  to_status: string;
+  note?: string;
   created_at: string;
 };
 
 export function createReturnRequest(
   token: string,
   orderId: string,
-  orderItemId: string,
-  reason: string,
+  input: { orderItemId: string; quantity: number; reason: string; evidence?: string },
 ): Promise<ReturnRequest> {
   return request<ReturnRequest>(`/api/orders/${orderId}/return-requests`, {
     method: "POST",
     token,
-    json: { order_item_id: orderItemId, reason },
+    json: {
+      order_item_id: input.orderItemId,
+      quantity: input.quantity,
+      reason: input.reason,
+      evidence: input.evidence || undefined,
+    },
   });
 }
+
+export function listMyReturns(token: string): Promise<ReturnRequest[]> {
+  return request<ReturnRequest[]>("/api/orders/return-requests/mine", { token });
+}
+
+export type ShippingSnapshot = {
+  fee_amount: number;
+  fee_rule_id: string;
+  fee_rule_version: number;
+  package_weight_grams: number;
+  quoted_at?: string;
+};
+
+// Commission frozen at checkout (source "checkout") or, for orders placed
+// before snapshots existed, computed at payment time ("payment_time_legacy").
+export type CommissionSnapshot = {
+  rule_id?: string;
+  rule_version?: number;
+  rate_bps: number;
+  base_amount: number;
+  amount: number;
+  net_amount: number;
+  rounding?: string;
+  source?: string;
+};
 
 export type VendorOrder = {
   id: string;
   order_id: string;
+  vendor_id?: string;
   status: OrderStatus;
   subtotal_amount: number;
   shipping_fee_amount: number;
+  refunded_amount?: number;
   currency: string;
+  shipping?: ShippingSnapshot;
+  commission?: CommissionSnapshot;
   commission_rate_bps?: number;
   commission_amount?: number;
   net_amount?: number;
+  fulfillable?: boolean;
+  completed_at?: string;
   items?: OrderItem[];
+  created_at: string;
+};
+
+export type OrderRefundStatus = "requested" | "submitted" | "succeeded" | "failed" | "rejected";
+
+export type OrderRefund = {
+  id: string;
+  order_id: string;
+  vendor_order_id?: string;
+  return_request_id?: string;
+  payment_id?: string;
+  reason_code: "return" | "dispute" | "late_payment" | "duplicate_payment";
+  amount: number;
+  currency: string;
+  reason: string;
+  status: OrderRefundStatus;
+  failure_reason?: string;
+  created_at: string;
+  resolved_at?: string;
+};
+
+// A capture Payment reported for the order. "rejected" captures (late,
+// duplicate, wrong amount) did not pay the order and need a refund.
+export type OrderPayment = {
+  payment_id: string;
+  order_id: string;
+  amount: number;
+  currency: string;
+  outcome: "applied" | "rejected";
+  rejection_reason?: string;
+  received_at: string;
+};
+
+export type OrderEffect = {
+  id: string;
+  order_id: string;
+  kind: string;
+  target?: string;
+  status: string;
+  attempts: number;
+  next_attempt_at: string;
+  last_error?: string;
   created_at: string;
 };
 
 export type Order = {
   id: string;
   status: OrderStatus;
+  checkout_state?: "preparing" | "ready" | "failed";
+  subtotal_amount?: number;
+  shipping_amount?: number;
   total_amount: number;
+  refunded_amount?: number;
   currency: string;
   cancellation_reason?: string;
   recipient_name: string;
@@ -1071,19 +1181,67 @@ export type Order = {
   district: string;
   ward: string;
   street_address: string;
+  paid_at?: string;
   items?: OrderItem[];
   vendor_orders?: VendorOrder[];
+  refunds?: OrderRefund[];
+  returns?: ReturnRequest[];
+  payments?: OrderPayment[];
+  effects?: OrderEffect[];
   created_at: string;
   updated_at: string;
 };
 
-// cartVersion is the cart version the buyer reviewed; the order is refused
-// with 409 cart_changed if the cart changed since.
-export function checkout(token: string, addressId: string, cartVersion?: number): Promise<Order> {
+export type CheckoutPreviewVendor = {
+  vendor_id: string;
+  subtotal_amount: number;
+  // null when Shipment cannot quote this shop for the address.
+  shipping_fee_amount: number | null;
+  shipping_error?: string;
+  item_count: number;
+};
+
+export type CheckoutPreview = {
+  cart_version: number;
+  currency: string;
+  subtotal_amount: number;
+  shipping_amount: number | null;
+  total_amount: number | null;
+  ready: boolean;
+  vendors: CheckoutPreviewVendor[];
+};
+
+// previewCheckout prices the cart for an address with a shipping quote per
+// shop. The buyer confirms total_amount; checkout is refused if it moved.
+export function previewCheckout(token: string, addressId: string): Promise<CheckoutPreview> {
+  return request<CheckoutPreview>("/api/orders/checkout/preview", {
+    method: "POST",
+    token,
+    json: { address_id: addressId },
+  });
+}
+
+export type CheckoutInput = {
+  addressId: string;
+  // The cart version the buyer reviewed; 409 cart_changed if it moved.
+  cartVersion?: number;
+  // The total the buyer confirmed; 409 checkout_total_changed if it moved.
+  expectedTotalAmount?: number;
+  // Same key for every retry of one attempt: a retry returns the same
+  // order instead of creating a second one.
+  idempotencyKey: string;
+};
+
+export function checkout(token: string, input: CheckoutInput): Promise<Order> {
   return request<Order>("/api/orders/checkout", {
     method: "POST",
     token,
-    json: { address_id: addressId, cart_version: cartVersion },
+    headers: { "Idempotency-Key": input.idempotencyKey },
+    json: {
+      address_id: input.addressId,
+      cart_version: input.cartVersion,
+      expected_total_amount: input.expectedTotalAmount,
+    },
   });
 }
 
@@ -1161,7 +1319,7 @@ export function cancelOrder(token: string, orderId: string): Promise<Order> {
 export function listVendorOrders(
   token: string,
   vendorId: string,
-  params: { limit?: number; offset?: number } = {},
+  params: { status?: string; limit?: number; offset?: number } = {},
 ): Promise<VendorOrder[]> {
   return request<VendorOrder[]>("/api/orders/vendor/mine", {
     token,
@@ -1171,21 +1329,150 @@ export function listVendorOrders(
 
 export function listAdminOrders(
   token: string,
-  params: { status?: string; limit?: number; offset?: number } = {},
+  params: {
+    status?: string;
+    buyer_id?: string;
+    from?: string;
+    to?: string;
+    limit?: number;
+    offset?: number;
+  } = {},
 ): Promise<Order[]> {
   return request<Order[]>("/api/orders/admin", { token, query: params });
 }
 
-export function adminTransitionOrder(
-  token: string,
-  orderId: string,
-  status: "cancelled" | "refunded",
-  reason: string,
-): Promise<Order> {
+export function getAdminOrder(token: string, orderId: string): Promise<Order> {
+  return request<Order>(`/api/orders/admin/${orderId}`, { token });
+}
+
+// Admin can only cancel an unpaid order here. Money goes back through
+// requestOrderRefund, never by relabelling an order "refunded".
+export function adminCancelOrder(token: string, orderId: string, reason: string): Promise<Order> {
   return request<Order>(`/api/orders/admin/${orderId}/transition`, {
     method: "POST",
     token,
-    json: { status, reason },
+    json: { status: "cancelled", reason },
+  });
+}
+
+export type OrderRefundInput = {
+  reason_code: "dispute" | "late_payment" | "duplicate_payment";
+  amount: number;
+  reason: string;
+  vendor_order_id?: string;
+  payment_id?: string;
+};
+
+export function requestOrderRefund(
+  token: string,
+  orderId: string,
+  input: OrderRefundInput,
+): Promise<OrderRefund> {
+  return request<OrderRefund>(`/api/orders/admin/${orderId}/refunds`, {
+    method: "POST",
+    token,
+    json: input,
+  });
+}
+
+export function listOrderRefunds(
+  token: string,
+  params: { status?: string; limit?: number; offset?: number } = {},
+): Promise<OrderRefund[]> {
+  return request<OrderRefund[]>("/api/orders/admin/refunds", { token, query: params });
+}
+
+export function listPaymentExceptions(
+  token: string,
+  params: { limit?: number; offset?: number } = {},
+): Promise<OrderPayment[]> {
+  return request<OrderPayment[]>("/api/orders/admin/payment-exceptions", { token, query: params });
+}
+
+export type OrderOperations = {
+  pending: number;
+  parked: number;
+  oldest_pending?: string;
+  parked_effects: OrderEffect[];
+};
+
+export function getOrderOperations(token: string): Promise<OrderOperations> {
+  return request<OrderOperations>("/api/orders/admin/operations", { token });
+}
+
+export function replayOrderEffect(token: string, effectId: string): Promise<{ replayed: boolean }> {
+  return request(`/api/orders/admin/operations/effects/${effectId}/replay`, {
+    method: "POST",
+    token,
+  });
+}
+
+export function listAdminReturns(
+  token: string,
+  params: { status?: string; limit?: number; offset?: number } = {},
+): Promise<ReturnRequest[]> {
+  return request<ReturnRequest[]>("/api/orders/admin/return-requests", { token, query: params });
+}
+
+export function decideReturn(
+  token: string,
+  returnId: string,
+  approve: boolean,
+  note: string,
+): Promise<ReturnRequest> {
+  return request<ReturnRequest>(`/api/orders/admin/return-requests/${returnId}/decision`, {
+    method: "POST",
+    token,
+    json: { approve, note },
+  });
+}
+
+export function retryReturnRefund(token: string, returnId: string): Promise<ReturnRequest> {
+  return request<ReturnRequest>(`/api/orders/admin/return-requests/${returnId}/retry-refund`, {
+    method: "POST",
+    token,
+  });
+}
+
+export function getReturnHistory(token: string, returnId: string): Promise<ReturnEvent[]> {
+  return request<ReturnEvent[]>(`/api/orders/admin/return-requests/${returnId}/history`, { token });
+}
+
+export function listVendorReturns(
+  token: string,
+  vendorId: string,
+  params: { status?: string; limit?: number; offset?: number } = {},
+): Promise<ReturnRequest[]> {
+  return request<ReturnRequest[]>("/api/orders/vendor/return-requests", {
+    token,
+    query: { vendor_id: vendorId, ...params },
+  });
+}
+
+export function confirmReturnByVendor(
+  token: string,
+  returnId: string,
+  note: string,
+): Promise<ReturnRequest> {
+  return request<ReturnRequest>(`/api/orders/vendor/return-requests/${returnId}/confirm`, {
+    method: "POST",
+    token,
+    json: { note },
+  });
+}
+
+// receiveReturn records that the goods came back and were inspected; it
+// starts the refund. The vendor or an admin may do it.
+export function receiveReturn(
+  token: string,
+  as: "vendor" | "admin",
+  returnId: string,
+  input: { restock: boolean; note: string },
+): Promise<ReturnRequest> {
+  return request<ReturnRequest>(`/api/orders/${as}/return-requests/${returnId}/receive`, {
+    method: "POST",
+    token,
+    json: input,
   });
 }
 
@@ -1215,6 +1502,7 @@ export type VendorSummary = {
   total_revenue: number;
   total_commission: number;
   total_net: number;
+  total_refunded?: number;
   top_products: TopProduct[];
 };
 
@@ -1244,6 +1532,7 @@ export async function exportVendorOrdersCSV(token: string, vendorId: string): Pr
 
 export type CommissionRule = {
   id: string;
+  version?: number;
   rate_bps: number;
   created_by?: string;
   created_at: string;
@@ -1263,7 +1552,10 @@ export function setCommissionRule(token: string, rateBps: number): Promise<Commi
 
 // ---------- Payments ----------
 
-export type PaymentStatus = "pending" | "authorized" | "captured" | "failed" | "refunded";
+// creating: the provider link is being made; expired: the link closed
+// without a payment (a late payment is still recorded as captured).
+export type PaymentStatus =
+  "creating" | "pending" | "authorized" | "captured" | "failed" | "refunded" | "expired";
 
 export type PaymentIntent = {
   id: string;
@@ -1307,6 +1599,251 @@ export function simulatePaymentOutcome(
     method: "POST",
     token,
     json: { outcome, failure_reason: failureReason },
+  });
+}
+
+// Refunds Order requested. Payment accepts them against the capture;
+// money counts as returned only once an operator records the provider or
+// bank reference.
+export type PaymentRefundStatus = "awaiting_provider_refund" | "pending" | "succeeded" | "failed";
+
+export type PaymentRefund = {
+  id: string;
+  payment_intent_id: string;
+  order_id: string;
+  order_refund_id?: string;
+  amount: number;
+  currency: string;
+  reason: string;
+  status: PaymentRefundStatus;
+  requested_by: string;
+  evidence_reference?: string;
+  note?: string;
+  failure_reason?: string;
+  resolved_by?: string;
+  resolved_at?: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export function listPaymentRefunds(
+  token: string,
+  params: { status?: string; limit?: number; offset?: number } = {},
+): Promise<PaymentRefund[]> {
+  return request<PaymentRefund[]>("/api/payments/admin/refunds", { token, query: params });
+}
+
+export function resolvePaymentRefund(
+  token: string,
+  refundId: string,
+  input: { outcome: "succeeded" | "failed"; evidence_reference?: string; note?: string },
+): Promise<PaymentRefund> {
+  return request<PaymentRefund>(`/api/payments/admin/refunds/${refundId}/resolve`, {
+    method: "POST",
+    token,
+    json: input,
+  });
+}
+
+// ---------- Payment reconciliation (admin) ----------
+
+export type PaymentReceipt = {
+  id: string;
+  provider: string;
+  provider_event_id: string;
+  provider_intent_id?: string;
+  provider_reference?: string;
+  payment_intent_id?: string;
+  event_type: string;
+  amount: number;
+  currency: string;
+  // received | processed | retryable | rejected | parked
+  status: string;
+  outcome?: string;
+  attempts: number;
+  last_error?: string;
+  received_at: string;
+  processed_at?: string;
+};
+
+export type AdminPaymentIntent = PaymentIntent & {
+  buyer_id: string;
+  provider_reference?: string;
+  create_attempts: number;
+  last_error?: string;
+  closed_reason?: string;
+};
+
+export type OutboxProblem = {
+  payment_intent_id?: string;
+  payment_refund_id?: string;
+  order_id: string;
+  outcome?: string;
+  status?: string;
+  attempts: number;
+  requires_review: boolean;
+  last_error?: string;
+  created_at: string;
+};
+
+export type ReconciliationOverview = {
+  counts: Record<string, number>;
+  parked_receipts: PaymentReceipt[];
+  rejected_receipts: PaymentReceipt[];
+  retryable_receipts: PaymentReceipt[];
+  order_sync: OutboxProblem[];
+  refund_sync: OutboxProblem[];
+  generated_at: string;
+};
+
+export function getPaymentReconciliation(token: string): Promise<ReconciliationOverview> {
+  return request<ReconciliationOverview>("/api/payments/admin/reconciliation", { token });
+}
+
+export type PaymentSearchResult = {
+  intents: AdminPaymentIntent[];
+  receipts: PaymentReceipt[];
+  refunds: PaymentRefund[];
+};
+
+// searchPayments looks up an order id, payment id, provider link id,
+// provider reference or provider event id.
+export function searchPayments(token: string, q: string): Promise<PaymentSearchResult> {
+  return request<PaymentSearchResult>("/api/payments/admin/search", { token, query: { q } });
+}
+
+function adminRetry(token: string, path: string, reason: string) {
+  return request<unknown>(path, { method: "POST", token, json: { reason } });
+}
+
+export function retryPaymentReceipt(token: string, receiptId: string, reason: string) {
+  return adminRetry(token, `/api/payments/admin/receipts/${receiptId}/retry`, reason);
+}
+
+export function reconcilePaymentIntent(token: string, intentId: string, reason: string) {
+  return adminRetry(token, `/api/payments/admin/intents/${intentId}/reconcile`, reason);
+}
+
+export function retryOrderSync(token: string, intentId: string, reason: string) {
+  return adminRetry(token, `/api/payments/admin/order-sync/${intentId}/retry`, reason);
+}
+
+export function retryRefundSync(token: string, refundId: string, reason: string) {
+  return adminRetry(token, `/api/payments/admin/refund-sync/${refundId}/retry`, reason);
+}
+
+// ---------- Vendor settlement and payouts (admin) ----------
+
+export type VendorBalance = {
+  vendor_id: string;
+  currency: string;
+  // Everything still owed to the vendor.
+  owed: number;
+  // Unpaid and past the return window, before Order's return/refund holds.
+  eligible: number;
+  in_payout: number;
+  sales: number;
+  commission: number;
+  refunded: number;
+  paid_out: number;
+};
+
+export type SettlementEntry = {
+  id: string;
+  vendor_id: string;
+  vendor_order_id?: string;
+  entry_type:
+    "sale" | "shipping" | "commission" | "refund" | "commission_reversal" | "payout" | "adjustment";
+  amount: number;
+  currency: string;
+  eligible_at: string;
+  note?: string;
+  created_at: string;
+};
+
+export type PayoutItem = {
+  id: string;
+  batch_id: string;
+  vendor_id: string;
+  amount: number;
+  currency: string;
+  destination_account_id: string;
+  destination_version: number;
+  destination_mask: string;
+  status: "pending" | "succeeded" | "failed";
+  evidence_reference?: string;
+  note?: string;
+  failure_reason?: string;
+  resolved_at?: string;
+  created_at: string;
+};
+
+export type PayoutBatch = {
+  id: string;
+  idempotency_key: string;
+  currency: string;
+  // pending: items still open; completed: every item resolved.
+  status: string;
+  created_by: string;
+  created_at: string;
+  items?: PayoutItem[];
+};
+
+export function listSettlementBalances(token: string, currency = "VND"): Promise<VendorBalance[]> {
+  return request<VendorBalance[]>("/api/payments/admin/settlements/balances", {
+    token,
+    query: { currency, limit: 200 },
+  });
+}
+
+export function listSettlementEntries(
+  token: string,
+  vendorId: string,
+  currency = "VND",
+): Promise<SettlementEntry[]> {
+  return request<SettlementEntry[]>(`/api/payments/admin/settlements/vendors/${vendorId}/entries`, {
+    token,
+    query: { currency, limit: 100 },
+  });
+}
+
+export function createSettlementAdjustment(
+  token: string,
+  input: { vendor_id: string; amount: number; currency: string; reason: string },
+): Promise<SettlementEntry> {
+  return request<SettlementEntry>("/api/payments/admin/settlements/adjustments", {
+    method: "POST",
+    token,
+    json: input,
+  });
+}
+
+export function listPayoutBatches(token: string): Promise<PayoutBatch[]> {
+  return request<PayoutBatch[]>("/api/payments/admin/payouts/batches", { token });
+}
+
+export function getPayoutBatch(token: string, batchId: string): Promise<PayoutBatch> {
+  return request<PayoutBatch>(`/api/payments/admin/payouts/batches/${batchId}`, { token });
+}
+
+// createPayoutBatch is idempotent by key: send the same key again after a
+// timeout and the same batch comes back instead of a second one.
+export function createPayoutBatch(
+  token: string,
+  input: { idempotency_key: string; currency: string; vendor_ids?: string[] },
+): Promise<{ batch: PayoutBatch; skipped: { vendor_id: string; reason: string }[] }> {
+  return request("/api/payments/admin/payouts/batches", { method: "POST", token, json: input });
+}
+
+export function resolvePayoutItem(
+  token: string,
+  itemId: string,
+  input: { outcome: "succeeded" | "failed"; evidence_reference?: string; note?: string },
+): Promise<PayoutItem> {
+  return request<PayoutItem>(`/api/payments/admin/payouts/items/${itemId}/resolve`, {
+    method: "POST",
+    token,
+    json: input,
   });
 }
 

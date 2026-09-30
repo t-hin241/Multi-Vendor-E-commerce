@@ -8,6 +8,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"shopee/backend/pkg/serviceauth"
 )
 
 // OrderGateway lets the storefront listing resolve units-sold for a batch
@@ -18,11 +20,12 @@ type OrderGateway interface {
 
 type HTTPOrderClient struct {
 	baseURL string
+	key     string
 	client  *http.Client
 }
 
-func NewHTTPOrderClient(baseURL string) *HTTPOrderClient {
-	return &HTTPOrderClient{baseURL: baseURL, client: &http.Client{Timeout: 5 * time.Second}}
+func NewHTTPOrderClient(baseURL, key string) *HTTPOrderClient {
+	return &HTTPOrderClient{baseURL: baseURL, key: key, client: &http.Client{Timeout: 5 * time.Second}}
 }
 
 type quantitySoldResponse struct {
@@ -48,6 +51,7 @@ func (c *HTTPOrderClient) GetQuantitySold(ctx context.Context, productIDs []stri
 	if err != nil {
 		return nil, err
 	}
+	serviceauth.SetRequestHeaders(req, c.key)
 
 	resp, err := c.client.Do(req)
 	if err != nil {

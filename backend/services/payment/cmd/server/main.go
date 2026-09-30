@@ -3,13 +3,16 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
+	"time"
 
 	"shopee/backend/pkg/authjwt"
 	sessionconfig "shopee/backend/pkg/config"
 	"shopee/backend/pkg/health"
+	"shopee/backend/pkg/identityclient"
 	"shopee/backend/pkg/logger"
 	"shopee/backend/pkg/platform/natsclient"
 	"shopee/backend/pkg/platform/postgres"
@@ -68,6 +71,8 @@ func main() {
 		log.Fatal().Msg("internal service configuration invalid")
 	}
 	orderClient := adapter.NewHTTPOrderClient(cfg.OrderServiceURL, internalServices.Key)
+	vendorClient := adapter.NewHTTPVendorClient(cfg.VendorServiceURL, internalServices.Key)
+	roles := identityclient.Client{URL: internalServices.IdentityURL, Key: internalServices.Key}
 
 	var paymentProvider provider.Provider
 	var verifier provider.Verifier
@@ -80,14 +85,55 @@ func main() {
 		paymentProvider, verifier, simulator = p, p, p
 	}
 
+	tx := repository.Transactions{Pool: dbPool}
 	intentRepo := repository.NewPaymentIntentRepository(dbPool)
-	eventRepo := repository.NewPaymentEventRepository(dbPool)
+	receiptRepo := repository.NewReceiptRepository(dbPool)
+	orderSync := repository.OrderSync{Pool: dbPool}
+	refundSync := repository.RefundSync{Pool: dbPool}
 
-	paymentUseCase := usecase.NewPaymentUseCase(intentRepo, eventRepo, orderClient, paymentProvider, verifier, simulator, cfg.Provider, cfg.PayOSReturnURL, cfg.PayOSCancelURL, log)
-	paymentHandler := transport.NewPaymentHandler(paymentUseCase, log)
-	webhookHandler := transport.NewWebhookHandler(paymentUseCase, log)
+	deliverOutcome := func(ctx context.Context, out repository.OrderOutcome) error {
+		if out.Outcome == "captured" {
+			return orderClient.MarkPaid(ctx, out.OrderID, adapter.Capture{PaymentID: out.PaymentID, Amount: out.Amount, Currency: out.Currency})
+		}
+		reason := out.Reason
+		if reason == "" {
+			reason = "Payment failed"
+		}
+		return orderClient.MarkPaymentFailed(ctx, out.OrderID, reason)
+	}
+	wakeSync := make(chan struct{}, 1)
+	syncNow := func(ctx context.Context, intentID string) {
+		// Deliver right away; on any failure the outbox worker retries.
+		err := orderSync.DispatchIntent(context.WithoutCancel(ctx), intentID, deliverOutcome)
+		if err != nil && !errors.Is(err, repository.ErrNoOrderSync) {
+			select {
+			case wakeSync <- struct{}{}:
+			default:
+			}
+		}
+	}
 
-	router := transport.NewRouter(cfg.Base.Env, log, jwtManager, paymentHandler, webhookHandler,
+	paymentUseCase := usecase.NewPaymentUseCase(usecase.PaymentDeps{
+		Tx: tx, Intents: intentRepo, Receipts: receiptRepo, Orders: orderClient, Provider: paymentProvider, Verifier: verifier,
+		Simulator: simulator, ProviderName: cfg.Provider, ReturnURL: cfg.PayOSReturnURL, CancelURL: cfg.PayOSCancelURL, SyncNow: syncNow, Log: log,
+	})
+	settlementUseCase := usecase.NewSettlementUseCase(usecase.SettlementDeps{
+		Tx: tx, Settlement: repository.NewSettlementRepository(dbPool), Payouts: repository.NewPayoutRepository(dbPool),
+		Audit: repository.NewAuditRepository(dbPool), Roles: roles, Orders: orderClient, Vendors: vendorClient, Log: log,
+	})
+	refundUseCase := usecase.NewRefundUseCase(repository.NewRefundRepository(dbPool), roles, log).WithSettlement(tx, settlementUseCase)
+	reconUseCase := usecase.NewReconciliationUseCase(usecase.ReconciliationDeps{
+		Tx: tx, Payments: paymentUseCase, Refunds: refundUseCase, Intents: intentRepo, Receipts: receiptRepo,
+		OrderSync: orderSync, RefundSync: refundSync, Audit: repository.NewAuditRepository(dbPool), Roles: roles, Log: log,
+	})
+	limiter := adapter.RedisRateLimiter{Client: redisClient, Prefix: "payment:webhook:", Limit: cfg.WebhookRatePerMinute, Window: time.Minute}
+
+	router := transport.NewRouter(cfg.Base.Env, log, jwtManager, transport.Handlers{
+		Payment: transport.NewPaymentHandler(paymentUseCase, log),
+		Webhook: transport.NewWebhookHandler(paymentUseCase, limiter, log),
+		Refund:  transport.NewRefundHandler(refundUseCase, log),
+		Admin:   transport.NewAdminHandler(reconUseCase, settlementUseCase, log),
+	}, internalServices.Key,
 		health.Checker{Name: "postgres", Ping: func(ctx context.Context) error { return dbPool.Ping(ctx) }},
 		health.Checker{Name: "redis", Ping: func(ctx context.Context) error { return redisClient.Ping(ctx).Err() }},
 		health.Checker{Name: "nats", Ping: func(ctx context.Context) error {
@@ -102,12 +148,9 @@ func main() {
 
 	syncCtx, stopSync := context.WithCancel(ctx)
 	defer stopSync()
-	go (repository.OrderSync{Pool: dbPool}).Run(syncCtx, func(ctx context.Context, id, outcome string) error {
-		if outcome == "captured" {
-			return orderClient.MarkPaid(ctx, id)
-		}
-		return orderClient.MarkPaymentFailed(ctx, id, "Payment failed")
-	}, log)
+	go orderSync.Run(syncCtx, deliverOutcome, log, wakeSync)
+	go refundSync.Run(syncCtx, orderClient.ReportRefund, log)
+	go (usecase.PaymentWorker{Payments: paymentUseCase, Reconciliation: reconUseCase, Log: log}).Run(syncCtx)
 	srv := &http.Server{
 		Addr:              ":" + cfg.Base.Port,
 		Handler:           router,

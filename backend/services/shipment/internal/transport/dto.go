@@ -213,6 +213,15 @@ type internalCreateShipmentRequest struct {
 	District           string `json:"district"`
 	Ward               string `json:"ward"`
 	StreetAddress      string `json:"street_address" binding:"required"`
+	// Quote is Order's checkout-time fee snapshot for this vendor order.
+	Quote *internalQuotedFee `json:"quote"`
+}
+
+type internalQuotedFee struct {
+	FeeAmount int64  `json:"fee_amount" binding:"min=0"`
+	CarrierID string `json:"carrier_id" binding:"required"`
+	ZoneID    string `json:"zone_id" binding:"required"`
+	FeeRuleID string `json:"fee_rule_id" binding:"required"`
 }
 
 type internalShipmentResponse struct {

@@ -5,7 +5,9 @@ package config
 
 import (
 	"fmt"
+	"net/url"
 	"os"
+	"strconv"
 
 	"shopee/backend/pkg/config"
 )
@@ -22,6 +24,10 @@ type Config struct {
 	PayOSBaseURL      string
 	PayOSReturnURL    string
 	PayOSCancelURL    string
+	// VendorServiceURL resolves verified payout destinations for payouts.
+	VendorServiceURL string
+	// WebhookRatePerMinute bounds webhook deliveries per client IP.
+	WebhookRatePerMinute int64
 }
 
 func Load() (Config, error) {
@@ -66,7 +72,20 @@ func Load() (Config, error) {
 		}
 	}
 
+	if base.Env == "production" && provider == "payos" {
+		for name, raw := range map[string]string{"PAYOS_RETURN_URL": payosReturnURL, "PAYOS_CANCEL_URL": payosCancelURL, "PAYOS_API_URL": getEnv("PAYOS_API_URL", "https://api-merchant.payos.vn")} {
+			if u, err := url.Parse(raw); err != nil || u.Scheme != "https" || u.Host == "" {
+				return Config{}, fmt.Errorf("config: %s must be an https URL in production", name)
+			}
+		}
+	}
+	rate, err := strconv.ParseInt(getEnv("PAYMENT_WEBHOOK_RATE_PER_MINUTE", "600"), 10, 64)
+	if err != nil || rate < 10 || rate > 100000 {
+		return Config{}, fmt.Errorf("config: PAYMENT_WEBHOOK_RATE_PER_MINUTE must be between 10 and 100000")
+	}
+
 	return Config{
+		VendorServiceURL: getEnv("VENDOR_SERVICE_URL", "http://vendor:8082"), WebhookRatePerMinute: rate,
 		Base: base, JWTSecret: jwtSecret, OrderServiceURL: orderServiceURL,
 		Provider: provider, MockWebhookSecret: mockWebhookSecret, PayOSClientID: payosClientID, PayOSAPIKey: payosAPIKey, PayOSChecksumKey: payosChecksumKey, PayOSBaseURL: getEnv("PAYOS_API_URL", "https://api-merchant.payos.vn"), PayOSReturnURL: payosReturnURL, PayOSCancelURL: payosCancelURL,
 	}, nil

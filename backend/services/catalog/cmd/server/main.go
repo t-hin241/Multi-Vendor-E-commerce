@@ -75,7 +75,7 @@ func main() {
 	}
 	jwtManager.SetVerifier(verifier)
 	vendorClient := adapter.NewHTTPVendorClient(cfg.VendorServiceURL, internalServices.Key)
-	orderClient := adapter.NewHTTPOrderClient(cfg.OrderServiceURL)
+	orderClient := adapter.NewHTTPOrderClient(cfg.OrderServiceURL, internalServices.Key)
 	inventoryClient := adapter.NewHTTPInventoryClient(cfg.InventoryServiceURL, internalServices.Key)
 
 	categoryRepo := repository.NewCategoryRepository(dbPool)

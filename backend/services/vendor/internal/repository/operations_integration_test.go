@@ -427,7 +427,7 @@ func TestIntegrationPayoutBatchDestinationIsPinned(t *testing.T) {
 	if _, err := db.Exec(ctx, `INSERT INTO payout_items(payout_batch_id,vendor_id,vendor_order_id,amount,destination_mask,status,destination_account_id,currency) VALUES($1,$2,$3,100,'****1234','pending',$4,'VND')`, batch, uuid.NewString(), uuid.NewString(), uuid.NewString()); err == nil {
 		t.Fatal("missing destination version accepted")
 	}
-	if _, err := db.Exec(ctx, `UPDATE payout_items SET status='succeeded' WHERE id=$1`, id); err != nil {
+	if _, err := db.Exec(ctx, `UPDATE payout_items SET status='succeeded', evidence_reference='FAKE-TRANSFER-REF' WHERE id=$1`, id); err != nil {
 		t.Fatal("ordinary payment state update failed", err)
 	}
 }
@@ -449,7 +449,7 @@ func TestIntegrationAPIAuthAndPayoutScopes(t *testing.T) {
 		t.Fatal(err)
 	}
 	uc := &usecase.PayoutUseCase{Accounts: repository.PayoutRepository{Pool: f.db}, Vendors: f.vendors, Audit: f.audit, Ops: f.ops, Cipher: cipher}
-	(transport.PayoutHandler{UseCase: uc, Log: log}).Register(router, middleware.RequireAuth(manager), "test-payment-scope-key")
+	(transport.PayoutHandler{UseCase: uc, Log: log}).Register(router, middleware.RequireAuth(manager), "test-payment-scope-key", "test-internal-service-key")
 	ownerToken, _, err := manager.IssueAccessToken(f.owner, "vendor", time.Minute)
 	if err != nil {
 		t.Fatal(err)
@@ -480,6 +480,8 @@ func TestIntegrationAPIAuthAndPayoutScopes(t *testing.T) {
 		{name: "other owner payout list", method: "GET", path: "/api/vendor/" + v.ID + "/payout-accounts", token: otherToken, want: 403},
 		{name: "masked owner payout list", method: "GET", path: "/api/vendor/" + v.ID + "/payout-accounts", token: ownerToken, want: 200},
 		{name: "masked admin payout list", method: "GET", path: "/api/vendor/admin/shops/" + v.ID + "/payout-accounts", token: adminToken, want: 200},
+		{name: "default destination needs key", method: "GET", path: "/internal/payout-destinations/" + v.ID + "/default", want: 403},
+		{name: "no verified destination yet", method: "GET", path: "/internal/payout-destinations/" + v.ID + "/default", header: "X-Identity-Service-Key", value: "test-internal-service-key", want: 404},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -500,5 +502,16 @@ func TestIntegrationAPIAuthAndPayoutScopes(t *testing.T) {
 				t.Fatal("plaintext leaked in ordinary response")
 			}
 		})
+	}
+	if _, err := uc.Decide(ctx, f.admin, v.ID, a.ID, a.Version, true, "Test evidence"); err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest("GET", "/internal/payout-destinations/"+v.ID+"/default", nil)
+	req.Header.Set("X-Identity-Service-Key", "test-internal-service-key")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	body := w.Body.String()
+	if w.Code != 200 || !strings.Contains(body, `"last4":"1234"`) || !strings.Contains(body, a.ID) || strings.Contains(body, "0000001234") || strings.Contains(body, "TEST ACCOUNT OWNER") {
+		t.Fatalf("expected the masked verified destination, got %d %s", w.Code, body)
 	}
 }

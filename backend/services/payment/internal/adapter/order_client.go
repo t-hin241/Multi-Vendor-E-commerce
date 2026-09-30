@@ -1,9 +1,11 @@
 package adapter
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"shopee/backend/pkg/serviceauth"
@@ -11,6 +13,7 @@ import (
 	"time"
 
 	"shopee/backend/pkg/apperror"
+	"shopee/backend/services/payment/internal/domain"
 )
 
 // OrderSnapshot is Order's own record of an order, read fresh at payment-
@@ -81,30 +84,55 @@ func (c *HTTPOrderClient) GetOrder(ctx context.Context, orderID string) (*OrderS
 	}, nil
 }
 
-// MarkPaid reports a captured payment back to Order. Order — not Payment —
-// decides whether the resulting lifecycle transition is valid.
-func (c *HTTPOrderClient) MarkPaid(ctx context.Context, orderID string) error {
-	endpoint := fmt.Sprintf("%s/internal/orders/%s/mark-paid", c.baseURL, url.PathEscape(orderID))
+// Capture is the verified payment Order checks against its own snapshot.
+type Capture struct {
+	PaymentID string `json:"payment_id"`
+	Amount    int64  `json:"amount"`
+	Currency  string `json:"currency"`
+}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, nil)
+// MarkPaid reports a captured payment back to Order. Order — not Payment —
+// decides whether the resulting lifecycle transition is valid, and answers
+// 409 when the capture cannot pay the order (it then records it for a
+// refund review).
+func (c *HTTPOrderClient) MarkPaid(ctx context.Context, orderID string, capture Capture) error {
+	endpoint := fmt.Sprintf("%s/internal/orders/%s/mark-paid", c.baseURL, url.PathEscape(orderID))
+	return c.post(ctx, endpoint, capture, "marking order paid")
+}
+
+// ReportRefund delivers a resolved refund's outcome to Order. Any 4xx
+// other than auth or rate limiting is Order refusing the outcome and comes
+// back as a conflict for review; everything else is retryable.
+func (c *HTTPOrderClient) ReportRefund(ctx context.Context, outcome domain.RefundOutcome) error {
+	return c.post(ctx, c.baseURL+"/internal/refund-events", outcome, "reporting refund outcome")
+}
+
+func (c *HTTPOrderClient) post(ctx context.Context, endpoint string, payload any, action string) error {
+	body, err := json.Marshal(payload)
 	if err != nil {
 		return apperror.Internal(err)
 	}
-
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
+	if err != nil {
+		return apperror.Internal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
 	serviceauth.SetRequestHeaders(req, c.key)
 	resp, err := c.client.Do(req)
 	if err != nil {
 		return apperror.Internal(err)
 	}
 	defer resp.Body.Close()
-
-	if resp.StatusCode == http.StatusConflict {
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<16))
+	switch {
+	case resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusCreated:
+		return nil
+	case resp.StatusCode >= 400 && resp.StatusCode < 500 && resp.StatusCode != http.StatusUnauthorized &&
+		resp.StatusCode != http.StatusForbidden && resp.StatusCode != http.StatusTooManyRequests:
 		return apperror.Conflict("Order rejected payment outcome; reconciliation required")
+	default:
+		return apperror.Internal(fmt.Errorf("order service returned status %d %s", resp.StatusCode, action))
 	}
-	if resp.StatusCode != http.StatusOK {
-		return apperror.Internal(fmt.Errorf("order service returned status %d marking order paid", resp.StatusCode))
-	}
-	return nil
 }
 
 // MarkPaymentFailed reports a failed payment back to Order, which cancels
@@ -137,4 +165,47 @@ func (c *HTTPOrderClient) MarkPaymentFailed(ctx context.Context, orderID, reason
 		return apperror.Internal(fmt.Errorf("order service returned status %d marking payment failed", resp.StatusCode))
 	}
 	return nil
+}
+
+// HeldVendorOrders asks Order which vendor orders must not be paid out yet
+// (an open return or refund). An error means the answer is unknown and the
+// caller must not pay.
+func (c *HTTPOrderClient) HeldVendorOrders(ctx context.Context, vendorOrderIDs []string) (map[string]string, error) {
+	held := map[string]string{}
+	if len(vendorOrderIDs) == 0 {
+		return held, nil
+	}
+	body, err := json.Marshal(map[string][]string{"vendor_order_ids": vendorOrderIDs})
+	if err != nil {
+		return nil, apperror.Internal(err)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/internal/settlements/holds", bytes.NewReader(body))
+	if err != nil {
+		return nil, apperror.Internal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	serviceauth.SetRequestHeaders(req, c.key)
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return nil, apperror.Internal(fmt.Errorf("order service unreachable: %w", err))
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, apperror.Internal(fmt.Errorf("order service returned status %d for settlement holds", resp.StatusCode))
+	}
+	var envelope struct {
+		Data struct {
+			Held []struct {
+				VendorOrderID string `json:"vendor_order_id"`
+				Reason        string `json:"reason"`
+			} `json:"held"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&envelope); err != nil {
+		return nil, apperror.Internal(err)
+	}
+	for _, h := range envelope.Data.Held {
+		held[h.VendorOrderID] = h.Reason
+	}
+	return held, nil
 }

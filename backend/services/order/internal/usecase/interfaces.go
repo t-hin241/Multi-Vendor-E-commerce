@@ -4,45 +4,44 @@ import (
 	"context"
 	"time"
 
+	"shopee/backend/pkg/apperror"
+
 	"shopee/backend/services/order/internal/adapter"
 	"shopee/backend/services/order/internal/domain"
+	"shopee/backend/services/order/internal/repository"
 )
 
 type OrderRepositoryPort interface {
 	WithLockedOrder(context.Context, string, func(context.Context) error) error
 	CreateFromPlan(ctx context.Context, plan *domain.Plan) (*domain.Order, error)
 	FindByID(ctx context.Context, id string) (*domain.Order, error)
-	ListByBuyer(ctx context.Context, buyerID string, limit, offset int) ([]*domain.Order, error)
-	ListByStatus(ctx context.Context, status string, limit, offset int) ([]*domain.Order, error)
-	UpdateStatus(ctx context.Context, id string, status domain.Status, reason *string) error
-	// UpdateTotalAmount is a follow-up update once Shipment has quoted every
-	// vendor sub-order's fee at checkout time.
-	UpdateTotalAmount(ctx context.Context, id string, totalAmount int64) error
+	List(ctx context.Context, f repository.OrderFilter, limit, offset int) ([]*domain.Order, int64, error)
+	TransitionStatus(ctx context.Context, id string, from, to domain.Status, reason *string) error
+	SetCheckoutState(ctx context.Context, id string, state domain.CheckoutState) error
+	AddRefunded(ctx context.Context, id string, amount int64) error
 	ListItemsByOrder(ctx context.Context, orderID string) ([]*domain.OrderItem, error)
+	FindItem(ctx context.Context, orderID, itemID string) (*domain.OrderItem, error)
 	ListReviewEligibility(ctx context.Context, buyerID, productID string) ([]*domain.ReviewEligibility, error)
 }
 
 type VendorOrderRepositoryPort interface {
 	FindByID(ctx context.Context, id string) (*domain.VendorOrder, error)
-	ListByVendor(ctx context.Context, vendorID string, limit, offset int) ([]*domain.VendorOrder, error)
+	ListByVendor(ctx context.Context, vendorID, status string, limit, offset int) ([]*domain.VendorOrder, error)
 	ListByOrderID(ctx context.Context, orderID string) ([]*domain.VendorOrder, error)
-	UpdateStatus(ctx context.Context, id string, status domain.Status) error
-	SetCommission(ctx context.Context, id string, rateBps int, commissionAmount, netAmount int64) error
-	// SetShippingFee is a follow-up snapshot, same shape as SetCommission,
-	// applied once Shipment has quoted the fee at checkout time.
-	SetShippingFee(ctx context.Context, id string, feeAmount int64) error
+	TransitionStatus(ctx context.Context, id string, from, to domain.Status) error
+	TransitionAllForOrder(ctx context.Context, orderID string, from, to domain.Status) (int64, error)
+	SetLegacyCommission(ctx context.Context, id string, rule *domain.CommissionRule, commissionAmount, netAmount, base int64) error
+	AddRefunded(ctx context.Context, id string, amount int64) (int64, error)
 	SummaryByVendor(ctx context.Context, vendorID string) (*domain.VendorSummary, error)
 	TopProductsByVendor(ctx context.Context, vendorID string, limit int) ([]*domain.TopProduct, error)
 	QuantitySoldByProductIDs(ctx context.Context, productIDs []string) (map[string]int64, error)
-	// ListItemsByVendorOrderIDs batch-looks-up order items scoped to
-	// several vendor orders at once, keyed by vendor_order_id — backs the
-	// vendor's own order list/export, which previously showed no item
-	// detail at all.
 	ListItemsByVendorOrderIDs(ctx context.Context, vendorOrderIDs []string) (map[string][]*domain.OrderItem, error)
+	// HeldForSettlement names which vendor orders have an open return or
+	// refund, with the reason.
+	HeldForSettlement(ctx context.Context, vendorOrderIDs []string) (map[string]string, error)
 }
 
-// BuyerAddressRepositoryPort is a buyer's own saved shipping address book —
-// mirrors Vendor's warehouse-address shape.
+// BuyerAddressRepositoryPort is a buyer's own saved shipping address book.
 type BuyerAddressRepositoryPort interface {
 	Create(ctx context.Context, a *domain.BuyerAddress) error
 	FindByID(ctx context.Context, id string) (*domain.BuyerAddress, error)
@@ -53,23 +52,11 @@ type BuyerAddressRepositoryPort interface {
 	SetDefault(ctx context.Context, buyerID, addressID string) error
 }
 
-// CommissionRuleRepositoryPort is Order's own commission-rule ledger.
-// Setting a new rule (admin-only) is always an insert; nothing ever edits a
-// past rule, since a vendor order's commission is snapshotted at payment
-// time from whatever rule was current then.
+// CommissionRuleRepositoryPort is Order's insert-only commission ledger.
 type CommissionRuleRepositoryPort interface {
 	Create(ctx context.Context, rule *domain.CommissionRule) error
 	FindCurrent(ctx context.Context) (*domain.CommissionRule, error)
 	List(ctx context.Context, limit, offset int) ([]*domain.CommissionRule, error)
-}
-
-// CartGateway is Cart's internal checkout contract: freeze the buyer's cart
-// for one checkout operation, then — once the order stands — consume only
-// the purchased lines. Both calls are idempotent per operation id and use
-// Order's service identity, never the buyer's token.
-type CartGateway interface {
-	Snapshot(ctx context.Context, buyerID, operationID string, expectedVersion *int64) (*adapter.CartSnapshot, error)
-	Consume(ctx context.Context, buyerID, operationID string, lines []adapter.CartConsumeLine) error
 }
 
 // CartConsumptionRepositoryPort persists the durable consume task written
@@ -85,40 +72,109 @@ type CartConsumptionRepositoryPort interface {
 	Stats(ctx context.Context) (domain.CartConsumptionStats, error)
 }
 
+type CheckoutOperationRepositoryPort interface {
+	Begin(ctx context.Context, buyerID, key, hash string, ttl time.Duration) (*domain.CheckoutOperation, bool, error)
+	Complete(ctx context.Context, id, orderID string) error
+	Fail(ctx context.Context, id string, cause *apperror.Error) error
+	FindByID(ctx context.Context, id string) (*domain.CheckoutOperation, error)
+	ListStalePreparing(ctx context.Context, olderThan time.Time, limit int) ([]*domain.CheckoutOperation, error)
+	PurgeExpired(ctx context.Context, limit int) (int64, error)
+}
+
+type PaymentRecordRepositoryPort interface {
+	Find(ctx context.Context, paymentID string) (*domain.OrderPayment, error)
+	Insert(ctx context.Context, p *domain.OrderPayment) error
+	ListByOrder(ctx context.Context, orderID string) ([]*domain.OrderPayment, error)
+	ListRejected(ctx context.Context, limit, offset int) ([]*domain.OrderPayment, error)
+}
+
+type EffectRepositoryPort interface {
+	Enqueue(ctx context.Context, effects ...domain.Effect) error
+	ClaimDue(ctx context.Context, orderID string, limit int) ([]*domain.Effect, error)
+	MarkDone(ctx context.Context, id string) error
+	RecordFailure(ctx context.Context, id, reason string, park bool) (bool, error)
+	Replay(ctx context.Context, id string) (bool, error)
+	ListByOrder(ctx context.Context, orderID string) ([]*domain.Effect, error)
+	ListParked(ctx context.Context, limit, offset int) ([]*domain.Effect, error)
+	Stats(ctx context.Context) (domain.EffectStats, error)
+}
+
+type RefundRepositoryPort interface {
+	Create(ctx context.Context, f *domain.Refund) error
+	FindByID(ctx context.Context, id string) (*domain.Refund, error)
+	Transition(ctx context.Context, id string, from, to domain.RefundStatus, paymentRefundID, failure *string) error
+	OpenTotals(ctx context.Context, orderID, vendorOrderID string) (int64, int64, error)
+	ListByOrder(ctx context.Context, orderID string) ([]*domain.Refund, error)
+	List(ctx context.Context, status string, limit, offset int) ([]*domain.Refund, error)
+}
+
+type ReturnRepositoryPort interface {
+	Create(ctx context.Context, rr *domain.ReturnRequest) error
+	ReturnedQuantity(ctx context.Context, itemID string) (int64, error)
+	FindByID(ctx context.Context, id string) (*domain.ReturnRequest, error)
+	VendorOf(ctx context.Context, id string) (vendorOrderID, vendorID string, err error)
+	Transition(ctx context.Context, rr *domain.ReturnRequest, to domain.ReturnRequestStatus, u repository.ReturnUpdate) error
+	AddEvent(ctx context.Context, e *domain.ReturnEvent) error
+	ListEvents(ctx context.Context, returnID string) ([]*domain.ReturnEvent, error)
+	ListByBuyer(ctx context.Context, buyerID string, limit, offset int) ([]*domain.ReturnRequest, error)
+	ListByOrder(ctx context.Context, orderID string) ([]*domain.ReturnRequest, error)
+	ListByStatus(ctx context.Context, status string, limit, offset int) ([]*domain.ReturnRequest, error)
+	ListForVendor(ctx context.Context, vendorID, status string, limit, offset int) ([]*domain.ReturnRequest, error)
+}
+
+// CartGateway is Cart's internal checkout contract: read the cart for a
+// preview, freeze it for one checkout operation, then — once the order
+// stands — consume only the purchased lines.
+type CartGateway interface {
+	Lines(ctx context.Context, buyerID string) (*adapter.CartSnapshot, error)
+	Snapshot(ctx context.Context, buyerID, operationID string, expectedVersion *int64) (*adapter.CartSnapshot, error)
+	Consume(ctx context.Context, buyerID, operationID string, lines []adapter.CartConsumeLine) error
+}
+
 // CatalogGateway is the checkout pricing snapshot's source of truth.
 type CatalogGateway interface {
 	GetProduct(ctx context.Context, productID string) (*adapter.ProductInfo, error)
 	GetVariant(ctx context.Context, variantID string) (*adapter.VariantInfo, error)
 }
 
-// VendorGateway lets a vendor user see their own sub-orders.
+// VendorGateway checks shop selling permission and vendor ownership.
 type VendorGateway interface {
 	Approved(context.Context, []string) (map[string]int64, error)
 	GetApprovedVendorID(ctx context.Context, userID, vendorID string) (string, error)
 }
 
-// InventoryGateway is the reserve/release/commit contract used at checkout,
-// on cancellation or payment failure, and on payment success respectively.
+// InventoryGateway is the reserve/release/commit contract, plus putting
+// received returns back into stock.
 type InventoryGateway interface {
 	Operation(context.Context, string) (*adapter.ReservationReceipt, error)
 	Reserve(ctx context.Context, orderID string, lines []adapter.ReserveLine) error
 	Release(ctx context.Context, orderID string) error
 	Commit(ctx context.Context, orderID string) error
+	RestockReturn(ctx context.Context, returnID, productID string, variantID *string, quantity int64) error
 }
 
-// NotificationGateway lets Order tell a buyer about an order event without
-// owning any notification data itself. Every call is best-effort from
-// Order's side — see OrderUseCase.notify.
+// NotificationGateway sends a buyer notification; always called from a
+// durable effect, never inline with a transition.
 type NotificationGateway interface {
 	Notify(ctx context.Context, userID, notifType, referenceID string) error
 }
 
-// ShipmentGateway is Order's new dependency on Shipment — the reverse
-// direction of the pre-existing Shipment -> Order read. Every call is
-// best-effort from Order's side (see OrderUseCase.Checkout/cancel): a
-// briefly unreachable Shipment must never block or roll back an otherwise-
-// valid checkout or cancellation.
+// ShipmentGateway quotes shipping before an order exists and opens/cancels
+// shipments after payment/cancellation.
 type ShipmentGateway interface {
-	CreateShipment(ctx context.Context, in adapter.CreateShipmentInput) (shipmentID string, feeAmount int64, err error)
+	Quote(ctx context.Context, vendorID, province string, weightGrams int64) (*domain.ShippingQuote, error)
+	CreateShipment(ctx context.Context, in adapter.CreateShipmentInput) (string, error)
 	CancelForVendorOrder(ctx context.Context, vendorOrderID string) error
+}
+
+// PaymentGateway submits refunds; Payment owns the money movement.
+type PaymentGateway interface {
+	RequestRefund(ctx context.Context, r adapter.RefundRequest) (*adapter.RefundReceipt, error)
+	SettleVendorOrder(ctx context.Context, r adapter.SettlementReport) error
+}
+
+// IdentityGateway re-verifies a sensitive actor's role with Identity
+// instead of trusting the token claim alone.
+type IdentityGateway interface {
+	RequireRole(ctx context.Context, userID, role string) error
 }

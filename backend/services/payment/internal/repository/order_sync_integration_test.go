@@ -83,14 +83,14 @@ func TestPaymentCaptureQueuesDurableInventoryReconciliation(t *testing.T) {
 		t.Fatal("capture without durable delivery intent")
 	}
 	worker := repository.OrderSync{Pool: pool}
-	if err := worker.Dispatch(ctx, func(context.Context, string, string) error { return errors.New("test order unavailable") }); err != nil {
+	if err := worker.Dispatch(ctx, func(context.Context, repository.OrderOutcome) error { return errors.New("test order unavailable") }); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := pool.Exec(ctx, `UPDATE payment_order_sync SET next_attempt_at=now()`); err != nil {
 		t.Fatal(err)
 	}
 	// Recreated worker sees the same pending intent after a simulated restart.
-	if err := (repository.OrderSync{Pool: pool}).Dispatch(ctx, func(context.Context, string, string) error { return apperror.Conflict("Reservation expired") }); err != nil {
+	if err := (repository.OrderSync{Pool: pool}).Dispatch(ctx, func(context.Context, repository.OrderOutcome) error { return apperror.Conflict("Reservation expired") }); err != nil {
 		t.Fatal(err)
 	}
 	var review bool
@@ -101,7 +101,10 @@ func TestPaymentCaptureQueuesDurableInventoryReconciliation(t *testing.T) {
 	if !review || status != "captured" {
 		t.Fatal("late capture was lost or silently reported fulfilled")
 	}
-	if err := worker.Dispatch(ctx, func(context.Context, string, string) error { t.Fatal("review case retried automatically"); return nil }); !errors.Is(err, repository.ErrNoOrderSync) {
+	if err := worker.Dispatch(ctx, func(context.Context, repository.OrderOutcome) error {
+		t.Fatal("review case retried automatically")
+		return nil
+	}); !errors.Is(err, repository.ErrNoOrderSync) {
 		t.Fatal(err)
 	}
 }
@@ -117,16 +120,16 @@ func TestPaymentCaptureDeliveryIsRetriedAndAcknowledged(t *testing.T) {
 	}
 	worker := repository.OrderSync{Pool: pool}
 	calls := 0
-	if err := worker.Dispatch(ctx, func(_ context.Context, _ string, outcome string) error {
+	if err := worker.Dispatch(ctx, func(_ context.Context, out repository.OrderOutcome) error {
 		calls++
-		if outcome != "captured" {
+		if out.Outcome != "captured" || out.PaymentID != id || out.Amount != 100 || out.Currency != "VND" {
 			t.Fatal("incorrect outcome")
 		}
 		return nil
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := worker.Dispatch(ctx, func(context.Context, string, string) error { calls++; return nil }); !errors.Is(err, repository.ErrNoOrderSync) {
+	if err := worker.Dispatch(ctx, func(context.Context, repository.OrderOutcome) error { calls++; return nil }); !errors.Is(err, repository.ErrNoOrderSync) {
 		t.Fatal(err)
 	}
 	if calls != 1 {

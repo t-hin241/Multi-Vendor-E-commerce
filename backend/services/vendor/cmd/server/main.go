@@ -101,7 +101,7 @@ func main() {
 		log.Fatal().Msg("payout encryption configuration invalid")
 	}
 	payoutUC := &usecase.PayoutUseCase{Accounts: repository.PayoutRepository{Pool: dbPool}, Vendors: vendorRepo, Audit: auditLogRepo, Ops: ops, Cipher: cipher}
-	(transport.PayoutHandler{UseCase: payoutUC, Log: log}).Register(router, middleware.RequireAuth(jwtManager), cfg.PayoutServiceKey)
+	(transport.PayoutHandler{UseCase: payoutUC, Log: log}).Register(router, middleware.RequireAuth(jwtManager), cfg.PayoutServiceKey, cfg.Internal.Key)
 
 	dashboard := usecase.Dashboard{Vendors: vendorUseCase, Orders: adapter.ReportClient{URL: cfg.OrderURL, Key: cfg.Internal.Key}, Payments: adapter.ReportClient{URL: cfg.PaymentURL, Key: cfg.Internal.Key}}
 	router.GET("/api/vendor/:vendorId/dashboard", middleware.RequireAuth(jwtManager), middleware.RequireRole("vendor"), transport.DashboardHandler(dashboard, log))

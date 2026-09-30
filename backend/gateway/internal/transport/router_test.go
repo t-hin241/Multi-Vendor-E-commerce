@@ -117,3 +117,22 @@ func TestRouter_LongerPrefixWinsOverAShorterOverlappingOne(t *testing.T) {
 		t.Errorf("expected the more specific prefix's upstream to handle the request, got: %s", body)
 	}
 }
+
+// Checkout sends an Idempotency-Key header; if the browser's preflight
+// refuses it, no buyer can place an order.
+func TestRouter_CORSAllowsCheckoutIdempotencyKey(t *testing.T) {
+	cfg := config.Config{Env: "test", AllowedOrigins: []string{"http://localhost:3000"}, Upstreams: map[string]string{}}
+	router, err := transport.NewRouter(cfg, zerolog.Nop())
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodOptions, "/api/orders/checkout", nil)
+	req.Header.Set("Origin", "http://localhost:3000")
+	req.Header.Set("Access-Control-Request-Method", "POST")
+	req.Header.Set("Access-Control-Request-Headers", "content-type,idempotency-key,x-csrf-protection")
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if !strings.Contains(strings.ToLower(w.Header().Get("Access-Control-Allow-Headers")), "idempotency-key") {
+		t.Fatalf("preflight must allow Idempotency-Key, got %d %q", w.Code, w.Header().Get("Access-Control-Allow-Headers"))
+	}
+}

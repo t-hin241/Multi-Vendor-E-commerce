@@ -52,6 +52,26 @@ func TestSnapshot_RejectsEmptyCartAndStaleVersion(t *testing.T) {
 	expectCode(t, err, domain.CodeCartChanged)
 }
 
+func TestCurrentLines_ReadsWithoutCreatingAnOperation(t *testing.T) {
+	f := newFixture()
+	f.sellable("p1", 100)
+	ctx := t.Context()
+	version, lines, err := f.uc.CurrentLines(ctx, "buyer-1")
+	if err != nil || len(lines) != 0 || version != 1 {
+		t.Fatalf("empty cart: %d %v %v", version, lines, err)
+	}
+	if err := f.uc.AddItem(ctx, "buyer-1", "p1", nil, 2, nil); err != nil {
+		t.Fatal(err)
+	}
+	version, lines, err = f.uc.CurrentLines(ctx, "buyer-1")
+	if err != nil || version != 2 || len(lines) != 1 || lines[0].Quantity != 2 || *lines[0].SeenPriceAmount != 100 {
+		t.Fatalf("unexpected %d %+v %v", version, lines, err)
+	}
+	if len(f.store.ops) != 0 {
+		t.Fatal("a preview read must not create checkout operations")
+	}
+}
+
 func TestSnapshot_ReplayReturnsTheOriginalSnapshot(t *testing.T) {
 	f := newFixture()
 	f.sellable("p1", 100)

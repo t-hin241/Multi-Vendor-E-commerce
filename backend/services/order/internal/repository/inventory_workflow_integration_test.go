@@ -19,7 +19,7 @@ import (
 	"github.com/rs/zerolog"
 )
 
-func orderDB(t *testing.T) *pgxpool.Pool {
+func orderDB(t *testing.T, maxVersion ...string) *pgxpool.Pool {
 	t.Helper()
 	raw := os.Getenv("ORDER_TEST_DATABASE_URL")
 	if raw == "" {
@@ -61,6 +61,9 @@ func orderDB(t *testing.T) *pgxpool.Pool {
 		t.Fatal(err)
 	}
 	for _, file := range migrations {
+		if len(maxVersion) > 0 && filepath.Base(file)[:6] > maxVersion[0] {
+			continue
+		}
 		sql, err := os.ReadFile(file)
 		if err != nil {
 			t.Fatal(err)
@@ -110,17 +113,41 @@ type notifyStub struct{}
 
 func (notifyStub) Notify(context.Context, string, string, string) error { return nil }
 
+func (s *inventoryReceiptStub) RestockReturn(context.Context, string, string, *string, int64) error {
+	return nil
+}
+
 type shipmentStub struct{}
 
-func (shipmentStub) CreateShipment(context.Context, adapter.CreateShipmentInput) (string, int64, error) {
-	return "", 0, nil
+func (shipmentStub) Quote(_ context.Context, vendorID, _ string, weight int64) (*domain.ShippingQuote, error) {
+	return &domain.ShippingQuote{VendorID: vendorID, FeeAmount: 0, Currency: "VND", FeeRuleID: uuid.NewString(), PackageWeightGrams: weight}, nil
+}
+func (shipmentStub) CreateShipment(context.Context, adapter.CreateShipmentInput) (string, error) {
+	return "", nil
 }
 func (shipmentStub) CancelForVendorOrder(context.Context, string) error { return nil }
+
+// realUseCase wires the use case on the real repositories of pool.
+func realUseCase(pool *pgxpool.Pool, stock usecase.InventoryGateway) *usecase.OrderUseCase {
+	return usecase.NewOrderUseCase(usecase.Deps{
+		Orders: repository.NewOrderRepository(pool), VendorOrders: repository.NewVendorOrderRepository(pool),
+		BuyerAddresses: repository.NewBuyerAddressRepository(pool), CommissionRules: repository.NewCommissionRuleRepository(pool),
+		CartConsumption: repository.NewCartConsumptionRepository(pool), CheckoutOps: repository.NewCheckoutOperationRepository(pool),
+		Payments: repository.NewPaymentRecordRepository(pool), Effects: repository.NewEffectRepository(pool),
+		Refunds: repository.NewRefundRepository(pool), Returns: repository.NewReturnRequestRepository(pool),
+		Inventory: stock, Shipments: shipmentStub{}, Notifications: notifyStub{}, Log: zerolog.Nop(),
+	})
+}
+
+func capture(amount int64) *domain.PaymentCapture {
+	return &domain.PaymentCapture{PaymentID: uuid.NewString(), Amount: amount, Currency: "VND"}
+}
+
 func TestOrderInventoryReceiptPrecedesAtomicPaidState(t *testing.T) {
 	pool := orderDB(t)
 	ctx := t.Context()
 	order, vo := uuid.NewString(), uuid.NewString()
-	if _, err := pool.Exec(ctx, `INSERT INTO orders(id,buyer_id,total_amount,currency,recipient_name,phone,province,district,ward,street_address) VALUES($1,$2,100,'VND','Test Recipient','0000000000','Test','Test','Test','Test street')`, order, uuid.NewString()); err != nil {
+	if _, err := pool.Exec(ctx, `INSERT INTO orders(id,buyer_id,total_amount,subtotal_amount,currency,recipient_name,phone,province,district,ward,street_address) VALUES($1,$2,100,100,'VND','Test Recipient','0000000000','Test','Test','Test','Test street')`, order, uuid.NewString()); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := pool.Exec(ctx, `INSERT INTO vendor_orders(id,order_id,vendor_id,subtotal_amount,currency) VALUES($1,$2,$3,100,'VND')`, vo, order, uuid.NewString()); err != nil {
@@ -129,16 +156,21 @@ func TestOrderInventoryReceiptPrecedesAtomicPaidState(t *testing.T) {
 	orders := repository.NewOrderRepository(pool)
 	vendorOrders := repository.NewVendorOrderRepository(pool)
 	stock := &inventoryReceiptStub{}
-	uc := usecase.NewOrderUseCase(orders, vendorOrders, nil, repository.NewCommissionRuleRepository(pool), repository.NewCartConsumptionRepository(pool), nil, nil, nil, stock, shipmentStub{}, notifyStub{}, zerolog.Nop())
+	uc := realUseCase(pool, stock)
 	if _, err := pool.Exec(ctx, `CREATE FUNCTION reject_paid() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'test vendor write failure'; END $$; CREATE TRIGGER reject_paid BEFORE UPDATE ON vendor_orders FOR EACH ROW EXECUTE FUNCTION reject_paid()`); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := uc.MarkPaid(ctx, order); err == nil {
+	pay := capture(100)
+	if _, err := uc.MarkPaid(ctx, order, pay); err == nil {
 		t.Fatal("expected paid transaction failure")
 	}
 	persisted, err := orders.FindByID(ctx, order)
 	if err != nil || persisted.Status != domain.StatusPendingPayment {
 		t.Fatal("parent paid survived vendor write rollback")
+	}
+	var records int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM order_payments`).Scan(&records); err != nil || records != 0 {
+		t.Fatalf("the capture record must roll back with the transition, got %d", records)
 	}
 	if !stock.committed {
 		t.Fatal("inventory receipt not requested first")
@@ -151,35 +183,40 @@ func TestOrderInventoryReceiptPrecedesAtomicPaidState(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			if _, err := uc.MarkPaid(ctx, order); err != nil {
+			if _, err := uc.MarkPaid(ctx, order, pay); err != nil {
 				t.Error(err)
 			}
 		}()
 	}
 	wg.Wait()
 	persisted, err = orders.FindByID(ctx, order)
-	if err != nil || persisted.Status != domain.StatusPaid {
+	if err != nil || persisted.Status != domain.StatusPaid || persisted.PaidAt == nil {
 		t.Fatal("retry did not converge")
 	}
 	child, err := vendorOrders.FindByID(ctx, vo)
-	if err != nil || child.Status != domain.StatusPaid {
-		t.Fatal("vendor order not paid")
+	if err != nil || child.Status != domain.StatusPaid || child.Commission == nil || child.Commission.Source != domain.CommissionSourceLegacy {
+		t.Fatalf("vendor order not paid with a labelled legacy commission: %+v", child)
+	}
+	var shipments int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM order_effects WHERE kind='create_shipment' AND order_id=$1`, order).Scan(&shipments); err != nil || shipments != 1 {
+		t.Fatalf("expected one shipment effect written with the paid transition, got %d", shipments)
 	}
 	if _, err := uc.MarkPaymentFailed(ctx, order, "late failure"); err == nil {
 		t.Fatal("late failed outcome cancelled committed stock")
 	}
 }
+
 func TestOrderLatePaymentAndExpiryEvent(t *testing.T) {
 	pool := orderDB(t)
 	ctx := t.Context()
 	id := uuid.NewString()
-	if _, err := pool.Exec(ctx, `INSERT INTO orders(id,buyer_id,total_amount,currency,recipient_name,phone,province,district,ward,street_address) VALUES($1,$2,100,'VND','Test Recipient','0000000000','Test','Test','Test','Test street')`, id, uuid.NewString()); err != nil {
+	if _, err := pool.Exec(ctx, `INSERT INTO orders(id,buyer_id,total_amount,subtotal_amount,currency,recipient_name,phone,province,district,ward,street_address) VALUES($1,$2,100,100,'VND','Test Recipient','0000000000','Test','Test','Test','Test street')`, id, uuid.NewString()); err != nil {
 		t.Fatal(err)
 	}
 	orders := repository.NewOrderRepository(pool)
 	stock := &inventoryReceiptStub{expired: true}
-	uc := usecase.NewOrderUseCase(orders, repository.NewVendorOrderRepository(pool), nil, repository.NewCommissionRuleRepository(pool), repository.NewCartConsumptionRepository(pool), nil, nil, nil, stock, shipmentStub{}, notifyStub{}, zerolog.Nop())
-	if _, err := uc.MarkPaid(ctx, id); err == nil {
+	uc := realUseCase(pool, stock)
+	if _, err := uc.MarkPaid(ctx, id, capture(100)); err == nil {
 		t.Fatal("late payment fulfilled expired stock")
 	}
 	for i := 0; i < 2; i++ {
@@ -191,8 +228,12 @@ func TestOrderLatePaymentAndExpiryEvent(t *testing.T) {
 	if err != nil || persisted.Status != domain.StatusCancelled {
 		t.Fatal("expiry event did not cancel order")
 	}
-	if _, err := uc.MarkPaid(ctx, id); err == nil {
+	if _, err := uc.MarkPaid(ctx, id, capture(100)); err == nil {
 		t.Fatal("cancelled order resurrected")
+	}
+	var rejected int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM order_payments WHERE outcome='rejected' AND order_id=$1`, id).Scan(&rejected); err != nil || rejected != 2 {
+		t.Fatalf("both late captures must be recorded for refund review, got %d", rejected)
 	}
 }
 

@@ -178,7 +178,7 @@ func TestCreateOrGet_RecreatesFromOrderSnapshotWhenAutoCreateFailedEarlier(t *te
 	f.setUpShippingConfig(t, "vendor-a", "HN")
 	f.vendors.approvedVendors["user-a"] = "vendor-a"
 	f.orders.vendorOrders["vo-1"] = &adapter.VendorOrderSnapshot{
-		ID: "vo-1", VendorID: "vendor-a", Status: "pending_payment",
+		ID: "vo-1", VendorID: "vendor-a", Status: "paid", Fulfillable: true,
 		BuyerID: "buyer-1", RecipientName: "Nguyen Van A", Phone: "0900000000",
 		Province: "HN", District: "District 1", Ward: "Ward 1", StreetAddress: "123 Main St",
 		PackageWeightGrams: 1000,
@@ -190,6 +190,75 @@ func TestCreateOrGet_RecreatesFromOrderSnapshotWhenAutoCreateFailedEarlier(t *te
 	}
 	if shipment.FeeAmount != 20000 {
 		t.Errorf("expected the fallback path to compute the same fee as CreateAuto, got %d", shipment.FeeAmount)
+	}
+}
+
+func TestCreateOrGet_RefusesOrdersOrderHasNotReleasedForFulfillment(t *testing.T) {
+	f := newFixture()
+	f.setUpShippingConfig(t, "vendor-a", "HN")
+	f.vendors.approvedVendors["user-a"] = "vendor-a"
+	f.orders.vendorOrders["vo-1"] = &adapter.VendorOrderSnapshot{
+		ID: "vo-1", VendorID: "vendor-a", Status: "pending_payment", Fulfillable: false,
+		BuyerID: "buyer-1", RecipientName: "A", Phone: "0900000000", Province: "HN", StreetAddress: "1 St",
+	}
+
+	_, err := f.uc.CreateOrGet(t.Context(), "user-a", "vo-1")
+	if mustAppError(t, err).Code != apperror.CodeConflict {
+		t.Fatalf("an unpaid order must not be shipped, got %v", err)
+	}
+}
+
+func TestCreateOrGet_KeepsOrdersQuotedFeeAfterARuleChange(t *testing.T) {
+	f := newFixture()
+	ctx := t.Context()
+	f.setUpShippingConfig(t, "vendor-a", "HN")
+	f.vendors.approvedVendors["user-a"] = "vendor-a"
+	quote, err := f.uc.Quote(ctx, "vendor-a", "HN", 1000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The admin raises the fee after the buyer paid the quoted one.
+	if err := f.feeRules.Insert(ctx, &domain.FeeRule{CarrierID: "carrier-1", ZoneID: quote.ZoneID, Version: 2, BaseFeeAmount: 99000}); err != nil {
+		t.Fatal(err)
+	}
+	f.orders.vendorOrders["vo-1"] = &adapter.VendorOrderSnapshot{
+		ID: "vo-1", VendorID: "vendor-a", Status: "paid", Fulfillable: true,
+		BuyerID: "buyer-1", RecipientName: "A", Phone: "0900000000", Province: "HN", StreetAddress: "1 St",
+		Quote: &domain.QuotedFee{FeeAmount: quote.FeeAmount, CarrierID: quote.CarrierID, ZoneID: quote.ZoneID, FeeRuleID: quote.FeeRuleID},
+	}
+
+	shipment, err := f.uc.CreateOrGet(ctx, "user-a", "vo-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if shipment.FeeAmount != quote.FeeAmount || *shipment.FeeRuleID != quote.FeeRuleID {
+		t.Fatalf("the shipment must keep the fee the buyer paid, got %d", shipment.FeeAmount)
+	}
+}
+
+func TestQuote_PricesWithoutCreatingAndReportsUnavailable(t *testing.T) {
+	f := newFixture()
+	ctx := t.Context()
+	f.setUpShippingConfig(t, "vendor-a", "HN")
+
+	quote, err := f.uc.Quote(ctx, "vendor-a", "HN", 1000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if quote.FeeAmount != 20000 || quote.Currency != "VND" || quote.FeeRuleVersion != 1 || quote.FeeRuleID == "" {
+		t.Fatalf("unexpected quote %+v", quote)
+	}
+	if list, _ := f.shipments.ListByVendor(ctx, "vendor-a", 10, 0); len(list) != 0 {
+		t.Fatal("a quote must not create a shipment")
+	}
+	for _, tc := range []struct{ vendor, province string }{{"vendor-x", "HN"}, {"vendor-a", "NOWHERE"}} {
+		_, err := f.uc.Quote(ctx, tc.vendor, tc.province, 1000)
+		if mustAppError(t, err).Code != apperror.CodeValidation {
+			t.Errorf("%+v: expected unavailable, got %v", tc, err)
+		}
+	}
+	if _, err := f.uc.Quote(ctx, "vendor-a", "HN", -1); err == nil {
+		t.Error("negative weight must be rejected")
 	}
 }
 

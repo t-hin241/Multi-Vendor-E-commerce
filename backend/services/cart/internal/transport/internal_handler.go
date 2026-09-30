@@ -46,6 +46,25 @@ func (h *InternalHandler) CreateSnapshot(c *gin.Context) {
 	httpresponse.OK(c, status, toSnapshotResponse(op, replayed))
 }
 
+// Lines: GET /internal/carts/:buyerId/lines — the current lines for a
+// checkout preview, without creating a checkout operation.
+func (h *InternalHandler) Lines(c *gin.Context) {
+	buyerID := c.Param("buyerId")
+	if !validUUID(buyerID) {
+		httpresponse.Error(c, http.StatusBadRequest, "validation_error", "buyer_id must be a valid id")
+		return
+	}
+	version, lines, err := h.cart.CurrentLines(c.Request.Context(), buyerID)
+	if err != nil {
+		httpresponse.HandleError(c, h.log, err)
+		return
+	}
+	op := &domain.CheckoutOperation{BuyerID: buyerID, CartVersion: version, Lines: lines}
+	resp := toSnapshotResponse(op, false)
+	c.Header("Cache-Control", "no-store")
+	httpresponse.OK(c, http.StatusOK, gin.H{"buyer_id": buyerID, "cart_version": resp.CartVersion, "lines": resp.Lines})
+}
+
 // Consume: POST /internal/carts/:buyerId/checkout-snapshots/:operationId/consume
 func (h *InternalHandler) Consume(c *gin.Context) {
 	buyerID, operationID := c.Param("buyerId"), c.Param("operationId")

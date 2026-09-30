@@ -62,6 +62,13 @@ type reserveRequest struct {
 	Items   []reserveLineRequest `json:"items" binding:"required,min=1,max=100,dive"`
 }
 
+type returnRestockRequest struct {
+	ReturnID  string  `json:"return_id" binding:"required,uuid"`
+	ProductID string  `json:"product_id" binding:"required,uuid"`
+	VariantID *string `json:"variant_id" binding:"omitempty,uuid"`
+	Quantity  int64   `json:"quantity" binding:"required,min=1"`
+}
+
 type releaseRequest struct {
 	OrderID string `json:"order_id" binding:"required,uuid"`
 }

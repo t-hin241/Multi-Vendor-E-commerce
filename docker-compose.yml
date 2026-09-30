@@ -1,5 +1,10 @@
 name: shopee
 
+# Build images with "bash deploy/build-images.sh" (one image at a time, base
+# images pulled first, retried on failure). A plain "docker compose build"
+# or "up --build" builds every image in parallel and can time out with
+# "failed to solve: context deadline exceeded" on a slow network or host.
+
 x-service-defaults: &service-defaults
   restart: unless-stopped
   networks:
@@ -264,6 +269,10 @@ services:
       INVENTORY_SERVICE_URL: http://inventory:8084
       SHIPMENT_SERVICE_URL: http://shipment:8088
       NOTIFICATION_SERVICE_URL: http://notification:8090
+      # No depends_on: Payment already depends on Order; refund requests are
+      # durable effects retried until Payment is up.
+      PAYMENT_SERVICE_URL: http://payment:8087
+      ORDER_RETURN_WINDOW_DAYS: ${ORDER_RETURN_WINDOW_DAYS:-7}
     ports:
       - "8086:8086"
 
@@ -294,6 +303,8 @@ services:
       PAYOS_API_URL: ${PAYOS_API_URL:-https://api-merchant.payos.vn}
       PAYOS_RETURN_URL: ${PAYOS_RETURN_URL:-http://localhost:3000/orders/payment-return}
       PAYOS_CANCEL_URL: ${PAYOS_CANCEL_URL:-http://localhost:3000/orders/payment-cancel}
+      VENDOR_SERVICE_URL: http://vendor:8082
+      PAYMENT_WEBHOOK_RATE_PER_MINUTE: ${PAYMENT_WEBHOOK_RATE_PER_MINUTE:-600}
     ports:
       - "8087:8087"
 

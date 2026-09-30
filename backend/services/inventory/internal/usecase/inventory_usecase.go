@@ -335,6 +335,23 @@ func (uc *InventoryUseCase) Commit(ctx context.Context, orderID string) error {
 	return nil
 }
 
+// RestockReturn puts the units of a return Order received and inspected
+// back into available stock, once per return id.
+func (uc *InventoryUseCase) RestockReturn(ctx context.Context, returnID, productID string, variantID *string, quantity int64) (replayed bool, err error) {
+	if returnID == "" || productID == "" {
+		return false, apperror.Validation("return_id and product_id are required")
+	}
+	if quantity <= 0 {
+		return false, apperror.Validation("quantity must be positive")
+	}
+	replayed, err = uc.items.RestockReturn(ctx, returnID, productID, variantID, quantity)
+	var notStocked *repository.ErrProductNotStocked
+	if errors.As(err, &notStocked) {
+		return false, apperror.Conflict("The returned product has no stock item")
+	}
+	return replayed, inventoryError(err)
+}
+
 // verifyItemOwnership resolves who owns the target of a stock operation —
 // the product/variant itself already names a fixed vendor id, so there's
 // nothing for the client to disambiguate here — and confirms that vendor is

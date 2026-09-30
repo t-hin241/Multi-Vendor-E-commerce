@@ -19,7 +19,7 @@ func (uc *OrderUseCase) AddAddress(ctx context.Context, buyerID, recipientName, 
 		return nil, err
 	}
 
-	existing, err := uc.buyerAddresses.ListForBuyer(ctx, buyerID)
+	existing, err := uc.BuyerAddresses.ListForBuyer(ctx, buyerID)
 	if err != nil {
 		return nil, apperror.Internal(err)
 	}
@@ -29,14 +29,14 @@ func (uc *OrderUseCase) AddAddress(ctx context.Context, buyerID, recipientName, 
 		Province: province, District: district, Ward: ward, StreetAddress: streetAddress,
 		IsDefault: len(existing) == 0,
 	}
-	if err := uc.buyerAddresses.Create(ctx, address); err != nil {
+	if err := uc.BuyerAddresses.Create(ctx, address); err != nil {
 		return nil, apperror.Internal(err)
 	}
 	return address, nil
 }
 
 func (uc *OrderUseCase) ListMyAddresses(ctx context.Context, buyerID string) ([]*domain.BuyerAddress, error) {
-	addresses, err := uc.buyerAddresses.ListForBuyer(ctx, buyerID)
+	addresses, err := uc.BuyerAddresses.ListForBuyer(ctx, buyerID)
 	if err != nil {
 		return nil, apperror.Internal(err)
 	}
@@ -54,7 +54,7 @@ func (uc *OrderUseCase) UpdateAddress(ctx context.Context, buyerID, addressID, r
 
 	address.RecipientName, address.Phone = recipientName, phone
 	address.Province, address.District, address.Ward, address.StreetAddress = province, district, ward, streetAddress
-	if err := uc.buyerAddresses.Update(ctx, addressID, address); err != nil {
+	if err := uc.BuyerAddresses.Update(ctx, addressID, address); err != nil {
 		return nil, apperror.Internal(err)
 	}
 	return address, nil
@@ -64,7 +64,7 @@ func (uc *OrderUseCase) DeleteAddress(ctx context.Context, buyerID, addressID st
 	if _, err := uc.ownedAddress(ctx, buyerID, addressID); err != nil {
 		return err
 	}
-	if err := uc.buyerAddresses.Delete(ctx, addressID); err != nil {
+	if err := uc.BuyerAddresses.Delete(ctx, addressID); err != nil {
 		return apperror.Internal(err)
 	}
 	return nil
@@ -74,14 +74,14 @@ func (uc *OrderUseCase) SetDefaultAddress(ctx context.Context, buyerID, addressI
 	if _, err := uc.ownedAddress(ctx, buyerID, addressID); err != nil {
 		return err
 	}
-	if err := uc.buyerAddresses.SetDefault(ctx, buyerID, addressID); err != nil {
+	if err := uc.BuyerAddresses.SetDefault(ctx, buyerID, addressID); err != nil {
 		return apperror.Internal(err)
 	}
 	return nil
 }
 
 func (uc *OrderUseCase) ownedAddress(ctx context.Context, buyerID, addressID string) (*domain.BuyerAddress, error) {
-	address, err := uc.buyerAddresses.FindByID(ctx, addressID)
+	address, err := uc.BuyerAddresses.FindByID(ctx, addressID)
 	if err != nil {
 		if errors.Is(err, repository.ErrBuyerAddressNotFound) {
 			return nil, apperror.NotFound("Address not found")

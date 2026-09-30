@@ -92,6 +92,34 @@ func (c *HTTPCartClient) Snapshot(ctx context.Context, buyerID, operationID stri
 	return snap, nil
 }
 
+// Lines reads the buyer's current cart without creating a checkout
+// operation, for the checkout preview.
+func (c *HTTPCartClient) Lines(ctx context.Context, buyerID string) (*CartSnapshot, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/internal/carts/"+url.PathEscape(buyerID)+"/lines", nil)
+	if err != nil {
+		return nil, apperror.Internal(err)
+	}
+	serviceauth.SetRequestHeaders(req, c.key)
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return nil, apperror.Internal(fmt.Errorf("cart service unreachable: %w", err))
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, apperror.Internal(fmt.Errorf("cart service returned status %d", resp.StatusCode))
+	}
+	var body snapshotEnvelope
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&body); err != nil {
+		return nil, apperror.Internal(err)
+	}
+	snap := &CartSnapshot{CartVersion: body.Data.CartVersion, Lines: make([]CartLine, 0, len(body.Data.Lines))}
+	for _, l := range body.Data.Lines {
+		snap.Lines = append(snap.Lines, CartLine{LineID: l.LineID, ProductID: l.ProductID, VariantID: l.VariantID,
+			Quantity: l.Quantity, SeenPriceAmount: l.SeenPriceAmount, SeenCurrency: l.SeenCurrency})
+	}
+	return snap, nil
+}
+
 // Consume removes the purchased units of the snapshotted lines from the
 // buyer's cart. Cart makes it idempotent per operation.
 func (c *HTTPCartClient) Consume(ctx context.Context, buyerID, operationID string, lines []CartConsumeLine) error {

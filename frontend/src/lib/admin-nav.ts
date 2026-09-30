@@ -1,5 +1,7 @@
 import {
+  Banknote,
   ClipboardList,
+  CreditCard,
   FolderTree,
   MessageSquareWarning,
   PackagePlus,
@@ -8,7 +10,9 @@ import {
   ShieldCheck,
   Tags,
   Truck,
+  Undo2,
   Users,
+  Wallet,
 } from "lucide-react";
 
 export type AdminNavLink = {
@@ -29,7 +33,16 @@ export const ADMIN_NAV_GROUPS: AdminNavGroup[] = [
       { href: "/admin/users", label: "Users", icon: Users },
     ],
   },
-  { label: "Operations", items: [{ href: "/admin/orders", label: "Orders", icon: ClipboardList }] },
+  {
+    label: "Operations",
+    items: [
+      { href: "/admin/orders", label: "Orders", icon: ClipboardList },
+      { href: "/admin/returns", label: "Returns", icon: Undo2 },
+      { href: "/admin/refunds", label: "Refunds", icon: Banknote },
+      { href: "/admin/payments", label: "Payment reconciliation", icon: CreditCard },
+      { href: "/admin/payouts", label: "Vendor payouts", icon: Wallet },
+    ],
+  },
   {
     label: "Configuration",
     items: [
