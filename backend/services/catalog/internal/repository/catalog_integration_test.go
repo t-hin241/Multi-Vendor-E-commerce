@@ -295,8 +295,21 @@ func TestCatalogMediaConcurrencyCleanupAndRevision(t *testing.T) {
 	if err := cleanup.Sweep(ctx, f.store); err != nil {
 		t.Fatal(err)
 	}
-	if len(f.store.deleted) != 1 || f.store.deleted[0] != orphan {
-		t.Fatal("cleanup deleted referenced media")
+	// Uploads that lost the race for the last slots are staged orphans too, so
+	// the sweep may delete more than the explicit orphan, never referenced media.
+	deletedOrphan := false
+	for _, key := range f.store.deleted {
+		deletedOrphan = deletedOrphan || key == orphan
+		var referenced bool
+		if err := f.pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM product_images WHERE object_key=$1 UNION ALL SELECT 1 FROM product_media WHERE object_key=$1)`, key).Scan(&referenced); err != nil {
+			t.Fatal(err)
+		}
+		if referenced {
+			t.Fatal("cleanup deleted referenced media")
+		}
+	}
+	if !deletedOrphan {
+		t.Fatal("cleanup kept unattached object")
 	}
 	if _, err := f.uc.UploadImage(ctx, uuid.NewString(), p.ID, "image/jpeg", data); err == nil {
 		t.Fatal("cross-owner upload allowed")

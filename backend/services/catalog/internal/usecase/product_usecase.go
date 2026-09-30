@@ -652,36 +652,51 @@ func (uc *ProductUseCase) setActive(ctx context.Context, userID, productID strin
 	return p, nil
 }
 
-func (uc *ProductUseCase) uploadImage(ctx context.Context, userID, productID, contentType string, data []byte) (*domain.ProductImage, error) {
-	p, err := uc.ownedByUser(ctx, userID, productID)
+// stageObject tracks and uploads an object before any metadata transaction
+// opens. Track commits on its own pooled connection and the upload is slow
+// network I/O, so neither may run while a transaction holds a connection and
+// the product row lock: concurrent uploads would exhaust the pool and
+// deadlock. A failed attach leaves the tracked object for the cleanup sweep.
+func (uc *ProductUseCase) stageObject(ctx context.Context, productID, dir, ext string, data []byte, contentType string) (objectKey, url string, err error) {
+	suffix, err := randomHex(16)
 	if err != nil {
-		return nil, err
+		return "", "", apperror.Internal(err)
+	}
+	objectKey = fmt.Sprintf("products/%s/%s%s%s", productID, dir, suffix, ext)
+	if err := uc.ops.Cleanup.Track(ctx, objectKey, productID); err != nil {
+		return "", "", apperror.Internal(err)
+	}
+	url, err = uc.store.Upload(ctx, objectKey, data, contentType)
+	if err != nil {
+		return "", "", apperror.Internal(err)
+	}
+	if !domain.SafeMediaURL(url) {
+		return "", "", apperror.Validation("Unsafe media URL")
+	}
+	return objectKey, url, nil
+}
+
+// lockForAttach re-reads the product under the transaction's row lock, so
+// the attach sees current moderation state and the cleanup sweep cannot
+// delete the staged object mid-attachment. Ownership was already verified.
+func (uc *ProductUseCase) lockForAttach(ctx context.Context, userID string, owned *domain.Product) (*domain.Product, error) {
+	p, err := uc.products.FindByID(ctx, owned.ID)
+	if err != nil {
+		if errors.Is(err, repository.ErrProductNotFound) {
+			return nil, apperror.NotFound("Product not found")
+		}
+		return nil, apperror.Internal(err)
 	}
 	if err := uc.revise(ctx, p, userID); err != nil {
 		return nil, err
 	}
+	return p, nil
+}
 
-	_, ext, detectedType, err := domain.ValidateMediaBytes(contentType, data, true)
+func (uc *ProductUseCase) attachImage(ctx context.Context, userID string, owned *domain.Product, objectKey, url string) (*domain.ProductImage, error) {
+	p, err := uc.lockForAttach(ctx, userID, owned)
 	if err != nil {
 		return nil, err
-	}
-
-	suffix, err := randomHex(16)
-	if err != nil {
-		return nil, apperror.Internal(err)
-	}
-	objectKey := fmt.Sprintf("products/%s/%s%s", p.ID, suffix, ext)
-
-	if err := uc.ops.Cleanup.Track(ctx, objectKey, p.ID); err != nil {
-		return nil, apperror.Internal(err)
-	}
-	url, err := uc.store.Upload(ctx, objectKey, data, detectedType)
-	if err != nil {
-		return nil, apperror.Internal(err)
-	}
-
-	if !domain.SafeMediaURL(url) {
-		return nil, apperror.Validation("Unsafe media URL")
 	}
 	img := &domain.ProductImage{ProductID: p.ID, ObjectKey: objectKey, URL: url}
 	oldKeys, err := uc.images.ReplaceForProduct(ctx, img)
@@ -744,44 +759,27 @@ func (uc *ProductUseCase) ListImagesForOwner(ctx context.Context, userID, produc
 // gallery — a separate concept from UploadImage's plain photo gallery, that
 // also accepts short videos. Mirrors UploadImage's ownership-then-validate
 // flow exactly.
-func (uc *ProductUseCase) uploadMedia(ctx context.Context, userID, productID, contentType string, data []byte) (*domain.ProductMedia, error) {
-	p, err := uc.ownedByUser(ctx, userID, productID)
+// mediaSlot returns the next media position, rejecting a full gallery.
+func (uc *ProductUseCase) mediaSlot(ctx context.Context, productID string) (int, error) {
+	position, err := uc.media.CountForProduct(ctx, productID)
 	if err != nil {
-		return nil, err
-	}
-	if err := uc.revise(ctx, p, userID); err != nil {
-		return nil, err
-	}
-
-	kind, ext, detectedType, err := domain.ValidateMediaBytes(contentType, data, false)
-	if err != nil {
-		return nil, err
-	}
-
-	position, err := uc.media.CountForProduct(ctx, p.ID)
-	if err != nil {
-		return nil, apperror.Internal(err)
+		return 0, apperror.Internal(err)
 	}
 	if position >= domain.MaxMediaItemsPerProduct {
-		return nil, apperror.Validation("A product can have at most 5 media items")
+		return 0, apperror.Validation("A product can have at most 5 media items")
 	}
+	return position, nil
+}
 
-	suffix, err := randomHex(16)
+func (uc *ProductUseCase) attachMedia(ctx context.Context, userID string, owned *domain.Product, kind domain.MediaKind, objectKey, url, detectedType string, data []byte) (*domain.ProductMedia, error) {
+	p, err := uc.lockForAttach(ctx, userID, owned)
 	if err != nil {
-		return nil, apperror.Internal(err)
+		return nil, err
 	}
-	objectKey := fmt.Sprintf("products/%s/media/%s%s", p.ID, suffix, ext)
-
-	if err := uc.ops.Cleanup.Track(ctx, objectKey, p.ID); err != nil {
-		return nil, apperror.Internal(err)
-	}
-	url, err := uc.store.Upload(ctx, objectKey, data, detectedType)
+	// Authoritative limit check under the row lock; the pre-upload check can race.
+	position, err := uc.mediaSlot(ctx, p.ID)
 	if err != nil {
-		return nil, apperror.Internal(err)
-	}
-
-	if !domain.SafeMediaURL(url) {
-		return nil, apperror.Validation("Unsafe media URL")
+		return nil, err
 	}
 	m := &domain.ProductMedia{
 		ProductID: p.ID, Kind: kind, ObjectKey: objectKey, URL: url,
@@ -1340,21 +1338,51 @@ func (uc *ProductUseCase) Reject(ctx context.Context, productID, adminUserID, re
 	return value, err
 }
 
+// UploadImage and UploadMedia stage the object (see stageObject) before the
+// metadata transaction; only the attach step runs inside it.
 func (uc *ProductUseCase) UploadImage(ctx context.Context, userID, productID, contentType string, data []byte) (*domain.ProductImage, error) {
+	p, err := uc.ownedByUser(ctx, userID, productID)
+	if err != nil {
+		return nil, err
+	}
+	_, ext, detectedType, err := domain.ValidateMediaBytes(contentType, data, true)
+	if err != nil {
+		return nil, err
+	}
+	objectKey, url, err := uc.stageObject(ctx, p.ID, "", ext, data, detectedType)
+	if err != nil {
+		return nil, err
+	}
 	var value *domain.ProductImage
-	err := uc.transact(ctx, func(ctx context.Context) error {
+	err = uc.transact(ctx, func(ctx context.Context) error {
 		var err error
-		value, err = uc.uploadImage(ctx, userID, productID, contentType, data)
+		value, err = uc.attachImage(ctx, userID, p, objectKey, url)
 		return err
 	})
 	return value, err
 }
 
 func (uc *ProductUseCase) UploadMedia(ctx context.Context, userID, productID, contentType string, data []byte) (*domain.ProductMedia, error) {
+	p, err := uc.ownedByUser(ctx, userID, productID)
+	if err != nil {
+		return nil, err
+	}
+	kind, ext, detectedType, err := domain.ValidateMediaBytes(contentType, data, false)
+	if err != nil {
+		return nil, err
+	}
+	// Cheap early rejection so a full gallery does not upload an orphan.
+	if _, err := uc.mediaSlot(ctx, p.ID); err != nil {
+		return nil, err
+	}
+	objectKey, url, err := uc.stageObject(ctx, p.ID, "media/", ext, data, detectedType)
+	if err != nil {
+		return nil, err
+	}
 	var value *domain.ProductMedia
-	err := uc.transact(ctx, func(ctx context.Context) error {
+	err = uc.transact(ctx, func(ctx context.Context) error {
 		var err error
-		value, err = uc.uploadMedia(ctx, userID, productID, contentType, data)
+		value, err = uc.attachMedia(ctx, userID, p, kind, objectKey, url, detectedType, data)
 		return err
 	})
 	return value, err
