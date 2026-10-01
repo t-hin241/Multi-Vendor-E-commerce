@@ -37,6 +37,7 @@ export const ADMIN_NAV_GROUPS: AdminNavGroup[] = [
     label: "Operations",
     items: [
       { href: "/admin/orders", label: "Orders", icon: ClipboardList },
+      { href: "/admin/fulfillment", label: "Fulfillment", icon: Truck },
       { href: "/admin/returns", label: "Returns", icon: Undo2 },
       { href: "/admin/refunds", label: "Refunds", icon: Banknote },
       { href: "/admin/payments", label: "Payment reconciliation", icon: CreditCard },

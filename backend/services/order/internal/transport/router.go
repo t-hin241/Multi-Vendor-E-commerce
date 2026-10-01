@@ -105,6 +105,7 @@ func NewRouter(
 		internalGroup.POST("/inventory-events", internalHandler.InventoryEvent)
 		internalGroup.POST("/refund-events", internalHandler.RefundEvent)
 		internalGroup.POST("/settlements/holds", internalHandler.SettlementHolds)
+		internalGroup.POST("/shipment-events", internalHandler.ShipmentEvent)
 	}
 
 	return r

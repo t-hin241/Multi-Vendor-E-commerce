@@ -39,6 +39,7 @@ func (p *Provider) RequestInterception(_ context.Context, _ carrier.RequestInter
 }
 
 type eventPayload struct {
+	EventID             string `json:"event_id"`
 	ProviderReferenceID string `json:"provider_reference_id"`
 	Accepted            bool   `json:"accepted"`
 	Reason              string `json:"reason,omitempty"`
@@ -50,7 +51,7 @@ type eventPayload struct {
 // signature verification and webhook processing path a real delivery would
 // go through, so the two code paths can never drift apart.
 func (p *Provider) BuildSignedEvent(providerReferenceID string, accepted bool, reason string) (payload []byte, signature string, err error) {
-	evt := eventPayload{ProviderReferenceID: providerReferenceID, Accepted: accepted, Reason: reason}
+	evt := eventPayload{EventID: "mock_evt_" + uuid.NewString(), ProviderReferenceID: providerReferenceID, Accepted: accepted, Reason: reason}
 
 	payload, err = json.Marshal(evt)
 	if err != nil {
@@ -81,6 +82,7 @@ func (p *Provider) Verify(payload []byte, signatureHeader string) (carrier.Decis
 	}
 
 	return carrier.DecisionEvent{
+		EventID:             evt.EventID,
 		ProviderReferenceID: evt.ProviderReferenceID,
 		Accepted:            evt.Accepted,
 		Reason:              evt.Reason,

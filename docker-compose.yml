@@ -330,8 +330,11 @@ services:
       DATABASE_URL: postgres://${POSTGRES_USER:-shopee}:${POSTGRES_PASSWORD}@postgres:5432/shipment_db?sslmode=disable
       VENDOR_SERVICE_URL: http://vendor:8082
       ORDER_SERVICE_URL: http://order:8086
-      SHIPMENT_CARRIER_PROVIDER: ${SHIPMENT_CARRIER_PROVIDER:-mock}
-      SHIPMENT_CARRIER_MOCK_WEBHOOK_SECRET: ${SHIPMENT_CARRIER_MOCK_WEBHOOK_SECRET:?set SHIPMENT_CARRIER_MOCK_WEBHOOK_SECRET in .env}
+      # manual (default): tracking entered by vendors/admins. mock: simulated
+      # carrier for local testing; refused when ENV=production.
+      SHIPMENT_CARRIER_PROVIDER: ${SHIPMENT_CARRIER_PROVIDER:-manual}
+      SHIPMENT_CARRIER_MOCK_WEBHOOK_SECRET: ${SHIPMENT_CARRIER_MOCK_WEBHOOK_SECRET:-}
+      SHIPMENT_ADDRESS_RETENTION_DAYS: ${SHIPMENT_ADDRESS_RETENTION_DAYS:-180}
     ports:
       - "8088:8088"
 

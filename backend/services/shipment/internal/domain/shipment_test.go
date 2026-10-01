@@ -65,3 +65,47 @@ func TestValidateTrackingNumber(t *testing.T) {
 		t.Errorf("unexpected error: %v", err)
 	}
 }
+
+func TestReturnedAndFinalStatuses(t *testing.T) {
+	if !domain.CanTransition(domain.StatusShipped, domain.StatusReturned) || !domain.CanTransition(domain.StatusInterceptionRequested, domain.StatusReturned) {
+		t.Fatal("a package in transit can come back")
+	}
+	for _, s := range []domain.Status{domain.StatusDelivered, domain.StatusCancelled, domain.StatusReturned} {
+		if !s.Final() || domain.CanTransition(s, domain.StatusShipped) {
+			t.Fatalf("%s must be final", s)
+		}
+	}
+	if domain.CanTransition(domain.StatusPending, domain.StatusReturned) {
+		t.Fatal("an unshipped package cannot be returned")
+	}
+}
+
+func TestTrackingNumberAndQuoteInput(t *testing.T) {
+	if got, err := domain.NormalizeTrackingNumber("  GHN-123.45 "); err != nil || got != "GHN-123.45" {
+		t.Fatalf("unexpected %q %v", got, err)
+	}
+	for _, bad := range []string{"", "  ", "ab", "has space", "<script>"} {
+		if _, err := domain.NormalizeTrackingNumber(bad); err == nil {
+			t.Fatalf("%q must be refused", bad)
+		}
+	}
+	if domain.ValidateQuoteInput("v", "HN", 0) == nil {
+		t.Fatal("a missing weight cannot be priced")
+	}
+	if domain.ValidateQuoteInput("v", "HN", 2_000_000) == nil {
+		t.Fatal("an absurd weight is refused")
+	}
+}
+
+func TestVendorViewDropsContactDetailsOnceFinal(t *testing.T) {
+	phone, street, province := "0900000000", "1 Test St", "HN"
+	s := &domain.Shipment{Status: domain.StatusShipped, Phone: &phone, StreetAddress: &street, Province: &province}
+	if s.ForVendor().Phone == nil {
+		t.Fatal("the vendor needs the address while shipping")
+	}
+	s.Status = domain.StatusDelivered
+	v := s.ForVendor()
+	if v.Phone != nil || v.StreetAddress != nil || v.Province == nil || s.Phone == nil {
+		t.Fatal("a final shipment shows the vendor the region only, without changing the record")
+	}
+}

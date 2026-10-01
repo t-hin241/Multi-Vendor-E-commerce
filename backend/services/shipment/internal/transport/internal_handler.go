@@ -54,6 +54,9 @@ type quoteRequest struct {
 	PackageWeightGrams int64  `json:"package_weight_grams" binding:"min=0"`
 }
 
+// a 400 from Quote means shipping is unavailable (no method, zone, fee
+// rule or weight), never a zero fee.
+
 type quoteResponse struct {
 	VendorID           string    `json:"vendor_id"`
 	FeeAmount          int64     `json:"fee_amount"`
@@ -65,6 +68,7 @@ type quoteResponse struct {
 	FeeRuleVersion     int       `json:"fee_rule_version"`
 	PackageWeightGrams int64     `json:"package_weight_grams"`
 	QuotedAt           time.Time `json:"quoted_at"`
+	ExpiresAt          time.Time `json:"expires_at"`
 }
 
 // Quote: POST /internal/shipments/quotes. Prices one vendor's package to a
@@ -84,7 +88,7 @@ func (h *InternalHandler) Quote(c *gin.Context) {
 	httpresponse.OK(c, http.StatusOK, quoteResponse{
 		VendorID: q.VendorID, FeeAmount: q.FeeAmount, Currency: q.Currency, CarrierID: q.CarrierID, ZoneID: q.ZoneID,
 		ZoneName: q.ZoneName, FeeRuleID: q.FeeRuleID, FeeRuleVersion: q.FeeRuleVersion,
-		PackageWeightGrams: q.PackageWeightGrams, QuotedAt: q.QuotedAt,
+		PackageWeightGrams: q.PackageWeightGrams, QuotedAt: q.QuotedAt, ExpiresAt: q.ExpiresAt,
 	})
 }
 

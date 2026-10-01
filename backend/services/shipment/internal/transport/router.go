@@ -5,6 +5,10 @@
 package transport
 
 import (
+	"context"
+	"net/http"
+	"time"
+
 	"github.com/gin-gonic/gin"
 	"github.com/rs/zerolog"
 
@@ -23,6 +27,7 @@ func NewRouter(
 	vendorMethodHandler *VendorShippingMethodHandler,
 	internalHandler *InternalHandler,
 	webhookHandler *WebhookHandler,
+	opsHandler *OpsHandler,
 	internalKey string,
 	checkers ...health.Checker,
 ) *gin.Engine {
@@ -34,6 +39,7 @@ func NewRouter(
 	r.Use(middleware.RequestID())
 	r.Use(middleware.StructuredLogging(log))
 	r.Use(middleware.Recovery(log))
+	r.Use(boundRequest())
 
 	health.RegisterRoutes(r, checkers...)
 
@@ -58,6 +64,13 @@ func NewRouter(
 		vendorGroup.POST("", shipmentHandler.Create)
 		vendorGroup.GET("/by-vendor-order/:vendorOrderID", shipmentHandler.GetByVendorOrderID)
 		vendorGroup.PATCH("/:id/advance", shipmentHandler.Advance)
+		vendorGroup.POST("/:id/ready", shipmentHandler.MarkReady)
+		vendorGroup.POST("/:id/ship", shipmentHandler.MarkShipped)
+		vendorGroup.POST("/:id/tracking", shipmentHandler.UpdateTracking)
+		vendorGroup.POST("/:id/failed-attempts", shipmentHandler.FailedAttempt)
+		vendorGroup.POST("/:id/deliver", shipmentHandler.MarkDelivered)
+		vendorGroup.POST("/:id/return", shipmentHandler.MarkReturned)
+		vendorGroup.POST("/:id/interception-decision", shipmentHandler.ResolveInterception)
 		vendorGroup.POST("/:id/simulate-carrier-decision", shipmentHandler.SimulateCarrierDecision)
 	}
 
@@ -80,6 +93,15 @@ func NewRouter(
 		adminGroup.GET("/zones/:id/provinces", adminHandler.ListZoneProvinces)
 		adminGroup.POST("/fee-rules", adminHandler.SetFeeRule)
 		adminGroup.GET("/fee-rules", adminHandler.ListFeeRules)
+
+		adminGroup.GET("/operations", opsHandler.Operations)
+		adminGroup.GET("/shipments/:id", opsHandler.Get)
+		adminGroup.POST("/shipments/:id/deliver", opsHandler.MarkDelivered)
+		adminGroup.POST("/shipments/:id/failed-attempts", opsHandler.FailedAttempt)
+		adminGroup.POST("/shipments/:id/return", opsHandler.MarkReturned)
+		adminGroup.POST("/shipments/:id/tracking", opsHandler.UpdateTracking)
+		adminGroup.POST("/shipments/:id/interception-decision", opsHandler.ResolveInterception)
+		adminGroup.POST("/order-events/:id/retry", opsHandler.RetryOrderEvent)
 	}
 
 	internalGroup := r.Group("/internal/shipments", serviceauth.Require(internalKey, serviceauth.Header))
@@ -94,4 +116,17 @@ func NewRouter(
 	r.POST("/api/webhooks/shipment-carrier", webhookHandler.Handle)
 
 	return r
+}
+
+// boundRequest caps processing time and body size.
+func boundRequest() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		ctx, cancel := context.WithTimeout(c.Request.Context(), 30*time.Second)
+		defer cancel()
+		c.Request = c.Request.WithContext(ctx)
+		if c.Request.Body != nil {
+			c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 1<<20)
+		}
+		c.Next()
+	}
 }

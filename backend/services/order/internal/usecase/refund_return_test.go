@@ -26,11 +26,10 @@ func deliveredOrder(t *testing.T, f *checkoutFixture) (*domain.Order, map[string
 	vos, _ := f.vendorOrders.ListByOrderID(t.Context(), order.ID)
 	for _, vo := range vos {
 		user := map[string]string{"vendor-a": "user-a", "vendor-b": "user-b"}[vo.VendorID]
-		for _, s := range []domain.Status{domain.StatusProcessing, domain.StatusShipped, domain.StatusCompleted} {
-			if _, err := f.uc.UpdateVendorOrderStatus(t.Context(), user, vo.ID, s); err != nil {
-				t.Fatal(err)
-			}
+		if _, err := f.uc.UpdateVendorOrderStatus(t.Context(), user, vo.ID, domain.StatusProcessing); err != nil {
+			t.Fatal(err)
 		}
+		shipmentEvent(t, f, vo.ID, "delivered")
 		byVendor[vo.VendorID], _ = f.vendorOrders.FindByID(t.Context(), vo.ID)
 	}
 	return f.orders.get(order.ID), byVendor

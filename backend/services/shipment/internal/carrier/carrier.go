@@ -29,6 +29,8 @@ type Provider interface {
 // DecisionEvent is a carrier's answer to a previously requested
 // interception, already verified and parsed.
 type DecisionEvent struct {
+	// EventID identifies the delivery; a repeated delivery is ignored.
+	EventID             string
 	ProviderReferenceID string
 	Accepted            bool
 	Reason              string

@@ -14,7 +14,12 @@ const SHIPMENT_STATUS_LABEL: Record<ShipmentStatus, string> = {
   delivered: "Đã giao hàng",
   cancelled: "Đã hủy",
   interception_requested: "Yêu cầu thu hồi",
+  returned: "Hàng đã hoàn về người bán",
 };
+
+export function shipmentStatusLabel(status: ShipmentStatus): string {
+  return SHIPMENT_STATUS_LABEL[status] ?? status;
+}
 
 // ShipmentTimeline is collapsed by default and only fetches
 // listShipmentEvents once expanded — a buyer with several packages
@@ -49,7 +54,7 @@ export function ShipmentTimeline({ shipmentId }: { shipmentId: string }) {
           {eventsQuery.data && eventsQuery.data.length > 0 && (
             <ol className="flex flex-col gap-3">
               {eventsQuery.data.map((event, i) => (
-                <li key={`${event.status}-${event.created_at}`} className="relative pl-5">
+                <li key={`${i}-${event.created_at}`} className="relative pl-5">
                   <span
                     className={cn(
                       "absolute top-1 left-0 size-2.5 rounded-full",
@@ -62,7 +67,7 @@ export function ShipmentTimeline({ shipmentId }: { shipmentId: string }) {
                   <p className="text-xs font-medium">{SHIPMENT_STATUS_LABEL[event.status]}</p>
                   {event.note && <p className="text-xs text-muted-foreground">{event.note}</p>}
                   <p className="text-[11px] text-muted-foreground">
-                    {new Date(event.created_at).toLocaleString("vi-VN")}
+                    {new Date(event.occurred_at ?? event.created_at).toLocaleString("vi-VN")}
                   </p>
                 </li>
               ))}

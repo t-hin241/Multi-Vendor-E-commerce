@@ -7,7 +7,7 @@ import { OrderStatusBadge } from "@/components/order-status-badge";
 import { ReturnRequestDialog } from "@/components/orders/return-request-dialog";
 import { PageShell } from "@/components/page-shell";
 import { PaymentSection } from "@/components/payment-section";
-import { ShipmentTimeline } from "@/components/shipment-timeline";
+import { ShipmentTimeline, shipmentStatusLabel } from "@/components/shipment-timeline";
 import { EmptyState, ErrorState, LoadingState } from "@/components/states/query-state";
 import {
   AlertDialog,
@@ -235,10 +235,32 @@ export default function OrderDetailPage() {
                     </p>
                     {shipment && (
                       <>
-                        <p className="mt-1 text-xs text-muted-foreground capitalize">
-                          Vận chuyển: {shipment.status.replace(/_/g, " ")}
-                          {shipment.tracking_number && ` (mã vận đơn: ${shipment.tracking_number})`}
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          Vận chuyển: {shipmentStatusLabel(shipment.status)}
+                          {shipment.tracking_number && ` · mã vận đơn ${shipment.tracking_number}`}
                         </p>
+                        {shipment.shipped_at && (
+                          <p className="text-xs text-muted-foreground">
+                            Giao cho vận chuyển:{" "}
+                            {new Date(shipment.shipped_at).toLocaleString("vi-VN")}
+                          </p>
+                        )}
+                        {shipment.delivered_at && (
+                          <p className="text-xs text-muted-foreground">
+                            Đã nhận hàng: {new Date(shipment.delivered_at).toLocaleString("vi-VN")}
+                          </p>
+                        )}
+                        {shipment.failed_attempts > 0 && shipment.status === "shipped" && (
+                          <p className="text-xs text-warning">
+                            Giao không thành công {shipment.failed_attempts} lần
+                            {shipment.last_attempt_reason && `: ${shipment.last_attempt_reason}`}
+                          </p>
+                        )}
+                        {shipment.status === "interception_requested" && (
+                          <p className="text-xs text-warning">
+                            Đơn đã hủy; đang chờ đơn vị vận chuyển xác nhận có chặn được hàng không.
+                          </p>
+                        )}
                         <ShipmentTimeline shipmentId={shipment.id} />
                       </>
                     )}

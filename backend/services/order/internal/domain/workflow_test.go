@@ -157,3 +157,14 @@ func asAppError(err error, target **apperror.Error) bool {
 	}
 	return ok
 }
+
+func TestApplyShippingRefusesExpiredQuote(t *testing.T) {
+	plan, err := domain.BuildCheckoutPlan("buyer", []domain.CheckoutLine{{ProductID: "p", VendorID: "a", ProductName: "P", PriceAmount: 100, Currency: "VND", Quantity: 1}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	expired := domain.ShippingQuote{VendorID: "a", FeeAmount: 10, Currency: "VND", FeeRuleID: "r", ExpiresAt: time.Now().Add(-time.Second)}
+	if err := plan.ApplyShipping(map[string]domain.ShippingQuote{"a": expired}); err == nil {
+		t.Fatal("an expired quote must not be snapshotted")
+	}
+}

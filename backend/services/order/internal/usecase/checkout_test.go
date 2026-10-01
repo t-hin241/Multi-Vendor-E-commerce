@@ -359,3 +359,15 @@ func TestCancel_BuyerCancelsOwnUnpaidOrderDurably(t *testing.T) {
 		t.Fatal("a cancelled order cannot be cancelled again")
 	}
 }
+
+func TestCheckout_ProductWithoutWeightMakesItsShopUnavailable(t *testing.T) {
+	f := newCheckoutFixture()
+	f.product("p1", "vendor-a", 100000).PackageWeightGrams = nil
+	f.cartOf(adapter.CartLine{ProductID: "p1", Quantity: 1})
+	preview, err := f.uc.Preview(t.Context(), "buyer-1", f.addressID)
+	if err != nil || preview.Ready || preview.Vendors[0].ShippingFeeAmount != nil || preview.Vendors[0].ShippingError == "" {
+		t.Fatalf("a shop with an unweighed product must be unavailable, got %+v %v", preview, err)
+	}
+	_, _, err = f.uc.Checkout(t.Context(), "buyer-1", usecase.CheckoutInput{AddressID: f.addressID, IdempotencyKey: "key-no-weight"})
+	expectCode(t, err, domain.CodeShippingUnavailable)
+}

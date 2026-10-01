@@ -1849,8 +1849,15 @@ export function resolvePayoutItem(
 
 // ---------- Shipments ----------
 
+// returned: the carrier brought the package back to the vendor.
 export type ShipmentStatus =
-  "pending" | "ready_to_ship" | "shipped" | "delivered" | "cancelled" | "interception_requested";
+  | "pending"
+  | "ready_to_ship"
+  | "shipped"
+  | "delivered"
+  | "cancelled"
+  | "interception_requested"
+  | "returned";
 
 export type Shipment = {
   id: string;
@@ -1869,6 +1876,13 @@ export type Shipment = {
   street_address?: string;
   shipped_at?: string;
   delivered_at?: string;
+  returned_at?: string;
+  cancelled_at?: string;
+  tracking_updated_at?: string;
+  failed_attempts: number;
+  last_attempt_reason?: string;
+  // The buyer's contact details were removed after the retention period.
+  address_redacted: boolean;
   intercept_requested_at?: string;
   intercept_resolved_at?: string;
   created_at: string;
@@ -1923,8 +1937,106 @@ export function listMyShipments(
 export type TrackingEvent = {
   status: ShipmentStatus;
   note?: string;
+  actor_role: "vendor" | "admin" | "carrier" | "system";
+  occurred_at: string;
   created_at: string;
 };
+
+// Fulfillment actions. Each is audited; shipped/delivered/returned are
+// reported to Order, which updates the order's status itself.
+function shipmentAction(token: string, path: string, body: unknown = {}) {
+  return request<Shipment>(path, { method: "POST", token, json: body });
+}
+
+export function markShipmentReady(token: string, shipmentId: string) {
+  return shipmentAction(token, `/api/shipments/${shipmentId}/ready`);
+}
+
+export function shipShipment(token: string, shipmentId: string, trackingNumber: string) {
+  return shipmentAction(token, `/api/shipments/${shipmentId}/ship`, {
+    tracking_number: trackingNumber,
+  });
+}
+
+export function updateShipmentTracking(
+  token: string,
+  shipmentId: string,
+  trackingNumber: string,
+  reason: string,
+) {
+  return shipmentAction(token, `/api/shipments/${shipmentId}/tracking`, {
+    tracking_number: trackingNumber,
+    reason,
+  });
+}
+
+export function recordFailedDelivery(token: string, shipmentId: string, reason: string) {
+  return shipmentAction(token, `/api/shipments/${shipmentId}/failed-attempts`, { reason });
+}
+
+export function markShipmentDelivered(token: string, shipmentId: string, note = "") {
+  return shipmentAction(token, `/api/shipments/${shipmentId}/deliver`, { note });
+}
+
+export function markShipmentReturned(token: string, shipmentId: string, reason: string) {
+  return shipmentAction(token, `/api/shipments/${shipmentId}/return`, { reason });
+}
+
+// resolveInterception records the carrier's answer after calling it.
+export function resolveInterception(
+  token: string,
+  shipmentId: string,
+  accepted: boolean,
+  note: string,
+) {
+  return shipmentAction(token, `/api/shipments/${shipmentId}/interception-decision`, {
+    accepted,
+    note,
+  });
+}
+
+// ----- admin fulfillment operations -----
+
+export type ShipmentOperations = {
+  counts: Record<string, number>;
+  outbox: {
+    id: string;
+    shipment_id: string;
+    vendor_order_id: string;
+    event_type: string;
+    attempts: number;
+    requires_review: boolean;
+    last_error?: string;
+    created_at: string;
+  }[];
+  lists: Record<string, Shipment[]>;
+};
+
+export function getShipmentOperations(token: string): Promise<ShipmentOperations> {
+  return request<ShipmentOperations>("/api/shipments/admin/operations", { token });
+}
+
+export function adminShipmentAction(
+  token: string,
+  shipmentId: string,
+  action: "deliver" | "failed-attempts" | "return" | "interception-decision",
+  body: Record<string, unknown>,
+): Promise<Shipment> {
+  return shipmentAction(token, `/api/shipments/admin/shipments/${shipmentId}/${action}`, body);
+}
+
+export function retryShipmentOrderEvent(
+  token: string,
+  eventId: string,
+  shipmentId: string,
+  reason: string,
+) {
+  return request(`/api/shipments/admin/order-events/${eventId}/retry`, {
+    method: "POST",
+    token,
+    json: { shipment_id: shipmentId, reason },
+  });
+}
 
 export function listShipmentEvents(token: string, shipmentId: string): Promise<TrackingEvent[]> {
   return request<TrackingEvent[]>(`/api/shipments/${shipmentId}/events`, { token });

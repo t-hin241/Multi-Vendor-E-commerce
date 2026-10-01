@@ -104,6 +104,7 @@ func (c *HTTPShipmentClient) Quote(ctx context.Context, vendorID, province strin
 			FeeRuleVersion     int       `json:"fee_rule_version"`
 			PackageWeightGrams int64     `json:"package_weight_grams"`
 			QuotedAt           time.Time `json:"quoted_at"`
+			ExpiresAt          time.Time `json:"expires_at"`
 		} `json:"data"`
 	}
 	payload := map[string]any{"vendor_id": vendorID, "province": province, "package_weight_grams": weightGrams}
@@ -115,7 +116,7 @@ func (c *HTTPShipmentClient) Quote(ctx context.Context, vendorID, province strin
 		return nil, apperror.Internal(fmt.Errorf("incomplete shipping quote"))
 	}
 	return &domain.ShippingQuote{VendorID: vendorID, FeeAmount: d.FeeAmount, Currency: d.Currency, CarrierID: d.CarrierID,
-		ZoneID: d.ZoneID, FeeRuleID: d.FeeRuleID, FeeRuleVersion: d.FeeRuleVersion, PackageWeightGrams: d.PackageWeightGrams, QuotedAt: d.QuotedAt}, nil
+		ZoneID: d.ZoneID, FeeRuleID: d.FeeRuleID, FeeRuleVersion: d.FeeRuleVersion, PackageWeightGrams: d.PackageWeightGrams, QuotedAt: d.QuotedAt, ExpiresAt: d.ExpiresAt}, nil
 }
 
 // CreateShipment opens (or returns the existing) shipment of a paid vendor

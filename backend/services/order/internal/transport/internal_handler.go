@@ -148,6 +148,31 @@ func (h *InternalHandler) MarkPaymentFailed(c *gin.Context) {
 	httpresponse.OK(c, http.StatusOK, toOrderResponse(order))
 }
 
+type shipmentEventRequest struct {
+	EventID       string    `json:"event_id" binding:"required,uuid"`
+	ShipmentID    string    `json:"shipment_id" binding:"required,uuid"`
+	VendorOrderID string    `json:"vendor_order_id" binding:"required,uuid"`
+	Type          string    `json:"type" binding:"required,oneof=shipped delivered returned"`
+	OccurredAt    time.Time `json:"occurred_at" binding:"required"`
+}
+
+// ShipmentEvent receives Shipment's fulfillment facts; Order decides the
+// vendor order's status from them.
+func (h *InternalHandler) ShipmentEvent(c *gin.Context) {
+	var req shipmentEventRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		httpresponse.Error(c, http.StatusBadRequest, "validation_error", "Invalid shipment event")
+		return
+	}
+	err := h.orders.ApplyShipmentEvent(c.Request.Context(), usecase.ShipmentEvent{EventID: req.EventID, ShipmentID: req.ShipmentID,
+		VendorOrderID: req.VendorOrderID, Type: req.Type, OccurredAt: req.OccurredAt})
+	if err != nil {
+		httpresponse.HandleError(c, h.log, err)
+		return
+	}
+	httpresponse.OK(c, http.StatusOK, gin.H{"received": true})
+}
+
 type settlementHoldsRequest struct {
 	VendorOrderIDs []string `json:"vendor_order_ids" binding:"required,max=500,dive,uuid"`
 }

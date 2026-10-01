@@ -6,6 +6,7 @@ import (
 	"shopee/backend/pkg/apperror"
 	"shopee/backend/services/order/internal/adapter"
 	"shopee/backend/services/order/internal/domain"
+	"shopee/backend/services/order/internal/usecase"
 )
 
 func placedOrder(t *testing.T, f *checkoutFixture) *domain.Order {
@@ -146,21 +147,54 @@ func TestUpdateVendorOrderStatus_WeakestLinkAndOwnership(t *testing.T) {
 	_, err = f.uc.UpdateVendorOrderStatus(t.Context(), "user-a", voB.ID, domain.StatusProcessing)
 	expectCode(t, err, apperror.CodeForbidden)
 
-	for _, s := range []domain.Status{domain.StatusProcessing, domain.StatusShipped} {
-		if _, err := f.uc.UpdateVendorOrderStatus(t.Context(), "user-a", voA.ID, s); err != nil {
-			t.Fatal(err)
-		}
+	if _, err := f.uc.UpdateVendorOrderStatus(t.Context(), "user-a", voA.ID, domain.StatusProcessing); err != nil {
+		t.Fatal(err)
 	}
+	_, err = f.uc.UpdateVendorOrderStatus(t.Context(), "user-a", voA.ID, domain.StatusShipped)
+	expectCode(t, err, apperror.CodeValidation) // shipped follows the shipment
+	shipmentEvent(t, f, voA.ID, "shipped")
 	if o := f.orders.get(order.ID); o.Status != domain.StatusPaid {
 		t.Fatalf("the parent must wait for the slowest vendor, got %s", o.Status)
 	}
-	for _, s := range []domain.Status{domain.StatusProcessing, domain.StatusShipped} {
-		if _, err := f.uc.UpdateVendorOrderStatus(t.Context(), "user-b", voB.ID, s); err != nil {
-			t.Fatal(err)
-		}
-	}
+	shipmentEvent(t, f, voB.ID, "shipped") // straight from paid
 	if o := f.orders.get(order.ID); o.Status != domain.StatusShipped {
 		t.Fatalf("expected shipped once both shipped, got %s", o.Status)
+	}
+	shipmentEvent(t, f, voA.ID, "delivered")
+	if o := f.orders.get(order.ID); o.Status != domain.StatusShipped {
+		t.Fatalf("one delivered package must not complete the order, got %s", o.Status)
+	}
+}
+
+func shipmentEvent(t *testing.T, f *checkoutFixture, vendorOrderID, kind string) {
+	t.Helper()
+	if err := f.uc.ApplyShipmentEvent(t.Context(), usecase.ShipmentEvent{EventID: "evt", ShipmentID: "shp", VendorOrderID: vendorOrderID, Type: kind}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestShipmentEvents_ConvergeAndRefuseCancelledOrders(t *testing.T) {
+	f := newCheckoutFixture()
+	order := placedOrder(t, f)
+	vos, _ := f.vendorOrders.ListByOrderID(t.Context(), order.ID)
+	// Unpaid: a shipment event must not ship it.
+	err := f.uc.ApplyShipmentEvent(t.Context(), usecase.ShipmentEvent{VendorOrderID: vos[0].ID, Type: "shipped"})
+	expectCode(t, err, apperror.CodeConflict)
+	f.pay(t, order, "66666666-6666-6666-6666-666666666666")
+	// Delivered arriving before shipped, then both repeated: one completion.
+	shipmentEvent(t, f, vos[0].ID, "delivered")
+	shipmentEvent(t, f, vos[0].ID, "shipped")
+	shipmentEvent(t, f, vos[0].ID, "delivered")
+	vo, _ := f.vendorOrders.FindByID(t.Context(), vos[0].ID)
+	if vo.Status != domain.StatusCompleted || vo.CompletedAt == nil {
+		t.Fatalf("expected completed, got %s", vo.Status)
+	}
+	if n := len(f.payment.settlements); n != 1 {
+		t.Fatalf("a repeated delivery must report the sale once, got %d", n)
+	}
+	shipmentEvent(t, f, vos[0].ID, "returned") // recorded, no status change
+	if vo, _ = f.vendorOrders.FindByID(t.Context(), vos[0].ID); vo.Status != domain.StatusCompleted {
+		t.Fatal("a returned package does not change the order by itself")
 	}
 }
 

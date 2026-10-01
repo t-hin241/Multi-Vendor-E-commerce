@@ -39,6 +39,8 @@ type ShippingQuote struct {
 	FeeRuleVersion     int
 	PackageWeightGrams int64
 	QuotedAt           time.Time
+	// ExpiresAt bounds how long the quote may be used (zero: no bound).
+	ExpiresAt time.Time
 }
 
 // BuildCheckoutPlan groups checkout lines by vendor and computes every
@@ -132,6 +134,9 @@ func (p *Plan) ApplyShipping(quotes map[string]ShippingQuote) error {
 		}
 		if quote.FeeAmount < 0 || quote.Currency != p.Order.Currency {
 			return ShippingUnavailable("Shipping cannot be quoted in this order's currency")
+		}
+		if !quote.ExpiresAt.IsZero() && time.Now().After(quote.ExpiresAt) {
+			return ShippingUnavailable("The shipping quote expired; please try again")
 		}
 		q := quote
 		vo.Shipping = &q

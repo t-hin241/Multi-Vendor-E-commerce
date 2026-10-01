@@ -11,6 +11,9 @@ import (
 // a quote whose currency differs from the order's.
 const FeeCurrency = "VND"
 
+// QuoteTTL is how long Order may use a quote; it re-quotes at checkout.
+const QuoteTTL = 15 * time.Minute
+
 // Quote is a shipping fee for one vendor's package to one destination,
 // computed from the vendor's default carrier and the current fee rule. It
 // does not create a shipment; Order snapshots it into the order.
@@ -25,6 +28,7 @@ type Quote struct {
 	FeeRuleVersion     int
 	PackageWeightGrams int64
 	QuotedAt           time.Time
+	ExpiresAt          time.Time
 }
 
 // QuotedFee is a quote Order already snapshotted and paid for; a shipment
@@ -36,13 +40,21 @@ type QuotedFee struct {
 	FeeRuleID string
 }
 
-// ValidateQuoteInput checks what a quote needs before any lookup.
+// maxPackageWeightGrams bounds a quote (1 tonne).
+const maxPackageWeightGrams = 1_000_000
+
+// ValidateQuoteInput checks what a quote needs before any lookup. A
+// missing (zero) weight cannot be priced: shipping is unavailable rather
+// than charged at the base fee.
 func ValidateQuoteInput(vendorID, province string, weightGrams int64) error {
 	if vendorID == "" || province == "" {
 		return apperror.Validation("vendor_id and province are required")
 	}
-	if weightGrams < 0 {
-		return apperror.Validation("Package weight cannot be negative")
+	if weightGrams <= 0 {
+		return apperror.Validation("Package weight is missing for this shop's products, so shipping cannot be priced")
+	}
+	if weightGrams > maxPackageWeightGrams {
+		return apperror.Validation("Package is too heavy to ship")
 	}
 	return nil
 }

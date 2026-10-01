@@ -10,12 +10,14 @@ import (
 	"shopee/backend/pkg/authjwt"
 	sessionconfig "shopee/backend/pkg/config"
 	"shopee/backend/pkg/health"
+	"shopee/backend/pkg/identityclient"
 	"shopee/backend/pkg/logger"
 	"shopee/backend/pkg/platform/natsclient"
 	"shopee/backend/pkg/platform/postgres"
 	"shopee/backend/pkg/platform/redisclient"
 	"shopee/backend/pkg/shutdown"
 	"shopee/backend/services/shipment/internal/adapter"
+	"shopee/backend/services/shipment/internal/carrier/manual"
 	"shopee/backend/services/shipment/internal/carrier/mock"
 	"shopee/backend/services/shipment/internal/config"
 	"shopee/backend/services/shipment/internal/repository"
@@ -73,29 +75,41 @@ func main() {
 	zoneRepo := repository.NewZoneRepository(dbPool)
 	feeRuleRepo := repository.NewFeeRuleRepository(dbPool)
 	vendorMethodRepo := repository.NewVendorShippingMethodRepository(dbPool)
-	trackingEventRepo := repository.NewTrackingEventRepository(dbPool)
+	outbox := repository.OrderOutbox{Pool: dbPool}
 
-	// SHIPMENT_CARRIER_PROVIDER is validated in config.Load, so "mock" is
-	// the only value reaching here today; a real carrier adapter is wired
-	// in the same way once this deployment has real carrier credentials.
-	mockCarrier := mock.New(cfg.CarrierMockWebhookSecret)
-
-	shipmentUseCase := usecase.NewShipmentUseCase(
-		shipmentRepo, vendorMethodRepo, zoneRepo, feeRuleRepo, trackingEventRepo, vendorClient, orderClient,
-		mockCarrier, mockCarrier, mockCarrier, log,
-	)
+	deps := usecase.Deps{
+		Tx: repository.Transactions{Pool: dbPool}, Shipments: shipmentRepo, VendorMethods: vendorMethodRepo, Zones: zoneRepo,
+		FeeRules: feeRuleRepo, Events: repository.NewTrackingEventRepository(dbPool), Outbox: outbox,
+		Vendors: vendorClient, Orders: orderClient, Identity: identityclient.Client{URL: internalServices.IdentityURL, Key: internalServices.Key},
+		Log: log,
+	}
+	if cfg.CarrierProvider == "mock" {
+		mockCarrier := mock.New(cfg.CarrierMockWebhookSecret)
+		deps.Carrier, deps.Verifier, deps.Simulator = mockCarrier, mockCarrier, mockCarrier
+	} else {
+		deps.Carrier, deps.Verifier = manual.Provider{}, manual.Provider{}
+	}
+	wake := make(chan struct{}, 1)
+	deps.Wake = func() {
+		select {
+		case wake <- struct{}{}:
+		default:
+		}
+	}
+	shipmentUseCase := usecase.NewShipmentUseCase(deps)
 	carrierUseCase := usecase.NewCarrierUseCase(carrierRepo)
 	zoneUseCase := usecase.NewZoneUseCase(zoneRepo)
 	feeRuleUseCase := usecase.NewFeeRuleUseCase(feeRuleRepo, carrierRepo, zoneRepo)
 	vendorMethodUseCase := usecase.NewVendorShippingMethodUseCase(vendorMethodRepo, carrierRepo, vendorClient)
 
-	shipmentHandler := transport.NewShipmentHandler(shipmentUseCase, log)
-	adminHandler := transport.NewAdminHandler(carrierUseCase, zoneUseCase, feeRuleUseCase, log)
-	vendorMethodHandler := transport.NewVendorShippingMethodHandler(vendorMethodUseCase, log)
-	internalHandler := transport.NewInternalHandler(shipmentUseCase, log)
-	webhookHandler := transport.NewWebhookHandler(shipmentUseCase, log)
-
-	router := transport.NewRouter(cfg.Base.Env, log, jwtManager, shipmentHandler, adminHandler, vendorMethodHandler, internalHandler, webhookHandler, internalServices.Key,
+	router := transport.NewRouter(cfg.Base.Env, log, jwtManager,
+		transport.NewShipmentHandler(shipmentUseCase, log),
+		transport.NewAdminHandler(carrierUseCase, zoneUseCase, feeRuleUseCase, log),
+		transport.NewVendorShippingMethodHandler(vendorMethodUseCase, log),
+		transport.NewInternalHandler(shipmentUseCase, log),
+		transport.NewWebhookHandler(shipmentUseCase, log),
+		transport.NewOpsHandler(shipmentUseCase, log),
+		internalServices.Key,
 		health.Checker{Name: "postgres", Ping: func(ctx context.Context) error { return dbPool.Ping(ctx) }},
 		health.Checker{Name: "redis", Ping: func(ctx context.Context) error { return redisClient.Ping(ctx).Err() }},
 		health.Checker{Name: "nats", Ping: func(ctx context.Context) error {
@@ -105,6 +119,14 @@ func main() {
 			return nil
 		}},
 	)
+
+	workerCtx, stopWorkers := context.WithCancel(ctx)
+	defer stopWorkers()
+	go outbox.Run(workerCtx, func(ctx context.Context, e repository.OutboxEvent) error {
+		return orderClient.SendShipmentEvent(ctx, adapter.ShipmentEvent{EventID: e.ID, ShipmentID: e.ShipmentID, VendorOrderID: e.VendorOrderID,
+			Type: string(e.Type), OccurredAt: e.OccurredAt, TrackingNumber: e.TrackingNumber})
+	}, log, wake)
+	go (usecase.Worker{Shipments: shipmentUseCase, Retention: cfg.AddressRetention, Log: log}).Run(workerCtx)
 
 	srv := &http.Server{
 		Addr:              ":" + cfg.Base.Port,

@@ -110,7 +110,7 @@ func (uc *OrderUseCase) runCheckout(ctx context.Context, buyerID string, op *dom
 	if err != nil {
 		return nil, err
 	}
-	quotes, failures, err := uc.quoteShipping(ctx, plan.VendorIDs(), address.Province, priced.weightByVendor)
+	quotes, failures, err := uc.quoteShipping(ctx, plan.VendorIDs(), address.Province, priced)
 	if err != nil {
 		return nil, err
 	}
@@ -231,12 +231,15 @@ type pricedLines struct {
 	lines           []domain.CheckoutLine
 	weightByVendor  map[string]int64
 	productVersions map[string]int64
+	// missingWeight: a vendor has a product without package weight; its
+	// shipping cannot be priced.
+	missingWeight map[string]bool
 }
 
 // priceLines re-prices and validates every cart line against Catalog now,
 // and refuses a price the buyer has not accepted in the cart.
 func (uc *OrderUseCase) priceLines(ctx context.Context, cartLines []adapter.CartLine) (*pricedLines, error) {
-	out := &pricedLines{weightByVendor: map[string]int64{}, productVersions: map[string]int64{}}
+	out := &pricedLines{weightByVendor: map[string]int64{}, productVersions: map[string]int64{}, missingWeight: map[string]bool{}}
 	for _, line := range cartLines {
 		product, err := uc.Catalog.GetProduct(ctx, line.ProductID)
 		if err != nil {
@@ -280,9 +283,11 @@ func (uc *OrderUseCase) priceLines(ctx context.Context, cartLines []adapter.Cart
 		}
 		out.lines = append(out.lines, checkoutLine)
 
-		// A product without packaging data weighs 0 g: the zone's base fee
-		// still applies, so this never becomes free shipping.
-		if product.PackageWeightGrams != nil {
+		// A product without packaging data cannot be priced for shipping:
+		// its shop is reported unavailable, never charged a guessed fee.
+		if product.PackageWeightGrams == nil || *product.PackageWeightGrams <= 0 {
+			out.missingWeight[product.VendorID] = true
+		} else {
 			weight, ok := domain.MulAmount(*product.PackageWeightGrams, line.Quantity)
 			if !ok {
 				return nil, apperror.Validation("Package weight is too large")
@@ -298,11 +303,15 @@ func (uc *OrderUseCase) priceLines(ctx context.Context, cartLines []adapter.Cart
 // quoteShipping asks Shipment for one quote per vendor. A vendor Shipment
 // cannot serve is reported in failures (shipping_unavailable); any other
 // error aborts.
-func (uc *OrderUseCase) quoteShipping(ctx context.Context, vendorIDs []string, province string, weightByVendor map[string]int64) (map[string]domain.ShippingQuote, map[string]*apperror.Error, error) {
+func (uc *OrderUseCase) quoteShipping(ctx context.Context, vendorIDs []string, province string, priced *pricedLines) (map[string]domain.ShippingQuote, map[string]*apperror.Error, error) {
 	quotes := map[string]domain.ShippingQuote{}
 	failures := map[string]*apperror.Error{}
 	for _, vendorID := range vendorIDs {
-		q, err := uc.Shipments.Quote(ctx, vendorID, province, weightByVendor[vendorID])
+		if priced.missingWeight[vendorID] {
+			failures[vendorID] = domain.ShippingUnavailable("A product of this shop has no package weight yet, so shipping cannot be priced")
+			continue
+		}
+		q, err := uc.Shipments.Quote(ctx, vendorID, province, priced.weightByVendor[vendorID])
 		if err != nil {
 			app := appError(err)
 			if app.Code == domain.CodeShippingUnavailable {
@@ -368,7 +377,7 @@ func (uc *OrderUseCase) Preview(ctx context.Context, buyerID, addressID string) 
 	if err != nil {
 		return nil, err
 	}
-	quotes, failures, err := uc.quoteShipping(ctx, plan.VendorIDs(), address.Province, priced.weightByVendor)
+	quotes, failures, err := uc.quoteShipping(ctx, plan.VendorIDs(), address.Province, priced)
 	if err != nil {
 		return nil, err
 	}

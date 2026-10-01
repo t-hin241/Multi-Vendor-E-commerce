@@ -3,6 +3,7 @@ package usecase
 import (
 	"context"
 	"strings"
+	"time"
 
 	"shopee/backend/pkg/apperror"
 	"shopee/backend/services/order/internal/domain"
@@ -95,22 +96,12 @@ func (uc *OrderUseCase) AdminCancel(ctx context.Context, adminID, orderID, reaso
 	return order, nil
 }
 
-// vendorAllowedTargets are the only statuses a vendor may move their own
-// sub-order into directly.
-var vendorAllowedTargets = map[domain.Status]bool{
-	domain.StatusProcessing: true,
-	domain.StatusShipped:    true,
-	domain.StatusCompleted:  true,
-}
-
-// UpdateVendorOrderStatus lets a vendor advance their own slice of a
-// multi-vendor order (processing -> shipped -> completed). The state
-// machine only allows processing after paid, i.e. after a verified capture
-// and committed stock. The parent order is recomputed as the weakest link
-// in the same transaction.
+// UpdateVendorOrderStatus lets a vendor start preparing a paid sub-order
+// (processing). Shipped and completed are not set by hand: they follow the
+// shipment (ApplyShipmentEvent), so Order and Shipment cannot disagree.
 func (uc *OrderUseCase) UpdateVendorOrderStatus(ctx context.Context, userID, vendorOrderID string, newStatus domain.Status) (*domain.VendorOrder, error) {
-	if !vendorAllowedTargets[newStatus] {
-		return nil, apperror.Validation("Vendors can only move an order to processing, shipped or completed")
+	if newStatus != domain.StatusProcessing {
+		return nil, apperror.Validation("Mark the shipment shipped or delivered instead; only processing is set here")
 	}
 	vo, err := uc.VendorOrders.FindByID(ctx, vendorOrderID)
 	if err != nil {
@@ -119,40 +110,19 @@ func (uc *OrderUseCase) UpdateVendorOrderStatus(ctx context.Context, userID, ven
 	if _, err := uc.Vendors.GetApprovedVendorID(ctx, userID, vo.VendorID); err != nil {
 		return nil, apperror.Forbidden("You do not have access to this order")
 	}
-
 	err = uc.withOrder(ctx, vo.OrderID, func(ctx context.Context) error {
 		current, err := uc.VendorOrders.FindByID(ctx, vendorOrderID)
 		if err != nil {
 			return err
 		}
-		if !domain.CanTransition(current.Status, newStatus) {
-			return apperror.Conflict("Cannot move this order from " + string(current.Status) + " to " + string(newStatus))
+		if current.Status == domain.StatusProcessing {
+			vo = current
+			return nil
 		}
-		if err := uc.VendorOrders.TransitionStatus(ctx, current.ID, current.Status, newStatus); err != nil {
+		if err := uc.advanceVendorOrder(ctx, current, domain.StatusProcessing); err != nil {
 			return err
-		}
-		if err := uc.recomputeOrderStatus(ctx, current.OrderID); err != nil {
-			return err
-		}
-		if notifType, ok := map[domain.Status]string{domain.StatusShipped: notifyOrderShipped, domain.StatusCompleted: notifyOrderCompleted}[newStatus]; ok {
-			parent, err := uc.findOrder(ctx, current.OrderID)
-			if err != nil {
-				return err
-			}
-			e := domain.NewNotifyEffect(current.OrderID, parent.BuyerID, notifType)
-			e.Target = notifType + ":" + current.ID // one notice per vendor package
-			if err := uc.Effects.Enqueue(ctx, e); err != nil {
-				return err
-			}
-		}
-		if newStatus == domain.StatusCompleted {
-			// Payment's settlement ledger learns of the sale once, durably.
-			if err := uc.Effects.Enqueue(ctx, domain.Effect{OrderID: current.OrderID, Kind: domain.EffectSettleVendorOrder, Target: current.ID}); err != nil {
-				return err
-			}
 		}
 		vo = current
-		vo.Status = newStatus
 		return nil
 	})
 	if err != nil {
@@ -160,6 +130,111 @@ func (uc *OrderUseCase) UpdateVendorOrderStatus(ctx context.Context, userID, ven
 	}
 	uc.runEffectsSoon(ctx, vo.OrderID)
 	return vo, nil
+}
+
+// advanceVendorOrder moves a locked vendor order one step with
+// compare-and-set, recomputes the parent (weakest link) and queues what the
+// step implies: buyer notices, and the settlement report on completion.
+func (uc *OrderUseCase) advanceVendorOrder(ctx context.Context, current *domain.VendorOrder, newStatus domain.Status) error {
+	if !domain.CanTransition(current.Status, newStatus) {
+		return apperror.Conflict("Cannot move this order from " + string(current.Status) + " to " + string(newStatus))
+	}
+	if err := uc.VendorOrders.TransitionStatus(ctx, current.ID, current.Status, newStatus); err != nil {
+		return err
+	}
+	if err := uc.recomputeOrderStatus(ctx, current.OrderID); err != nil {
+		return err
+	}
+	if notifType, ok := map[domain.Status]string{domain.StatusShipped: notifyOrderShipped, domain.StatusCompleted: notifyOrderCompleted}[newStatus]; ok {
+		parent, err := uc.findOrder(ctx, current.OrderID)
+		if err != nil {
+			return err
+		}
+		e := domain.NewNotifyEffect(current.OrderID, parent.BuyerID, notifType)
+		e.Target = notifType + ":" + current.ID // one notice per vendor package
+		if err := uc.Effects.Enqueue(ctx, e); err != nil {
+			return err
+		}
+	}
+	if newStatus == domain.StatusCompleted {
+		// Payment's settlement ledger learns of the sale once, durably.
+		if err := uc.Effects.Enqueue(ctx, domain.Effect{OrderID: current.OrderID, Kind: domain.EffectSettleVendorOrder, Target: current.ID}); err != nil {
+			return err
+		}
+	}
+	current.Status = newStatus
+	return nil
+}
+
+// ShipmentEvent is a fulfillment fact Shipment reports.
+type ShipmentEvent struct {
+	EventID       string
+	ShipmentID    string
+	VendorOrderID string
+	Type          string
+	OccurredAt    time.Time
+}
+
+// shipmentPaths are the steps a vendor order takes to reflect a shipment
+// event from each status. An event already reflected is a no-op; a vendor
+// order that is cancelled or refunded refuses it (Shipment parks it for an
+// operator).
+var shipmentPaths = map[string]map[domain.Status][]domain.Status{
+	"shipped": {
+		domain.StatusPaid:       {domain.StatusProcessing, domain.StatusShipped},
+		domain.StatusProcessing: {domain.StatusShipped},
+		domain.StatusShipped:    {},
+		domain.StatusCompleted:  {},
+	},
+	"delivered": {
+		domain.StatusPaid:       {domain.StatusProcessing, domain.StatusShipped, domain.StatusCompleted},
+		domain.StatusProcessing: {domain.StatusShipped, domain.StatusCompleted},
+		domain.StatusShipped:    {domain.StatusCompleted},
+		domain.StatusCompleted:  {},
+	},
+}
+
+// ApplyShipmentEvent is how a vendor order becomes shipped or completed:
+// Order decides from Shipment's facts, in its own transaction. A repeated
+// or out-of-order event converges on the same state; "returned" changes no
+// status (money and stock are decided by an operator through a refund).
+func (uc *OrderUseCase) ApplyShipmentEvent(ctx context.Context, e ShipmentEvent) error {
+	vo, err := uc.VendorOrders.FindByID(ctx, e.VendorOrderID)
+	if err != nil {
+		return notFoundOrInternal(err, repository.ErrVendorOrderNotFound, "Vendor order not found")
+	}
+	logger := uc.Log.With().Str("vendor_order_id", vo.ID).Str("shipment_id", e.ShipmentID).Str("event", e.Type).Logger()
+	if e.Type == "returned" {
+		logger.Warn().Str("order_id", vo.OrderID).Msg("order_shipment_returned")
+		return nil
+	}
+	paths, ok := shipmentPaths[e.Type]
+	if !ok {
+		return apperror.Validation("Unknown shipment event type")
+	}
+	err = uc.withOrder(ctx, vo.OrderID, func(ctx context.Context) error {
+		current, err := uc.VendorOrders.FindByID(ctx, vo.ID)
+		if err != nil {
+			return err
+		}
+		steps, ok := paths[current.Status]
+		if !ok {
+			return apperror.Conflict("This vendor order is " + string(current.Status) + "; the shipment event needs review")
+		}
+		for _, step := range steps {
+			if err := uc.advanceVendorOrder(ctx, current, step); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		logger.Warn().Err(err).Msg("order_shipment_event_refused")
+		return err
+	}
+	logger.Info().Msg("order_shipment_event_applied")
+	uc.runEffectsSoon(ctx, vo.OrderID)
+	return nil
 }
 
 // recomputeOrderStatus derives the parent status from its vendor orders

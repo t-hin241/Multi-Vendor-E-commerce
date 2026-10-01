@@ -39,6 +39,12 @@ type shipmentResponse struct {
 	StreetAddress        *string    `json:"street_address,omitempty"`
 	ShippedAt            *time.Time `json:"shipped_at,omitempty"`
 	DeliveredAt          *time.Time `json:"delivered_at,omitempty"`
+	ReturnedAt           *time.Time `json:"returned_at,omitempty"`
+	CancelledAt          *time.Time `json:"cancelled_at,omitempty"`
+	TrackingUpdatedAt    *time.Time `json:"tracking_updated_at,omitempty"`
+	FailedAttempts       int        `json:"failed_attempts"`
+	LastAttemptReason    *string    `json:"last_attempt_reason,omitempty"`
+	AddressRedacted      bool       `json:"address_redacted"`
 	InterceptRequestedAt *time.Time `json:"intercept_requested_at,omitempty"`
 	InterceptResolvedAt  *time.Time `json:"intercept_resolved_at,omitempty"`
 	CreatedAt            time.Time  `json:"created_at"`
@@ -52,7 +58,9 @@ func toShipmentResponse(s *domain.Shipment) shipmentResponse {
 		ZoneName: s.ZoneName, FeeAmount: s.FeeAmount, PackageWeightGrams: s.PackageWeightGrams,
 		RecipientName: s.RecipientName, Phone: s.Phone, Province: s.Province,
 		District: s.District, Ward: s.Ward, StreetAddress: s.StreetAddress,
-		ShippedAt: s.ShippedAt, DeliveredAt: s.DeliveredAt,
+		ShippedAt: s.ShippedAt, DeliveredAt: s.DeliveredAt, ReturnedAt: s.ReturnedAt, CancelledAt: s.CancelledAt,
+		TrackingUpdatedAt: s.TrackingUpdatedAt, FailedAttempts: s.FailedAttempts, LastAttemptReason: s.LastAttemptReason,
+		AddressRedacted:      s.AddressRedactedAt != nil,
 		InterceptRequestedAt: s.InterceptRequestedAt, InterceptResolvedAt: s.InterceptResolvedAt,
 		CreatedAt: s.CreatedAt, UpdatedAt: s.UpdatedAt,
 	}
@@ -67,17 +75,41 @@ func toShipmentResponseList(shipments []*domain.Shipment) []shipmentResponse {
 }
 
 type trackingEventResponse struct {
-	Status    string    `json:"status"`
-	Note      *string   `json:"note,omitempty"`
-	CreatedAt time.Time `json:"created_at"`
+	Status     string    `json:"status"`
+	Note       *string   `json:"note,omitempty"`
+	ActorRole  string    `json:"actor_role"`
+	OccurredAt time.Time `json:"occurred_at"`
+	CreatedAt  time.Time `json:"created_at"`
 }
 
 func toTrackingEventResponseList(events []*domain.TrackingEvent) []trackingEventResponse {
 	out := make([]trackingEventResponse, 0, len(events))
 	for _, e := range events {
-		out = append(out, trackingEventResponse{Status: string(e.Status), Note: e.Note, CreatedAt: e.CreatedAt})
+		out = append(out, trackingEventResponse{Status: string(e.Status), Note: e.Note, ActorRole: string(e.ActorRole), OccurredAt: e.OccurredAt, CreatedAt: e.CreatedAt})
 	}
 	return out
+}
+
+type markShippedRequest struct {
+	TrackingNumber string `json:"tracking_number" binding:"required,max=64"`
+}
+
+type noteRequest struct {
+	Note string `json:"note" binding:"max=500"`
+}
+
+type reasonRequest struct {
+	Reason string `json:"reason" binding:"required,max=500"`
+}
+
+type updateTrackingRequest struct {
+	TrackingNumber string `json:"tracking_number" binding:"required,max=64"`
+	Reason         string `json:"reason" binding:"required,max=500"`
+}
+
+type interceptionDecisionRequest struct {
+	Accepted bool   `json:"accepted"`
+	Note     string `json:"note" binding:"required,max=500"`
 }
 
 // ---------- Admin: carriers, zones, fee rules ----------

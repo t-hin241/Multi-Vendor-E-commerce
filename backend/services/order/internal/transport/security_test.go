@@ -54,6 +54,7 @@ func TestEveryInternalOrderRouteRequiresTheServiceKey(t *testing.T) {
 		{"POST", "/internal/inventory-events"},
 		{"POST", "/internal/refund-events"},
 		{"POST", "/internal/settlements/holds"},
+		{"POST", "/internal/shipment-events"},
 	}
 	for _, rt := range routes {
 		for _, headers := range []map[string]string{nil, {serviceauth.Header: "wrong"}, as(t, jwt, "admin")} {

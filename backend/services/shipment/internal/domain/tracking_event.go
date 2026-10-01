@@ -2,15 +2,17 @@ package domain
 
 import "time"
 
-// TrackingEvent is an automatic audit-on-mutation record of a shipment's
-// status changes — written as a side effect of Advance, never authored
-// directly, mirroring inventory's stock_movements pattern. This is what
-// gives buyers and vendors an actual timeline to look at instead of just
-// the shipment's current status.
+// TrackingEvent is one entry of a shipment's timeline, written in the same
+// transaction as the change it describes, with who made it. EventKey, when
+// set, makes a carrier delivery or a retried action land only once.
 type TrackingEvent struct {
 	ID         string
 	ShipmentID string
 	Status     Status
 	Note       *string
+	ActorID    *string
+	ActorRole  ActorRole
+	EventKey   *string
+	OccurredAt time.Time
 	CreatedAt  time.Time
 }

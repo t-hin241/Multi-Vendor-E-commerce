@@ -362,11 +362,10 @@ function VendorOrderCard({
   );
 }
 
-// VendorOrderActions lets a vendor advance their own sub-order one step at a
-// time. Marking a package "shipped" also opens (or reuses) its Shipment
-// record with the carrier/tracking number the buyer will see -- Order owns
-// the buyer-facing status, Shipment owns the tracking detail; this UI
-// exercises both to keep them consistent.
+// VendorOrderActions: the vendor starts preparing the order (Order), then
+// works on the shipment: hand it over with a tracking number, record
+// delivery, a failed attempt or a return. Shipment reports shipped and
+// delivered to Order, which updates the order status itself.
 function VendorOrderActions({
   vendorOrder,
   shipment,
@@ -381,90 +380,137 @@ function VendorOrderActions({
   const [error, setError] = useState<string | null>(null);
   const [isBusy, setIsBusy] = useState(false);
 
-  async function handleStartProcessing() {
+  async function run(fn: (token: string) => Promise<unknown>, fallback: string) {
     setError(null);
     setIsBusy(true);
     try {
-      await callWithAuth((token) =>
-        api.updateVendorOrderStatus(token, vendorOrder.id, "processing"),
-      );
+      await callWithAuth(fn);
       onChanged();
     } catch (err) {
-      setError(err instanceof api.ApiError ? err.message : "Không thể cập nhật đơn hàng.");
+      setError(err instanceof api.ApiError ? err.message : fallback);
     } finally {
       setIsBusy(false);
     }
   }
 
-  async function handleMarkShipped(e: React.FormEvent) {
-    e.preventDefault();
-    setError(null);
-    setIsBusy(true);
-    try {
-      await callWithAuth(async (token) => {
-        // The shipment is normally already created automatically at
-        // checkout (with its carrier and fee already set) -- createOrGet
-        // here is just the fallback for the rare case that call failed.
-        const shipment = await api.createOrGetShipment(token, vendorOrder.id);
-        if (shipment.status === "pending") {
-          await api.advanceShipment(token, shipment.id, "ready_to_ship");
-        }
-        await api.advanceShipment(token, shipment.id, "shipped", trackingNumber);
-        await api.updateVendorOrderStatus(token, vendorOrder.id, "shipped");
-      });
-      onChanged();
-    } catch (err) {
-      setError(err instanceof api.ApiError ? err.message : "Không thể đánh dấu đơn đã giao.");
-    } finally {
-      setIsBusy(false);
-    }
+  function withReason(
+    question: string,
+    fn: (token: string, reason: string) => Promise<unknown>,
+    fallback: string,
+  ) {
+    const reason = window.prompt(question)?.trim();
+    if (reason) void run((token) => fn(token, reason), fallback);
   }
 
-  async function handleMarkCompleted() {
-    setError(null);
-    setIsBusy(true);
-    try {
-      await callWithAuth((token) =>
-        api.updateVendorOrderStatus(token, vendorOrder.id, "completed"),
-      );
-      onChanged();
-    } catch (err) {
-      setError(err instanceof api.ApiError ? err.message : "Không thể cập nhật đơn hàng.");
-    } finally {
-      setIsBusy(false);
-    }
-  }
+  const canShip =
+    (vendorOrder.status === "paid" || vendorOrder.status === "processing") &&
+    (!shipment || shipment.status === "pending" || shipment.status === "ready_to_ship");
 
   return (
     <div className="mt-3">
       <Separator className="mb-3" />
       {vendorOrder.status === "paid" && (
-        <Button size="sm" onClick={handleStartProcessing} disabled={isBusy}>
+        <Button
+          size="sm"
+          className="mb-2"
+          disabled={isBusy}
+          onClick={() =>
+            run(
+              (token) => api.updateVendorOrderStatus(token, vendorOrder.id, "processing"),
+              "Không thể cập nhật đơn hàng.",
+            )
+          }
+        >
           Bắt đầu xử lý
         </Button>
       )}
 
-      {vendorOrder.status === "processing" && (
-        <form onSubmit={handleMarkShipped} className="flex flex-wrap items-end gap-2">
+      {canShip && (
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            void run(async (token) => {
+              // Normally created automatically once paid; this is the fallback.
+              const s = shipment ?? (await api.createOrGetShipment(token, vendorOrder.id));
+              await api.shipShipment(token, s.id, trackingNumber.trim());
+            }, "Không thể ghi nhận đã giao cho đơn vị vận chuyển.");
+          }}
+          className="flex flex-wrap items-end gap-2"
+        >
           <label className="flex flex-col gap-1 text-xs text-muted-foreground">
             Mã vận đơn
             <Input
               required
+              minLength={3}
+              maxLength={64}
               value={trackingNumber}
               onChange={(e) => setTrackingNumber(e.target.value)}
-              className="w-40"
+              className="w-44"
             />
           </label>
           <Button type="submit" size="sm" disabled={isBusy}>
-            Đánh dấu đã giao
+            Đã giao cho vận chuyển
           </Button>
         </form>
       )}
 
-      {vendorOrder.status === "shipped" && (
-        <Button size="sm" variant="secondary" onClick={handleMarkCompleted} disabled={isBusy}>
-          Đánh dấu hoàn tất
-        </Button>
+      {shipment?.status === "shipped" && (
+        <div className="flex flex-col gap-2">
+          <p className="text-xs text-muted-foreground">
+            Mã vận đơn {shipment.tracking_number}
+            {shipment.failed_attempts > 0 &&
+              ` · ${shipment.failed_attempts} lần giao thất bại (${shipment.last_attempt_reason ?? ""})`}
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              size="sm"
+              disabled={isBusy}
+              onClick={() =>
+                run(
+                  (token) => api.markShipmentDelivered(token, shipment.id),
+                  "Không thể ghi nhận đã giao.",
+                )
+              }
+            >
+              Người mua đã nhận hàng
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={isBusy}
+              onClick={() =>
+                withReason(
+                  "Lý do giao không thành công:",
+                  (token, reason) => api.recordFailedDelivery(token, shipment.id, reason),
+                  "Không thể ghi nhận lần giao thất bại.",
+                )
+              }
+            >
+              Giao thất bại
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              className="text-destructive"
+              disabled={isBusy}
+              onClick={() =>
+                withReason(
+                  "Lý do hàng bị hoàn về:",
+                  (token, reason) => api.markShipmentReturned(token, shipment.id, reason),
+                  "Không thể ghi nhận hàng hoàn về.",
+                )
+              }
+            >
+              Hàng hoàn về
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {shipment?.status === "returned" && (
+        <p className="text-sm text-destructive">
+          Hàng đã hoàn về. Sàn sẽ xử lý hoàn tiền nếu cần; kiểm tra hàng trước khi nhập lại kho.
+        </p>
       )}
 
       {shipment?.status === "interception_requested" && (
@@ -476,12 +522,10 @@ function VendorOrderActions({
   );
 }
 
-// CarrierInterceptionActions stands in for the carrier's own callback: the
-// buyer cancelled this order after the package had already shipped, so
-// Shipment asked the carrier (the mock adapter, until a real one is
-// integrated) whether it could still be pulled back. In production this
-// resolves on its own via the carrier's webhook; these buttons exist so the
-// mock adapter's decision can be exercised in local/dev environments.
+// CarrierInterceptionActions: the order was cancelled after the package
+// was handed over, so the carrier was asked to stop it. The vendor records
+// the carrier's answer after contacting it (audited). Until then the
+// package is not assumed stopped.
 function CarrierInterceptionActions({
   shipmentId,
   onChanged,
@@ -497,7 +541,11 @@ function CarrierInterceptionActions({
     setError(null);
     setIsBusy(true);
     try {
-      await callWithAuth((token) => api.simulateCarrierDecision(token, shipmentId, accepted));
+      const note = window
+        .prompt("Ghi chú từ đơn vị vận chuyển (người liên hệ, mã yêu cầu):")
+        ?.trim();
+      if (!note) return;
+      await callWithAuth((token) => api.resolveInterception(token, shipmentId, accepted, note));
       onChanged();
     } catch (err) {
       setError(
