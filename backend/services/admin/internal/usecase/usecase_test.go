@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"sort"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -24,8 +25,10 @@ type roles struct{ err error }
 func (r roles) RequireRole(context.Context, string, string) error { return r.err }
 
 // fakeReader answers like the services: ops counters by path, and audit
-// searches applying the forwarded filter to in-memory rows.
+// searches applying the forwarded filter to in-memory rows. Service fans out
+// Get calls concurrently, so recorded state is guarded by mu.
 type fakeReader struct {
+	mu    sync.Mutex
 	down  map[string]bool
 	ops   map[string]string
 	audit map[string][]adminaudit.Entry
@@ -33,7 +36,9 @@ type fakeReader struct {
 }
 
 func (f *fakeReader) Get(_ context.Context, baseURL, path string, q url.Values, authorization string) (json.RawMessage, error) {
+	f.mu.Lock()
 	f.auth = append(f.auth, authorization)
+	f.mu.Unlock()
 	source := strings.TrimPrefix(baseURL, "http://")
 	if f.down[source] {
 		return nil, fmt.Errorf("%w: timed out", adapter.ErrUnavailable)
