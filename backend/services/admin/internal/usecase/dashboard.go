@@ -16,6 +16,8 @@ var opsSources = []call{
 	{source: "order", path: "/api/orders/admin/operations", query: url.Values{"limit": {"1"}}},
 	{source: "payment", path: "/api/payments/admin/reconciliation"},
 	{source: "shipment", path: "/api/shipments/admin/operations"},
+	{source: "notification", path: "/api/notifications/admin/operations"},
+	{source: "review", path: "/api/reviews/admin/operations"},
 }
 
 type counterRef struct{ source, key string }
@@ -70,6 +72,21 @@ var tiles = []tileDef{
 		[]counterRef{{"inventory", "events_parked"}, {"inventory", "cache_parked"}}, false},
 	{"shipment_events_review", "Background jobs", "Shipment events Order refused", "Check the order, then resend.", "/admin/fulfillment",
 		[]counterRef{{"shipment", "order_events_review"}}, false},
+
+	{"notifications_parked", "Notifications", "Emails stopped after retries", "Fix the mail provider, then retry with a reason.", "/admin/notifications",
+		[]counterRef{{"notification", "parked"}}, false},
+	{"notifications_late", "Notifications", "Emails waiting more than 15 minutes", "The mail provider may be down or slow.", "/admin/notifications",
+		[]counterRef{{"notification", "pending_over_15m"}}, false},
+	{"notifications_failed", "Notifications", "Emails refused in the last 24 hours", "Unknown or refused recipient; not retried automatically.", "/admin/notifications",
+		[]counterRef{{"notification", "failed_24h"}}, false},
+	{"notifications_queue_down", "Notifications", "Delivery queue (Redis) unreachable", "Requests are kept in PostgreSQL and requeued once Redis is back.", "/admin/notifications",
+		[]counterRef{{"notification", "queue_unreachable"}}, false},
+	{"review_reports_open", "Moderation", "Review reports waiting for a decision", "Keep or hide with a reason.", "/admin/reviews",
+		[]counterRef{{"review", "open_reports"}}, false},
+	{"review_uploads_stuck", "Background jobs", "Review photos left behind by failed uploads", "Check object storage (review runbook).", "/admin/reviews",
+		[]counterRef{{"review", "image_cleanup_parked"}}, false},
+	{"notices_not_handed_over", "Notifications", "Shop decision notices Notification refused", "See the vendor notice outbox (runbook).", "/admin/notifications",
+		[]counterRef{{"vendor", "parked_notices"}}, false},
 }
 
 // Tile is one dashboard figure. Count is null when a service it depends on
@@ -116,6 +133,9 @@ func (s Service) Dashboard(ctx context.Context, adminID, authorization string) (
 		out.Sources = append(out.Sources, r.status)
 	}
 	for _, d := range tiles {
+		if !configured(results, d.counters) {
+			continue // e.g. reviews disabled
+		}
 		t := Tile{Key: d.key, Group: d.group, Label: d.label, Hint: d.hint, Link: d.link, Status: "ok"}
 		var total int64
 		available := true
@@ -140,6 +160,16 @@ func (s Service) Dashboard(ctx context.Context, adminID, authorization string) (
 		out.Tiles = append(out.Tiles, t)
 	}
 	return out, nil
+}
+
+// configured reports whether every service a tile reads is configured.
+func configured(results map[string]result, refs []counterRef) bool {
+	for _, ref := range refs {
+		if _, ok := results[ref.source]; !ok {
+			return false
+		}
+	}
+	return true
 }
 
 // numericCounters reads the numbers a service reports: top-level numbers

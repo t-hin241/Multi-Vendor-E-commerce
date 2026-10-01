@@ -136,12 +136,19 @@ func (uc *VendorUseCase) decide(ctx context.Context, id, actor string, to domain
 		if e = uc.ops.Events.Queue(ctx, v); e != nil {
 			return e
 		}
+		if to == domain.StatusApproved || to == domain.StatusRejected {
+			// The owner's notice commits with the decision (no loss when
+			// Notification is down); it never blocks or undoes it.
+			if uc.ops.Notices == nil {
+				return errors.New("decision notices are not configured")
+			}
+			if e = uc.ops.Notices.Queue(ctx, v.ID, v.UserID, "vendor_"+string(to), v.Version); e != nil {
+				return e
+			}
+		}
 		result = v
 		return nil
 	})
-	if err == nil && (to == domain.StatusApproved || to == domain.StatusRejected) {
-		uc.notify(ctx, result.UserID, "vendor_"+string(to), result.ID)
-	}
 	return result, wrap(err)
 }
 func (uc *VendorUseCase) Resubmit(ctx context.Context, actor, id string) (result *domain.Vendor, err error) {

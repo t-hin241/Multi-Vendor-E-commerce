@@ -158,7 +158,7 @@ type InventoryGateway interface {
 // NotificationGateway sends a buyer notification; always called from a
 // durable effect, never inline with a transition.
 type NotificationGateway interface {
-	Notify(ctx context.Context, userID, notifType, referenceID string) error
+	Notify(ctx context.Context, eventID, userID, notifType, referenceID string) error
 }
 
 // ShipmentGateway quotes shipping before an order exists and opens/cancels

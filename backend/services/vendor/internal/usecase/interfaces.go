@@ -33,11 +33,10 @@ type AuditLogRepositoryPort interface {
 	List(ctx context.Context, vendorID string, limit, offset int) ([]*domain.AuditLog, error)
 }
 
-// NotificationGateway lets Vendor tell an applicant about an approval
-// decision without owning any notification data itself. Every call is
-// best-effort — see VendorUseCase.notify.
-type NotificationGateway interface {
-	Notify(ctx context.Context, userID, notifType, referenceID string) error
+// NoticeQueue queues the owner's notice of a shop decision in the
+// decision's transaction; a worker hands it to Notification.
+type NoticeQueue interface {
+	Queue(ctx context.Context, vendorID, userID, notifType string, version int64) error
 }
 
 type VendorAddressRepositoryPort interface {
@@ -65,4 +64,5 @@ type Operations struct {
 	Actors    ActorAuthorizer
 	Addresses VendorAddressRepositoryPort
 	Events    EventStore
+	Notices   NoticeQueue
 }

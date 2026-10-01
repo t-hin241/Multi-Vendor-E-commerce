@@ -5,6 +5,7 @@ import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import * as api from "@/lib/api-client";
 import { useAuth } from "@/lib/auth-context";
@@ -17,6 +18,8 @@ export default function VendorReviewsPage() {
   const [message, setMessage] = useState("");
   const [reportFor, setReportFor] = useState<string | null>(null);
   const [reasonId, setReasonId] = useState("");
+  const [reportNote, setReportNote] = useState("");
+  const [reported, setReported] = useState<string | null>(null);
   const reviews = useQuery({
     queryKey: ["vendor-reviews", selectedVendorId],
     queryFn: () =>
@@ -44,10 +47,14 @@ export default function VendorReviewsPage() {
   });
   const report = useMutation({
     mutationFn: () =>
-      callWithAuth((token) => api.reportReview(token, reportFor!, selectedVendorId!, reasonId)),
+      callWithAuth((token) =>
+        api.reportReview(token, reportFor!, selectedVendorId!, reasonId, reportNote || undefined),
+      ),
     onSuccess: () => {
+      setReported(reportFor);
       setReportFor(null);
       setReasonId("");
+      setReportNote("");
     },
   });
   if (!selectedVendorId)
@@ -143,6 +150,13 @@ export default function VendorReviewsPage() {
                     </option>
                   ))}
                 </select>
+                <Input
+                  className="max-w-72"
+                  maxLength={1000}
+                  placeholder="Mô tả thêm (không bắt buộc)"
+                  value={reportNote}
+                  onChange={(event) => setReportNote(event.target.value)}
+                />
                 <Button
                   size="sm"
                   variant="destructive"
@@ -161,6 +175,11 @@ export default function VendorReviewsPage() {
               >
                 Báo cáo vi phạm
               </Button>
+            )}
+            {reported === review.id && (
+              <p role="status" className="mt-2 text-sm text-muted-foreground">
+                Đã gửi báo cáo; quản trị viên sẽ xem xét.
+              </p>
             )}
             {(reply.error || report.error) && (
               <p className="mt-2 text-sm text-destructive">

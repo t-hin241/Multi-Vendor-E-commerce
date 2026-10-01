@@ -77,7 +77,7 @@ func main() {
 	vendorClient := adapter.NewHTTPVendorClient(cfg.VendorServiceURL, internalServices.Key)
 	inventoryClient := adapter.NewHTTPInventoryClient(cfg.InventoryServiceURL, internalServices.Key)
 	shipmentClient := adapter.NewHTTPShipmentClient(cfg.ShipmentServiceURL, internalServices.Key)
-	notificationClient := adapter.NewHTTPNotificationClient(cfg.NotificationServiceURL)
+	notificationClient := adapter.NewHTTPNotificationClient(cfg.NotificationServiceURL, internalServices.Key)
 	paymentClient := adapter.NewHTTPPaymentClient(cfg.PaymentServiceURL, internalServices.Key)
 
 	vendorOrderRepo := repository.NewVendorOrderRepository(dbPool)

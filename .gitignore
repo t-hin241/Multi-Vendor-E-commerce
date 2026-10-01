@@ -13,6 +13,9 @@ node_modules/
 .next/
 out/
 frontend/next-env.d.ts
+# Playwright output
+frontend/test-results/
+frontend/playwright-report/
 
 # Editors / OS
 .vscode/

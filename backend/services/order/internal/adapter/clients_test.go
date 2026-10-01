@@ -72,3 +72,35 @@ func TestPaymentRefundRequestKeepsPaymentsRefusal(t *testing.T) {
 		t.Fatalf("an outage must be retryable, got %v", err)
 	}
 }
+
+// The notify call carries the service key and the effect id; a refusal is
+// a 4xx the effect runner treats as permanent, an outage is retried.
+func TestNotificationClientIdentifiesTheEventAndMapsAnswers(t *testing.T) {
+	status := http.StatusAccepted
+	var got map[string]string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get(serviceauth.Header) != testKey {
+			w.WriteHeader(http.StatusForbidden)
+			return
+		}
+		_ = json.NewDecoder(r.Body).Decode(&got)
+		w.WriteHeader(status)
+	}))
+	defer server.Close()
+	client := NewHTTPNotificationClient(server.URL, testKey)
+	if err := client.Notify(t.Context(), "effect-1", "user-1", "order_paid", "order-1"); err != nil {
+		t.Fatal(err)
+	}
+	if got["event_id"] != "effect-1" || got["source"] != "order" || got["reference_id"] != "order-1" {
+		t.Fatalf("unexpected payload %v", got)
+	}
+	var app *apperror.Error
+	status = http.StatusBadRequest
+	if err := client.Notify(t.Context(), "effect-1", "user-1", "order_paid", "order-1"); !errors.As(err, &app) || app.Status != 400 {
+		t.Fatalf("a refusal keeps its 4xx status, got %v", err)
+	}
+	status = http.StatusServiceUnavailable
+	if err := client.Notify(t.Context(), "effect-1", "user-1", "order_paid", "order-1"); !errors.As(err, &app) || app.Code != apperror.CodeInternal {
+		t.Fatalf("an outage is retried, got %v", err)
+	}
+}

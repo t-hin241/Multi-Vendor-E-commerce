@@ -111,7 +111,7 @@ func (s *inventoryReceiptStub) Operation(_ context.Context, id string) (*adapter
 
 type notifyStub struct{}
 
-func (notifyStub) Notify(context.Context, string, string, string) error { return nil }
+func (notifyStub) Notify(context.Context, string, string, string, string) error { return nil }
 
 func (s *inventoryReceiptStub) RestockReturn(context.Context, string, string, *string, int64) error {
 	return nil

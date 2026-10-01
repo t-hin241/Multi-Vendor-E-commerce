@@ -4,17 +4,20 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"time"
 
 	"shopee/backend/pkg/apperror"
+	"shopee/backend/pkg/serviceauth"
 )
 
 type UserSnapshot struct {
 	ID       string
 	Email    string
 	FullName string
+	Active   bool
 }
 
 type HTTPIdentityClient struct {
@@ -32,6 +35,7 @@ type internalUserResponseBody struct {
 		ID       string `json:"id"`
 		Email    string `json:"email"`
 		FullName string `json:"full_name"`
+		Active   bool   `json:"is_active"`
 	} `json:"data"`
 }
 
@@ -45,7 +49,7 @@ func (c *HTTPIdentityClient) GetUser(ctx context.Context, userID string) (*UserS
 		return nil, apperror.Internal(err)
 	}
 
-	req.Header.Set("X-Identity-Service-Key", c.serviceKey)
+	serviceauth.SetRequestHeaders(req, c.serviceKey)
 	resp, err := c.client.Do(req)
 	if err != nil {
 		return nil, apperror.Internal(err)
@@ -60,9 +64,9 @@ func (c *HTTPIdentityClient) GetUser(ctx context.Context, userID string) (*UserS
 	}
 
 	var body internalUserResponseBody
-	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 16*1024)).Decode(&body); err != nil {
 		return nil, apperror.Internal(err)
 	}
 
-	return &UserSnapshot{ID: body.Data.ID, Email: body.Data.Email, FullName: body.Data.FullName}, nil
+	return &UserSnapshot{ID: body.Data.ID, Email: body.Data.Email, FullName: body.Data.FullName, Active: body.Data.Active}, nil
 }

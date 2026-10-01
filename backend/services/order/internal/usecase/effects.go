@@ -86,7 +86,7 @@ func (uc *OrderUseCase) executeEffect(ctx context.Context, e *domain.Effect) err
 		if err := json.Unmarshal(e.Payload, &p); err != nil || p.UserID == "" {
 			return apperror.Validation("invalid notify payload")
 		}
-		return uc.Notifications.Notify(ctx, p.UserID, p.Type, e.OrderID)
+		return uc.Notifications.Notify(ctx, e.ID, p.UserID, p.Type, e.OrderID)
 	case domain.EffectRequestRefund:
 		return uc.submitRefund(ctx, e.Target)
 	case domain.EffectRestockReturn:

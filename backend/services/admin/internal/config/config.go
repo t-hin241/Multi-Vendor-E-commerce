@@ -42,6 +42,7 @@ var upstreams = []struct {
 	{"order", "ORDER_SERVICE_URL", false},
 	{"payment", "PAYMENT_SERVICE_URL", false},
 	{"shipment", "SHIPMENT_SERVICE_URL", false},
+	{"notification", "NOTIFICATION_SERVICE_URL", false},
 	{"review", "REVIEW_SERVICE_URL", true},
 }
 

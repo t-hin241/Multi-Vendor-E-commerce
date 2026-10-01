@@ -13,6 +13,7 @@ import {
 import { CheckoutQuote } from "@/components/cart/checkout-quote";
 import { PageShell } from "@/components/page-shell";
 import { EmptyState, ErrorState, LoadingState } from "@/components/states/query-state";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
@@ -24,13 +25,15 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
+import { isOutcomeUnknown } from "@/lib/api-client";
 import { useAuth } from "@/lib/auth-context";
+import { loadAttempt } from "@/lib/checkout-attempt";
 import { useAddresses } from "@/lib/hooks/use-addresses";
 import { useCart, useConfirmCartPrices } from "@/lib/hooks/use-cart";
 import { describeApiError } from "@/lib/errors";
 import { formatMoney } from "@/lib/format";
 import { useCheckout, useCheckoutPreview } from "@/lib/hooks/use-checkout";
-import { canPlaceOrder } from "@/lib/order-workflow";
+import { canPlaceOrder, checkoutErrorKind } from "@/lib/order-workflow";
 
 export default function CheckoutPage() {
   const { user, isReady } = useAuth();
@@ -42,6 +45,9 @@ export default function CheckoutPage() {
   const checkout = useCheckout();
   const [selectedAddressId, setSelectedAddressId] = useState("");
   const [paymentMethod, setPaymentMethod] = useState("online");
+  // The total the buyer confirmed when Order answered that it changed: the
+  // new quote is shown next to it and must be confirmed again.
+  const [changedFrom, setChangedFrom] = useState<number | null>(null);
   const addresses = addressesQuery.data ?? [];
   const addressId =
     selectedAddressId ||
@@ -72,14 +78,26 @@ export default function CheckoutPage() {
     );
   }
   if (!cart.data || cart.data.items.length === 0) {
+    // An attempt whose answer was lost may have created an order that
+    // emptied the cart: point to it instead of a blank checkout.
+    const pending = user ? loadAttempt(user.id) : null;
     return (
       <PageShell maxWidth="lg">
         <EmptyState
-          title="Chưa có sản phẩm để mua"
+          title={pending ? "Đơn hàng của bạn có thể đã được tạo" : "Chưa có sản phẩm để mua"}
+          description={
+            pending ? "Kiểm tra Đơn hàng của tôi trước khi mua lại để tránh trùng đơn." : undefined
+          }
           action={
-            <Button asChild>
-              <Link href="/">Tiếp tục mua sắm</Link>
-            </Button>
+            pending ? (
+              <Button asChild>
+                <Link href="/orders">Đơn hàng của tôi</Link>
+              </Button>
+            ) : (
+              <Button asChild>
+                <Link href="/">Tiếp tục mua sắm</Link>
+              </Button>
+            )
           }
         />
       </PageShell>
@@ -96,7 +114,7 @@ export default function CheckoutPage() {
     <PageShell maxWidth="lg">
       <h1 className="text-2xl font-semibold tracking-tight">Xác nhận mua hàng</h1>
       <div className="mt-6 grid gap-6 lg:grid-cols-3">
-        <div className="space-y-4 lg:col-span-2">
+        <div className="min-w-0 space-y-4 lg:col-span-2">
           <CartReadiness
             cart={data}
             onRefresh={() => cart.refetch()}
@@ -111,8 +129,10 @@ export default function CheckoutPage() {
             <CardContent>
               {addresses.length ? (
                 <Select value={addressId} onValueChange={setSelectedAddressId}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Chọn địa chỉ" />
+                  <SelectTrigger className="w-full min-w-0" aria-label="Địa chỉ giao hàng">
+                    <span className="truncate">
+                      <SelectValue placeholder="Chọn địa chỉ" />
+                    </span>
                   </SelectTrigger>
                   <SelectContent>
                     {addresses.map((address) => (
@@ -157,16 +177,6 @@ export default function CheckoutPage() {
               </RadioGroup>
             </CardContent>
           </Card>
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Voucher</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <Button variant="outline" disabled>
-                Chọn voucher (sắp có)
-              </Button>
-            </CardContent>
-          </Card>
         </div>
         <Card className="h-fit lg:sticky lg:top-20">
           <CardHeader>
@@ -190,6 +200,27 @@ export default function CheckoutPage() {
               <CheckoutQuote preview={quote} />
             ) : (
               <CartSubtotal cart={data} />
+            )}
+            {changedFrom !== null && placeable && quote.total_amount !== changedFrom && (
+              <Alert>
+                <AlertDescription>
+                  Tổng tiền đã đổi từ {formatMoney(changedFrom, quote.currency)} thành{" "}
+                  <strong>{formatMoney(quote.total_amount, quote.currency)}</strong>. Kiểm tra lại
+                  rồi bấm Đặt hàng để xác nhận.
+                </AlertDescription>
+              </Alert>
+            )}
+            {isOutcomeUnknown(checkout.error) && (
+              <Alert>
+                <AlertDescription>
+                  Chưa rõ đơn hàng đã được tạo chưa. Bấm Đặt hàng lần nữa sẽ không tạo đơn trùng,
+                  hoặc xem{" "}
+                  <Link className="underline" href="/orders">
+                    Đơn hàng của tôi
+                  </Link>
+                  .
+                </AlertDescription>
+              </Alert>
             )}
             {preview.isFetching && (
               <p className="text-xs text-muted-foreground">Đang tính phí vận chuyển…</p>
@@ -219,11 +250,16 @@ export default function CheckoutPage() {
               }
               onClick={() => {
                 if (!canPlaceOrder(quote, data.version)) return;
-                checkout.mutate({
-                  addressId,
-                  cartVersion: quote.cart_version,
-                  expectedTotalAmount: quote.total_amount,
-                });
+                const confirmed = quote.total_amount;
+                setChangedFrom(null);
+                checkout.mutate(
+                  { addressId, cartVersion: quote.cart_version, expectedTotalAmount: confirmed },
+                  {
+                    onError: (err) => {
+                      if (checkoutErrorKind(err) === "total_changed") setChangedFrom(confirmed);
+                    },
+                  },
+                );
               }}
             >
               {!addressId

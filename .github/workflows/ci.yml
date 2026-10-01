@@ -164,7 +164,7 @@ jobs:
         working-directory: backend/services/catalog
 
   inventory-integration:
-    name: Inventory, Cart, Order and Payment PostgreSQL integration
+    name: Inventory, Cart, Order, Payment, Shipment and Notification PostgreSQL/Redis integration
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -175,19 +175,25 @@ jobs:
           POSTGRES_HOST_AUTH_METHOD: trust
         ports: ["5432:5432"]
         options: --health-cmd "pg_isready -U inventory_test -d inventory_test" --health-interval 5s --health-timeout 3s --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: --health-cmd "redis-cli ping" --health-interval 5s --health-timeout 3s --health-retries 10
     env:
       INVENTORY_TEST_DATABASE_URL: postgres://inventory_test@localhost:5432/inventory_test?sslmode=disable
       ORDER_TEST_DATABASE_URL: postgres://inventory_test@localhost:5432/inventory_test?sslmode=disable
       PAYMENT_TEST_DATABASE_URL: postgres://inventory_test@localhost:5432/inventory_test?sslmode=disable
       CART_TEST_DATABASE_URL: postgres://inventory_test@localhost:5432/inventory_test?sslmode=disable
       SHIPMENT_TEST_DATABASE_URL: postgres://inventory_test@localhost:5432/inventory_test?sslmode=disable
+      NOTIFICATION_TEST_DATABASE_URL: postgres://inventory_test@localhost:5432/inventory_test?sslmode=disable
+      NOTIFICATION_TEST_REDIS_URL: redis://localhost:6379/0
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
           go-version: "1.25"
           cache-dependency-path: backend/services/inventory/go.sum
-      - run: go test -race -count=1 ./services/inventory/... ./services/cart/... ./services/order/... ./services/payment/... ./services/shipment/...
+      - run: go test -race -count=1 ./services/inventory/... ./services/cart/... ./services/order/... ./services/payment/... ./services/shipment/... ./services/notification/...
         working-directory: backend
 
   frontend:
@@ -211,3 +217,33 @@ jobs:
       - run: npm run format
       - run: npm test
       - run: npm run build
+
+  frontend-e2e:
+    name: Frontend browser E2E (mocked gateway)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      # Builds the app against the mock gateway origin and serves it on :3100.
+      - run: npm run test:e2e
+        env:
+          CI: "true"
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: |
+            frontend/playwright-report
+            frontend/test-results
+          retention-days: 7

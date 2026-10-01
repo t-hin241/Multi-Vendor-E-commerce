@@ -13,14 +13,14 @@ import (
 
 func newTestVendorUseCase() (*usecase.VendorUseCase, *fakeAuditLogRepository) {
 	audit := newFakeAuditLogRepository()
-	return usecase.NewVendorUseCase(newFakeVendorRepository(), audit, newFakeNotificationGateway(), newFakeObjectStore(), zerolog.Nop(), testOps()), audit
+	return usecase.NewVendorUseCase(newFakeVendorRepository(), audit, newFakeObjectStore(), zerolog.Nop(), testOps()), audit
 }
 
 // newTestVendorUseCaseWithStore is for tests that need to assert against the
 // object store itself (upload/delete side effects), not just the usecase.
 func newTestVendorUseCaseWithStore() (*usecase.VendorUseCase, *fakeObjectStore) {
 	store := newFakeObjectStore()
-	return usecase.NewVendorUseCase(newFakeVendorRepository(), newFakeAuditLogRepository(), newFakeNotificationGateway(), store, zerolog.Nop(), testOps()), store
+	return usecase.NewVendorUseCase(newFakeVendorRepository(), newFakeAuditLogRepository(), store, zerolog.Nop(), testOps()), store
 }
 
 func mustAppError(t *testing.T, err error) *apperror.Error {

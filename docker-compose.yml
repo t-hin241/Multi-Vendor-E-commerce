@@ -52,6 +52,10 @@ services:
     image: redis:7-alpine
     restart: unless-stopped
     networks: [shopee]
+    # Notification's delivery jobs (Asynq) live here: append-only file so a
+    # restart keeps them, and never evict keys to free memory (PostgreSQL
+    # can rebuild lost jobs, but eviction would make that routine).
+    command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec", "--maxmemory-policy", "noeviction"]
     ports:
       - "${REDIS_PORT:-6379}:6379"
     volumes:
@@ -355,6 +359,7 @@ services:
       ORDER_SERVICE_URL: http://order:8086
       PAYMENT_SERVICE_URL: http://payment:8087
       SHIPMENT_SERVICE_URL: http://shipment:8088
+      NOTIFICATION_SERVICE_URL: http://notification:8090
       REVIEW_SERVICE_URL: ${ADMIN_REVIEW_SERVICE_URL-http://review:8091}
       ADMIN_UPSTREAM_TIMEOUT: ${ADMIN_UPSTREAM_TIMEOUT:-4s}
     ports:
@@ -366,8 +371,6 @@ services:
       postgres:
         condition: service_healthy
       redis:
-        condition: service_healthy
-      nats:
         condition: service_healthy
       minio:
         condition: service_healthy
@@ -393,11 +396,16 @@ services:
       OBJECT_STORAGE_USE_SSL: "false"
       OBJECT_STORAGE_BUCKET: review-images
       OBJECT_STORAGE_PUBLIC_BASE_URL: ${OBJECT_STORAGE_PUBLIC_BASE_URL:-http://localhost:9000}
+      # true also lists seeded reviews that are not verified purchases
+      # (local/staging demo data); refused when ENV=production.
+      REVIEW_SHOW_UNVERIFIED: ${REVIEW_SHOW_UNVERIFIED:-false}
     ports:
       - "8091:8091"
 
   notification:
     <<: *service-defaults
+    # Running delivery jobs get SHUTDOWN_TIMEOUT to finish after the HTTP server.
+    stop_grace_period: 30s
     depends_on:
       postgres:
         condition: service_healthy
@@ -419,6 +427,14 @@ services:
       SMTP_PASSWORD: ${SMTP_PASSWORD:-}
       SMTP_FROM: ${SMTP_FROM:-}
       SMTP_ALLOW_PLAINTEXT: ${SMTP_ALLOW_PLAINTEXT:-false}
+      # smtp (needs SMTP_HOST/SMTP_FROM) or mock (local only, refused in
+      # production). Empty: smtp when SMTP_HOST is set, otherwise mock.
+      NOTIFICATION_EMAIL_PROVIDER: ${NOTIFICATION_EMAIL_PROVIDER:-}
+      NOTIFICATION_ATTEMPT_RETENTION_DAYS: ${NOTIFICATION_ATTEMPT_RETENTION_DAYS:-90}
+      # true stops sending; requests are still recorded and sent on resume.
+      NOTIFICATION_DELIVERY_PAUSED: ${NOTIFICATION_DELIVERY_PAUSED:-false}
+      # Delivery jobs run at once (Asynq workers on REDIS_URL), 1-100.
+      NOTIFICATION_WORKER_CONCURRENCY: ${NOTIFICATION_WORKER_CONCURRENCY:-10}
       PORT: "8090"
       DATABASE_URL: postgres://${POSTGRES_USER:-shopee}:${POSTGRES_PASSWORD}@postgres:5432/notification_db?sslmode=disable
       IDENTITY_SERVICE_URL: http://identity:8081

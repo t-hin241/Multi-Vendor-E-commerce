@@ -29,12 +29,18 @@ export function useOrders(page: number, enabled: boolean) {
   });
 }
 
+// useOrder reads the order; while Order is still holding stock for it
+// (checkout_state "preparing") it looks again every 2s, for up to 2 minutes.
 export function useOrder(orderId: string, enabled: boolean) {
   const { callWithAuth } = useAuth();
   return useQuery({
     queryKey: queryKeys.order(orderId),
     queryFn: () => callWithAuth((token) => api.getOrder(token, orderId)),
     enabled,
+    refetchInterval: (query) =>
+      query.state.data?.checkout_state === "preparing" && query.state.dataUpdateCount < 60
+        ? 2000
+        : false,
   });
 }
 
@@ -46,9 +52,9 @@ export function useCancelOrder(orderId: string) {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.order(orderId) });
       queryClient.invalidateQueries({ queryKey: queryKeys.ordersMine() });
-      toast.success("Order cancelled.");
+      toast.success("Đã hủy đơn hàng.");
     },
-    onError: (err) => toast.error(describeApiError(err, "Could not cancel order.")),
+    onError: (err) => toast.error(describeApiError(err, "Không thể hủy đơn hàng.")),
   });
 }
 

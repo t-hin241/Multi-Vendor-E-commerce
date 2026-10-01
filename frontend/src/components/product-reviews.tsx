@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Star, Upload } from "lucide-react";
+import { BadgeCheck, Star, Upload } from "lucide-react";
 import { useMemo, useState } from "react";
 
 import { Button } from "@/components/ui/button";
@@ -51,6 +51,8 @@ export function ProductReviews({
   const [rating, setRating] = useState(5);
   const [comment, setComment] = useState("");
   const [files, setFiles] = useState<File[]>([]);
+  const [fileError, setFileError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const reviews = useQuery({
     queryKey: ["product-reviews", productId],
     queryFn: () => api.listProductReviews(productId),
@@ -69,19 +71,29 @@ export function ProductReviews({
           "forbidden",
           "This product has no completed purchase eligible for review.",
         );
-      return callWithAuth(async (token) => {
-        const review = await api.createReview(token, {
-          orderItemId: eligible.order_item_id,
-          rating,
-          comment,
-        });
-        await Promise.all(files.map((file) => api.uploadReviewImage(token, review.id, file)));
-        return review;
-      });
+      const review = await callWithAuth((token) =>
+        api.createReview(token, { orderItemId: eligible.order_item_id, rating, comment }),
+      );
+      // The review is published even if a photo fails; say so instead of
+      // failing the whole form (resubmitting would be refused).
+      let failed = 0;
+      for (const file of files) {
+        try {
+          await callWithAuth((token) => api.uploadReviewImage(token, review.id, file));
+        } catch {
+          failed++;
+        }
+      }
+      return failed;
     },
-    onSuccess: () => {
+    onSuccess: (failed) => {
       setComment("");
       setFiles([]);
+      setNotice(
+        failed > 0
+          ? `Đã đăng đánh giá, nhưng ${failed} ảnh không tải lên được (JPEG, PNG hoặc WebP, tối đa 5MB).`
+          : "Đã đăng đánh giá. Cảm ơn bạn!",
+      );
       client.invalidateQueries({ queryKey: ["product-reviews", productId] });
       client.invalidateQueries({ queryKey: ["review-eligibility", productId] });
     },
@@ -140,9 +152,23 @@ export function ProductReviews({
                   type="file"
                   accept="image/jpeg,image/png,image/webp"
                   multiple
-                  onChange={(event) => setFiles(Array.from(event.target.files ?? []).slice(0, 5))}
+                  onChange={(event) => {
+                    const picked = Array.from(event.target.files ?? []);
+                    const ok = picked.filter(
+                      (file) =>
+                        ["image/jpeg", "image/png", "image/webp"].includes(file.type) &&
+                        file.size <= 5 * 1024 * 1024,
+                    );
+                    setFileError(
+                      ok.length < picked.length || ok.length > 5
+                        ? "Chỉ nhận tối đa 5 ảnh JPEG, PNG hoặc WebP, mỗi ảnh tối đa 5MB."
+                        : null,
+                    );
+                    setFiles(ok.slice(0, 5));
+                  }}
                 />
               </label>
+              {fileError && <p className="text-sm text-muted-foreground">{fileError}</p>}
               {error && <p className="text-sm text-destructive">{error}</p>}
               <Button type="submit" disabled={create.isPending}>
                 {create.isPending ? "Đang đăng..." : "Đăng đánh giá"}
@@ -150,6 +176,11 @@ export function ProductReviews({
             </form>
           </CardContent>
         </Card>
+      )}
+      {notice && (
+        <p role="status" className="mt-3 text-sm text-muted-foreground">
+          {notice}
+        </p>
       )}
       {reviews.isPending && (
         <p className="mt-3 text-sm text-muted-foreground">Đang tải đánh giá…</p>
@@ -160,9 +191,15 @@ export function ProductReviews({
             <CardContent className="pt-6">
               <div className="flex items-center justify-between">
                 <Stars rating={review.rating} />
-                <span className="text-xs text-muted-foreground">
-                  {review.buyer_name || "Người mua đã xác minh"} ·{" "}
-                  {new Date(review.created_at).toLocaleDateString("vi-VN")}
+                <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+                  {review.buyer_name || "Người mua"}
+                  {review.verified_purchase && (
+                    <span className="inline-flex items-center gap-0.5 text-emerald-700 dark:text-emerald-400">
+                      <BadgeCheck className="size-3.5" aria-hidden />
+                      Đã mua hàng
+                    </span>
+                  )}
+                  · {new Date(review.created_at).toLocaleDateString("vi-VN")}
                 </span>
               </div>
               <p className="mt-2 whitespace-pre-wrap text-sm">{review.comment}</p>

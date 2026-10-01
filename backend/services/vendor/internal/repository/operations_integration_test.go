@@ -115,8 +115,8 @@ func setup(t *testing.T) *fixture {
 	a := repository.NewAuditLogRepository(db)
 	addresses := repository.NewVendorAddressRepository(db)
 	f := &fixture{db: db, vendors: v, audit: a, owner: uuid.NewString(), other: uuid.NewString(), admin: uuid.NewString()}
-	f.ops = usecase.Operations{Tx: repository.Transactions{Pool: db}, Actors: actors{f.owner: "vendor", f.other: "vendor", f.admin: "admin"}, Addresses: addresses, Events: repository.Outbox{Pool: db}}
-	f.uc = usecase.NewVendorUseCase(v, a, noNotifications{}, nil, zerolog.Nop(), f.ops)
+	f.ops = usecase.Operations{Tx: repository.Transactions{Pool: db}, Actors: actors{f.owner: "vendor", f.other: "vendor", f.admin: "admin"}, Addresses: addresses, Events: repository.Outbox{Pool: db}, Notices: repository.NotificationOutbox{Pool: db}}
+	f.uc = usecase.NewVendorUseCase(v, a, nil, zerolog.Nop(), f.ops)
 	f.addresses = usecase.NewVendorAddressUseCase(addresses, v, f.ops)
 	return f
 }
@@ -159,7 +159,7 @@ func TestIntegrationDecisionAtomicityAndRace(t *testing.T) {
 	other := f.shop(t)
 	ops := f.ops
 	ops.Events = failEvents{}
-	broken := usecase.NewVendorUseCase(f.vendors, f.audit, noNotifications{}, nil, zerolog.Nop(), ops)
+	broken := usecase.NewVendorUseCase(f.vendors, f.audit, nil, zerolog.Nop(), ops)
 	if _, err := broken.Approve(ctx, other.ID, f.admin); err == nil {
 		t.Fatal("expected outbox error")
 	}
@@ -536,5 +536,47 @@ func TestIntegrationReplayIsAuditedWithReason(t *testing.T) {
 	}
 	if _, err := f.db.Exec(ctx, `DELETE FROM vendor_audit_logs WHERE vendor_id=$1`, v.ID); err == nil {
 		t.Fatal("audit rows must not be deletable")
+	}
+}
+
+// NTF-01: the owner's notice commits with the decision and waits in the
+// outbox until Notification accepts it; a refusal parks it.
+func TestIntegrationDecisionNoticeIsQueuedWithTheDecision(t *testing.T) {
+	f := setup(t)
+	ctx := t.Context()
+	v := f.shop(t)
+	if _, err := f.uc.Approve(ctx, v.ID, f.admin); err != nil {
+		t.Fatal(err)
+	}
+	var notices int
+	if err := f.db.QueryRow(ctx, `SELECT count(*) FROM vendor_notification_outbox WHERE vendor_id=$1 AND type='vendor_approved' AND user_id=$2`, v.ID, f.owner).Scan(&notices); err != nil || notices != 1 {
+		t.Fatalf("expected one queued notice, got %d %v", notices, err)
+	}
+	outbox := repository.NotificationOutbox{Pool: f.db}
+	batch, err := outbox.Claim(ctx)
+	if err != nil || len(batch) != 1 {
+		t.Fatalf("claim: %v %v", batch, err)
+	}
+	if again, _ := outbox.Claim(ctx); len(again) != 0 {
+		t.Fatal("a leased notice must not be claimed twice")
+	}
+	if err := outbox.Failed(ctx, batch[0], "notification refused with Bad Request", true); err != nil {
+		t.Fatal(err)
+	}
+	summary, err := f.vendors.Operations(ctx)
+	if err != nil || summary.ParkedNotices != 1 || summary.PendingNotices != 0 {
+		t.Fatalf("parked notice must be visible: %+v %v", summary, err)
+	}
+
+	// A decision that fails to queue its notice is rolled back.
+	other := f.shop(t)
+	ops := f.ops
+	ops.Notices = nil
+	broken := usecase.NewVendorUseCase(f.vendors, f.audit, nil, zerolog.Nop(), ops)
+	if _, err := broken.Reject(ctx, other.ID, f.admin, "Test rejection"); err == nil {
+		t.Fatal("expected the decision to fail without its notice")
+	}
+	if current, _ := f.vendors.FindByID(ctx, other.ID); current.Status != domain.StatusPending {
+		t.Fatalf("the decision must roll back, shop is %s", current.Status)
 	}
 }

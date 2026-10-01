@@ -9,7 +9,7 @@ Không có secret mới. Admin đọc các service bằng chính token của adm
 | Biến (service `admin`) | Mặc định | Ý nghĩa |
 |---|---|---|
 | `JWT_SECRET`, `IDENTITY_SERVICE_URL`, `IDENTITY_SERVICE_KEY` | dùng chung | Xác thực token và xác minh lại vai trò admin với Identity |
-| `VENDOR_SERVICE_URL` … `SHIPMENT_SERVICE_URL` | bắt buộc | Nơi đọc số liệu vận hành và audit |
+| `VENDOR_SERVICE_URL` … `SHIPMENT_SERVICE_URL`, `NOTIFICATION_SERVICE_URL` | bắt buộc | Nơi đọc số liệu vận hành và audit |
 | `REVIEW_SERVICE_URL` (Compose: `ADMIN_REVIEW_SERVICE_URL`) | `http://review:8091` | Để rỗng khi tắt review: audit review không được tra cứu |
 | `ADMIN_UPSTREAM_TIMEOUT` | `4s` | Giới hạn mỗi lần đọc một service (500ms–30s). Quá hạn thì service đó hiện "unavailable" |
 
@@ -41,11 +41,12 @@ Mỗi ô lấy số từ service sở hữu dữ liệu, kèm thời điểm. Se
 
 | Nhóm | Ô | Nguồn |
 |---|---|---|
-| Moderation | Shop chờ duyệt, sản phẩm chờ duyệt | Vendor, Catalog |
+| Moderation | Shop chờ duyệt, sản phẩm chờ duyệt, báo cáo review đang chờ (khi bật Review) | Vendor, Catalog, Review |
 | Fulfillment | Đã thanh toán chưa giao, chậm giao 3 ngày, tracking không cập nhật 7 ngày, chặn giao chưa có kết quả | Order, Shipment |
 | Money | Capture chưa áp vào đơn, capture Order từ chối chưa hoàn, link thanh toán kẹt, hoàn tiền chưa xác nhận, hoàn tiền trả hàng lỗi | Payment, Order |
 | Stock | Hold hết hạn chưa nhả, hold lệch với Order | Inventory |
-| Background jobs | Side effect Order dừng, event trạng thái shop, job Catalog, event Inventory, event Shipment bị Order từ chối | Từng service |
+| Background jobs | Side effect Order dừng, event trạng thái shop, job Catalog, event Inventory, event Shipment bị Order từ chối, ảnh review lỗi chưa dọn | Từng service |
+| Notifications | Email dừng sau retry, chờ quá 15 phút, bị từ chối 24 giờ, hàng đợi Redis không truy cập được, thông báo shop bị Notification từ chối | Notification, Vendor |
 
 ### Phục hồi một capture chưa áp vào đơn (không chạy SQL)
 

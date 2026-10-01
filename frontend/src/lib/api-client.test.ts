@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { type ApiError, fetchGatewayHealth, refreshSession } from "./api-client";
+import { type ApiError, fetchGatewayHealth, refreshSession, safeMessage } from "./api-client";
 
 describe("fetchGatewayHealth", () => {
   afterEach(() => {
@@ -103,5 +103,22 @@ describe("admin operation outcome", () => {
     const err = (await request("/x", { method: "POST" }).catch((e: unknown) => e)) as ApiError;
     expect(isOutcomeUnknown(err)).toBe(false);
     expect(err.requestId).toBe("req-server-1");
+  });
+});
+
+describe("safeMessage", () => {
+  it("never shows server internals for a server failure, and gives the request id", () => {
+    const msg = safeMessage(500, 'pq: relation "orders" does not exist', "req-123");
+    expect(msg).not.toContain("pq:");
+    expect(msg).toContain("req-123");
+  });
+
+  it("says the outcome is unknown when no response arrived", () => {
+    expect(safeMessage(0, "", "req-9")).toMatch(/có thể đã hoặc chưa/);
+  });
+
+  it("keeps a business refusal's wording", () => {
+    expect(safeMessage(409, "Giỏ hàng đã thay đổi")).toBe("Giỏ hàng đã thay đổi");
+    expect(safeMessage(429, "slow down")).toMatch(/quá nhanh/);
   });
 });

@@ -29,6 +29,7 @@ const SOURCES = [
   "payment",
   "shipment",
   "review",
+  "notification",
 ];
 const FIELDS: { key: keyof api.AuditFilter; label: string; placeholder: string }[] = [
   { key: "request_id", label: "Request id", placeholder: "from an error message" },

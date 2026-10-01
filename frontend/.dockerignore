@@ -6,3 +6,7 @@ npm-debug.log*
 .env.*.local
 Dockerfile
 .dockerignore
+e2e
+test-results
+playwright-report
+playwright.config.ts

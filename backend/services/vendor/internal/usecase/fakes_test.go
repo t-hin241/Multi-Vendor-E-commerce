@@ -198,27 +198,9 @@ func (f *fakeAuditLogRepository) List(_ context.Context, vendorID string, limit,
 	return out, nil
 }
 
-type sentNotification struct {
-	userID      string
-	notifType   string
-	referenceID string
-}
+type fakeNotices struct{}
 
-type fakeNotificationGateway struct {
-	mu   sync.Mutex
-	sent []sentNotification
-}
-
-func newFakeNotificationGateway() *fakeNotificationGateway {
-	return &fakeNotificationGateway{}
-}
-
-func (f *fakeNotificationGateway) Notify(_ context.Context, userID, notifType, referenceID string) error {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.sent = append(f.sent, sentNotification{userID: userID, notifType: notifType, referenceID: referenceID})
-	return nil
-}
+func (fakeNotices) Queue(context.Context, string, string, string, int64) error { return nil }
 
 // fakeObjectStore simulates the object store for logo/banner uploads --
 // Upload just records the key, Delete records which keys were removed so a
@@ -369,5 +351,5 @@ func (readyAddresses) FindDefaultForVendor(ctx context.Context, id string) (*dom
 	return &domain.VendorAddress{VendorID: id, RecipientName: "Test owner", Phone: "0900000000", Province: "Test province", District: "Test district", Ward: "Test ward", StreetAddress: "Test street", IsDefault: true}, nil
 }
 func testOps() usecase.Operations {
-	return usecase.Operations{Tx: directTx{}, Actors: allowActor{}, Addresses: readyAddresses{newFakeVendorAddressRepository()}, Events: fakeEvents{}}
+	return usecase.Operations{Tx: directTx{}, Actors: allowActor{}, Addresses: readyAddresses{newFakeVendorAddressRepository()}, Events: fakeEvents{}, Notices: fakeNotices{}}
 }

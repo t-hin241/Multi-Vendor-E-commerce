@@ -14,14 +14,15 @@ import (
 
 // auditPaths is each service's read-only audit search.
 var auditPaths = map[string]string{
-	"identity":  "/api/auth/admin/audit-events",
-	"vendor":    "/api/vendor/admin/audit-events",
-	"catalog":   "/api/catalog/admin/audit-events",
-	"inventory": "/api/inventory/admin/audit-events",
-	"order":     "/api/orders/admin/audit-events",
-	"payment":   "/api/payments/admin/audit-events",
-	"shipment":  "/api/shipments/admin/audit-events",
-	"review":    "/api/reviews/admin/audit-events",
+	"identity":     "/api/auth/admin/audit-events",
+	"vendor":       "/api/vendor/admin/audit-events",
+	"catalog":      "/api/catalog/admin/audit-events",
+	"inventory":    "/api/inventory/admin/audit-events",
+	"order":        "/api/orders/admin/audit-events",
+	"payment":      "/api/payments/admin/audit-events",
+	"shipment":     "/api/shipments/admin/audit-events",
+	"review":       "/api/reviews/admin/audit-events",
+	"notification": "/api/notifications/admin/audit-events",
 }
 
 // AuditPage is one page of the merged audit, newest first. Complete is
@@ -77,7 +78,7 @@ func (s Service) SearchAudit(ctx context.Context, adminID, authorization string,
 	}
 	if only != "" {
 		if _, ok := auditPaths[only]; !ok {
-			return nil, apperror.Validation("source must be one of identity, vendor, catalog, inventory, order, payment, shipment, review")
+			return nil, apperror.Validation("source must be one of identity, vendor, catalog, inventory, order, payment, shipment, review, notification")
 		}
 	}
 	c, err := s.decodeCursor(cursor)

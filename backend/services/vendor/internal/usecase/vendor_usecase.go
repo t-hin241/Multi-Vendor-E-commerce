@@ -19,25 +19,15 @@ import (
 )
 
 type VendorUseCase struct {
-	vendors       VendorRepositoryPort
-	auditLogs     AuditLogRepositoryPort
-	notifications NotificationGateway
-	store         ObjectStore
-	log           zerolog.Logger
-	ops           Operations
+	vendors   VendorRepositoryPort
+	auditLogs AuditLogRepositoryPort
+	store     ObjectStore
+	log       zerolog.Logger
+	ops       Operations
 }
 
-func NewVendorUseCase(vendors VendorRepositoryPort, auditLogs AuditLogRepositoryPort, notifications NotificationGateway, store ObjectStore, log zerolog.Logger, ops Operations) *VendorUseCase {
-	return &VendorUseCase{vendors: vendors, auditLogs: auditLogs, notifications: notifications, store: store, log: log, ops: ops}
-}
-
-// notify is fire-and-forget from every caller's point of view: a
-// notification failure is logged and never propagated, since it must never
-// roll back the moderation decision that triggered it.
-func (uc *VendorUseCase) notify(ctx context.Context, userID, notifType, referenceID string) {
-	if err := uc.notifications.Notify(ctx, userID, notifType, referenceID); err != nil {
-		uc.log.Error().Err(err).Str("user_id", userID).Str("type", notifType).Msg("failed to send notification")
-	}
+func NewVendorUseCase(vendors VendorRepositoryPort, auditLogs AuditLogRepositoryPort, store ObjectStore, log zerolog.Logger, ops Operations) *VendorUseCase {
+	return &VendorUseCase{vendors: vendors, auditLogs: auditLogs, store: store, log: log, ops: ops}
 }
 
 // Apply creates a new shop application for userID. A user may own any

@@ -1,4 +1,7 @@
-// Command server runs the notification service.
+// Command server runs the notification service: notifications recorded in
+// PostgreSQL and delivered by Asynq workers (Redis), the recovery loop that
+// requeues lost jobs from PostgreSQL, password reset delivery, and the
+// admin delivery view.
 package main
 
 import (
@@ -6,11 +9,15 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"time"
 
+	"shopee/backend/pkg/adminaudit"
 	"shopee/backend/pkg/authjwt"
 	sessionconfig "shopee/backend/pkg/config"
 	"shopee/backend/pkg/health"
+	"shopee/backend/pkg/identityclient"
 	"shopee/backend/pkg/logger"
+	"shopee/backend/pkg/middleware"
 	"shopee/backend/pkg/platform/natsclient"
 	"shopee/backend/pkg/platform/postgres"
 	"shopee/backend/pkg/platform/redisclient"
@@ -18,8 +25,10 @@ import (
 	"shopee/backend/services/notification/internal/adapter"
 	"shopee/backend/services/notification/internal/config"
 	"shopee/backend/services/notification/internal/repository"
+	"shopee/backend/services/notification/internal/sender"
 	"shopee/backend/services/notification/internal/sender/mock"
 	smtpsender "shopee/backend/services/notification/internal/sender/smtp"
+	"shopee/backend/services/notification/internal/taskqueue"
 	"shopee/backend/services/notification/internal/transport"
 	"shopee/backend/services/notification/internal/usecase"
 )
@@ -61,15 +70,37 @@ func main() {
 	}
 	jwtManager.SetVerifier(verifier)
 	identityClient := adapter.NewHTTPIdentityClient(cfg.IdentityServiceURL, cfg.IdentityServiceKey)
-	emailSender := mock.New(log)
+	roles := identityclient.Client{URL: cfg.IdentityServiceURL, Key: cfg.IdentityServiceKey}
+	relay := smtpsender.Relay{Host: cfg.SMTPHost, Port: cfg.SMTPPort, Username: cfg.SMTPUsername, Password: cfg.SMTPPassword, From: cfg.SMTPFrom, AllowPlaintext: cfg.SMTPAllowPlaintext}
+	var emailSender sender.Sender = smtpsender.Sender{Relay: relay}
+	if cfg.EmailProvider == "mock" {
+		emailSender = mock.New(log)
+		log.Warn().Msg("notification_mock_sender_in_use")
+	}
 
+	const sendTimeout = 20 * time.Second
 	notificationRepo := repository.NewNotificationRepository(dbPool)
+	jobs := taskqueue.New(redisClient, taskqueue.QueueName, sendTimeout+40*time.Second)
+	notificationUseCase := usecase.NewNotificationUseCase(usecase.Deps{
+		Store: notificationRepo, Tx: repository.Transactions{Pool: dbPool}, Identity: identityClient,
+		Sender: emailSender, Roles: roles, Log: log, SendTimeout: sendTimeout, Queue: jobs,
+	})
+	stopJobs := func() {}
+	if !cfg.DeliveryPaused {
+		stopJobs, err = jobs.Start(notificationUseCase.Deliver, cfg.WorkerConcurrency, cfg.Base.ShutdownTimeout, log)
+		if err != nil {
+			log.Fatal().Err(err).Msg("notification_workers_start_failed")
+		}
+	}
+	maintenance := &usecase.Maintenance{UseCase: notificationUseCase, AttemptRetention: cfg.AttemptRetention, Paused: cfg.DeliveryPaused}
+	maintenanceCtx, stopMaintenance := context.WithCancel(ctx)
+	defer stopMaintenance()
+	go maintenance.Run(maintenanceCtx)
 
-	notificationUseCase := usecase.NewNotificationUseCase(notificationRepo, identityClient, emailSender, log)
 	internalHandler := transport.NewInternalHandler(notificationUseCase, log)
 	adminHandler := transport.NewAdminHandler(notificationUseCase, log)
 
-	router := transport.NewRouter(cfg.Base.Env, log, jwtManager, internalHandler, adminHandler,
+	router := transport.NewRouter(cfg.Base.Env, log, jwtManager, cfg.IdentityServiceKey, internalHandler, adminHandler,
 		health.Checker{Name: "postgres", Ping: func(ctx context.Context) error { return dbPool.Ping(ctx) }},
 		health.Checker{Name: "redis", Ping: func(ctx context.Context) error { return redisClient.Ping(ctx).Err() }},
 		health.Checker{Name: "nats", Ping: func(ctx context.Context) error {
@@ -79,9 +110,11 @@ func main() {
 			return nil
 		}},
 	)
+	adminaudit.Register(router.Group("/api/notifications/admin", middleware.RequireAuth(jwtManager), middleware.RequireRole("admin")), "/audit-events",
+		adminaudit.Source{Name: "notification", SQL: repository.AuditSearchSQL, DB: dbPool, Roles: roles}, log)
 
 	resetUseCase := &usecase.PasswordResetUseCase{Source: adapter.ResetSource{URL: cfg.IdentityServiceURL, Key: cfg.ResetDeliveryKey}, Sender: smtpsender.ResetSender{Host: cfg.SMTPHost, Port: cfg.SMTPPort, Username: cfg.SMTPUsername, Password: cfg.SMTPPassword, From: cfg.SMTPFrom, AllowPlaintext: cfg.SMTPAllowPlaintext}}
-	transport.RegisterPasswordReset(router, cfg.ResetDeliveryKey, resetUseCase)
+	transport.RegisterPasswordReset(router, cfg.ResetDeliveryKey, resetUseCase, log)
 	srv := &http.Server{
 		Addr:              ":" + cfg.Base.Port,
 		Handler:           router,
@@ -91,11 +124,14 @@ func main() {
 	}
 
 	go func() {
-		log.Info().Str("port", cfg.Base.Port).Msg(serviceName + "_starting")
+		log.Info().Str("port", cfg.Base.Port).Str("email_provider", cfg.EmailProvider).Bool("delivery_paused", cfg.DeliveryPaused).Msg(serviceName + "_starting")
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatal().Err(err).Msg(serviceName + "_listen_failed")
 		}
 	}()
 
-	shutdown.WaitForSignal(log, srv, cfg.Base.ShutdownTimeout, nil)
+	shutdown.WaitForSignal(log, srv, cfg.Base.ShutdownTimeout, func() {
+		stopMaintenance()
+		stopJobs()
+	})
 }

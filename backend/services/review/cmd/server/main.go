@@ -1,3 +1,6 @@
+// Command server runs the review service: verified-purchase reviews,
+// shop replies and reports, admin moderation, and the background cleanup
+// of failed image uploads.
 package main
 
 import (
@@ -13,7 +16,6 @@ import (
 	"shopee/backend/pkg/identityclient"
 	"shopee/backend/pkg/logger"
 	"shopee/backend/pkg/middleware"
-	"shopee/backend/pkg/platform/natsclient"
 	"shopee/backend/pkg/platform/objectstorage"
 	"shopee/backend/pkg/platform/postgres"
 	"shopee/backend/pkg/platform/redisclient"
@@ -49,31 +51,36 @@ func main() {
 		log.Fatal().Err(err).Msg("redis connection failed")
 	}
 	defer redis.Close()
-	nats, err := natsclient.Connect(cfg.Base.NATSURL)
-	if err != nil {
-		log.Fatal().Err(err).Msg("nats connection failed")
-	}
-	defer nats.Close()
 	store, err := objectstorage.NewClient(ctx, cfg.ObjectStorage)
 	if err != nil {
 		log.Fatal().Err(err).Msg("object storage connection failed")
 	}
-	uc := usecase.NewReviewUseCase(repository.NewReviewRepository(db), adapter.NewHTTPOrderClient(cfg.OrderServiceURL, internalServices.Key), adapter.NewHTTPVendorClient(cfg.VendorServiceURL, internalServices.Key), adapter.NewHTTPIdentityClient(cfg.IdentityServiceURL, cfg.IdentityServiceKey), store).
-		WithAdminVerification(identityclient.Client{URL: internalServices.IdentityURL, Key: internalServices.Key})
+	roles := identityclient.Client{URL: internalServices.IdentityURL, Key: internalServices.Key}
+	uc := usecase.NewReviewUseCase(usecase.Deps{
+		Repo: repository.NewReviewRepository(db), Tx: repository.Transactions{Pool: db},
+		Orders: adapter.NewHTTPOrderClient(cfg.OrderServiceURL, internalServices.Key), Vendors: adapter.NewHTTPVendorClient(cfg.VendorServiceURL, internalServices.Key),
+		Identity: adapter.NewHTTPIdentityClient(cfg.IdentityServiceURL, internalServices.Key), Store: store, Roles: roles, Log: log,
+		ShowUnverified: cfg.ShowUnverified,
+	})
+	if cfg.ShowUnverified {
+		log.Warn().Msg("review_unverified_reviews_shown")
+	}
+	maintenanceCtx, stopMaintenance := context.WithCancel(ctx)
+	defer stopMaintenance()
+	go uc.Maintenance(maintenanceCtx)
 	jwtManager := authjwt.NewManager(cfg.JWTSecret)
 	verifier, err := sessionconfig.LoadSessionVerifier()
 	if err != nil {
 		log.Fatal().Err(err).Msg("session verifier configuration invalid")
 	}
 	jwtManager.SetVerifier(verifier)
-	router := transport.NewRouter(cfg.Base.Env, log, jwtManager, transport.NewHandler(uc, log), health.Checker{Name: "postgres", Ping: func(ctx context.Context) error { return db.Ping(ctx) }}, health.Checker{Name: "redis", Ping: func(ctx context.Context) error { return redis.Ping(ctx).Err() }}, health.Checker{Name: "object_storage", Ping: store.Ping}, health.Checker{Name: "nats", Ping: func(context.Context) error {
-		if !nats.IsConnected() {
-			return fmt.Errorf("nats: not connected")
-		}
-		return nil
-	}})
+	limiter := adapter.RedisRateLimiter{Client: redis, Prefix: "review:rate:"}
+	router := transport.NewRouter(cfg.Base.Env, log, jwtManager, transport.NewHandler(uc, log), limiter,
+		health.Checker{Name: "postgres", Ping: func(ctx context.Context) error { return db.Ping(ctx) }},
+		health.Checker{Name: "redis", Ping: func(ctx context.Context) error { return redis.Ping(ctx).Err() }},
+		health.Checker{Name: "object_storage", Ping: store.Ping})
 	adminaudit.Register(router.Group("/api/reviews/admin", middleware.RequireAuth(jwtManager), middleware.RequireRole("admin")), "/audit-events",
-		adminaudit.Source{Name: "review", SQL: repository.AuditSearchSQL, DB: db, Roles: identityclient.Client{URL: internalServices.IdentityURL, Key: internalServices.Key}}, log)
+		adminaudit.Source{Name: "review", SQL: repository.AuditSearchSQL, DB: db, Roles: roles}, log)
 
 	srv := &http.Server{Addr: ":" + cfg.Base.Port, Handler: router, ReadHeaderTimeout: cfg.Base.HTTPReadTimeout, ReadTimeout: cfg.Base.HTTPReadTimeout, IdleTimeout: cfg.Base.HTTPIdleTimeout}
 	go func() {
@@ -82,5 +89,5 @@ func main() {
 			log.Fatal().Err(err).Msg("review_listen_failed")
 		}
 	}()
-	shutdown.WaitForSignal(log, srv, cfg.Base.ShutdownTimeout, nil)
+	shutdown.WaitForSignal(log, srv, cfg.Base.ShutdownTimeout, stopMaintenance)
 }

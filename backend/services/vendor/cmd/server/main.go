@@ -62,7 +62,6 @@ func main() {
 		log.Fatal().Err(err).Msg("session verifier configuration invalid")
 	}
 	jwtManager.SetVerifier(verifier)
-	notificationClient := adapter.NewHTTPNotificationClient(cfg.NotificationServiceURL)
 
 	objectStore, err := objectstorage.NewClient(ctx, cfg.ObjectStorage)
 	if err != nil {
@@ -73,11 +72,13 @@ func main() {
 	auditLogRepo := repository.NewAuditLogRepository(dbPool)
 	addressRepo := repository.NewVendorAddressRepository(dbPool)
 	outbox := repository.Outbox{Pool: dbPool}
-	ops := usecase.Operations{Tx: repository.Transactions{Pool: dbPool}, Actors: identityclient.Client{URL: cfg.Internal.IdentityURL, Key: cfg.Internal.Key}, Addresses: addressRepo, Events: outbox}
+	notices := repository.NotificationOutbox{Pool: dbPool}
+	ops := usecase.Operations{Tx: repository.Transactions{Pool: dbPool}, Actors: identityclient.Client{URL: cfg.Internal.IdentityURL, Key: cfg.Internal.Key}, Addresses: addressRepo, Events: outbox, Notices: notices}
 	workerCtx, stopWorkers := context.WithCancel(ctx)
 	defer stopWorkers()
 	go adapter.DispatchStatus(workerCtx, outbox, []string{cfg.CatalogURL, cfg.OrderURL}, cfg.Internal.Key, log)
-	vendorUseCase := usecase.NewVendorUseCase(vendorRepo, auditLogRepo, notificationClient, objectStore, log, ops)
+	go adapter.DispatchNotices(workerCtx, notices, cfg.NotificationServiceURL, cfg.Internal.Key, log)
+	vendorUseCase := usecase.NewVendorUseCase(vendorRepo, auditLogRepo, objectStore, log, ops)
 	addressUseCase := usecase.NewVendorAddressUseCase(addressRepo, vendorRepo, ops)
 
 	vendorHandler := transport.NewVendorHandler(vendorUseCase, log)

@@ -1205,7 +1205,7 @@ type fakeNotificationGateway struct {
 	sent []sentNotification
 }
 
-func (f *fakeNotificationGateway) Notify(_ context.Context, userID, notifType, referenceID string) error {
+func (f *fakeNotificationGateway) Notify(_ context.Context, _, userID, notifType, referenceID string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.sent = append(f.sent, sentNotification{userID, notifType, referenceID})

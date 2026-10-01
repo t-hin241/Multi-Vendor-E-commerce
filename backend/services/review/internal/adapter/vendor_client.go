@@ -31,14 +31,22 @@ func (c *HTTPVendorClient) EnsureOwnedApproved(ctx context.Context, userID, vend
 	serviceauth.SetRequestHeaders(req, c.key)
 	resp, err := c.client.Do(req)
 	if err != nil {
-		return apperror.Internal(err)
+		return unavailable(err)
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusForbidden {
+	switch {
+	case resp.StatusCode == http.StatusOK:
+		return nil
+	case resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusForbidden:
 		return apperror.Forbidden("You do not own this shop")
+	case resp.StatusCode >= 500:
+		return unavailable(fmt.Errorf("vendor service returned status %d", resp.StatusCode))
 	}
-	if resp.StatusCode != http.StatusOK {
-		return apperror.Internal(fmt.Errorf("vendor service returned status %d", resp.StatusCode))
-	}
-	return nil
+	return apperror.Internal(fmt.Errorf("vendor service returned status %d", resp.StatusCode))
+}
+
+// unavailable: shop ownership could not be checked; nothing is changed.
+func unavailable(err error) *apperror.Error {
+	return &apperror.Error{Code: "service_unavailable", Message: "Shop records are unavailable right now; please try again shortly",
+		Status: http.StatusServiceUnavailable, Err: err}
 }

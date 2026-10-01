@@ -1,6 +1,5 @@
 "use client";
 
-import DOMPurify from "dompurify";
 import { Store } from "lucide-react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
@@ -26,6 +25,7 @@ import { Separator } from "@/components/ui/separator";
 import type { ProductVariant } from "@/lib/api-client";
 import { useAuth } from "@/lib/auth-context";
 import { removeNonSizeImages } from "@/lib/description-images";
+import { sanitizeDescription } from "@/lib/sanitize-html";
 import { formatMoney } from "@/lib/format";
 import { useAddCartItem } from "@/lib/hooks/use-cart";
 import { useProduct } from "@/lib/hooks/use-product";
@@ -82,7 +82,7 @@ export default function ProductDetailPage() {
   // the server pass regardless.
   const descriptionHtml = useMemo(() => {
     if (typeof window === "undefined") return "";
-    const sanitized = DOMPurify.sanitize(productQuery.data?.description ?? "");
+    const sanitized = sanitizeDescription(productQuery.data?.description ?? "");
     return removeNonSizeImages(sanitized);
   }, [productQuery.data?.description]);
 

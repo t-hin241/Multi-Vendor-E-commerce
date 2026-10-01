@@ -9,11 +9,14 @@ import (
 	"shopee/backend/pkg/platform/objectstorage"
 )
 
+// Config is Review's configuration; secrets are read here only.
 type Config struct {
 	Base                                                             baseconfig.Base
 	JWTSecret, OrderServiceURL, VendorServiceURL, IdentityServiceURL string
 	ObjectStorage                                                    objectstorage.Config
-	IdentityServiceKey                                               string
+	// ShowUnverified also lists reviews that are not verified purchases
+	// (seeded demo data). Refused in production (REV-05).
+	ShowUnverified bool
 }
 
 func Load() (Config, error) {
@@ -58,7 +61,11 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 	ssl, _ := strconv.ParseBool(os.Getenv("OBJECT_STORAGE_USE_SSL"))
-	return Config{IdentityServiceKey: os.Getenv("IDENTITY_SERVICE_KEY"), Base: base, JWTSecret: jwt, OrderServiceURL: orderURL, VendorServiceURL: vendorURL, IdentityServiceURL: identityURL, ObjectStorage: objectstorage.Config{Endpoint: endpoint, AccessKey: access, SecretKey: secret, Bucket: bucket, PublicBaseURL: publicURL, UseSSL: ssl}}, nil
+	showUnverified := os.Getenv("REVIEW_SHOW_UNVERIFIED") == "true"
+	if showUnverified && base.Env == "production" {
+		return Config{}, fmt.Errorf("config: REVIEW_SHOW_UNVERIFIED is not allowed in production")
+	}
+	return Config{ShowUnverified: showUnverified, Base: base, JWTSecret: jwt, OrderServiceURL: orderURL, VendorServiceURL: vendorURL, IdentityServiceURL: identityURL, ObjectStorage: objectstorage.Config{Endpoint: endpoint, AccessKey: access, SecretKey: secret, Bucket: bucket, PublicBaseURL: publicURL, UseSSL: ssl}}, nil
 }
 func requireEnv(key string) (string, error) {
 	if v := os.Getenv(key); v != "" {

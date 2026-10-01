@@ -145,6 +145,25 @@ func TestDashboardMarksUnavailableSourcesInsteadOfZero(t *testing.T) {
 	}
 }
 
+// Reviews are optional: without the service their tiles are left out
+// rather than shown as unavailable; with it they read its counters.
+func TestReviewTilesFollowTheReviewService(t *testing.T) {
+	r := &fakeReader{ops: map[string]string{"review": `{"counts": {"open_reports": 2, "image_cleanup_parked": 0}}`}}
+	d, err := service(r, "order").Dashboard(t.Context(), "admin-1", "Bearer x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, x := range d.Tiles {
+		if x.Key == "review_reports_open" || x.Key == "review_uploads_stuck" {
+			t.Fatalf("review tiles without the review service: %+v", x)
+		}
+	}
+	d, _ = service(r, "order", "review").Dashboard(t.Context(), "admin-1", "Bearer x")
+	if v := tile(t, d, "review_reports_open"); v.Count == nil || *v.Count != 2 || v.Status != "attention" {
+		t.Fatalf("open reports: %+v", v)
+	}
+}
+
 func TestReadsNeedAVerifiedAdmin(t *testing.T) {
 	r := &fakeReader{}
 	s := service(r, "order")

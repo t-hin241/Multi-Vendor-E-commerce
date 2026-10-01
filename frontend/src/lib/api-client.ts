@@ -31,6 +31,20 @@ export function newOperationId(): string {
   return `op-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
 }
 
+// safeMessage is what an error may say to the user. A business refusal
+// (4xx) keeps the server's message; a lost response, throttling or a
+// server failure gets a fixed message with the request id to quote to
+// support, never server internals.
+export function safeMessage(status: number, serverMessage: string, requestId?: string): string {
+  const ref = requestId ? ` Mã tra cứu: ${requestId}.` : "";
+  if (status === 0) {
+    return `Không nhận được phản hồi từ máy chủ; thao tác có thể đã hoặc chưa được thực hiện. Kiểm tra kết nối rồi tải lại trang.${ref}`;
+  }
+  if (status === 429) return "Bạn thao tác quá nhanh. Vui lòng thử lại sau ít phút.";
+  if (status >= 500) return `Hệ thống đang gặp sự cố. Vui lòng thử lại sau.${ref}`;
+  return serverMessage || `Yêu cầu không thành công (${status}).`;
+}
+
 type ErrorEnvelope = { error: { code: string; message: string; request_id?: string } };
 type SuccessEnvelope<T> = { data: T };
 
@@ -44,7 +58,12 @@ type RequestOptions = {
   // requestId is sent as X-Request-Id so the operation can be found in the
   // audit even if the response is lost.
   requestId?: string;
+  // timeoutMs bounds the wait for a response (default 30s, uploads 120s).
+  // A timeout is an unknown outcome (status 0), never a failure.
+  timeoutMs?: number;
 };
+
+const DEFAULT_TIMEOUT_MS = 30_000;
 
 function buildQuery(query?: Record<string, string | number | undefined>): string {
   if (!query) return "";
@@ -65,28 +84,44 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
   if (method !== "GET" && method !== "HEAD") headers["X-CSRF-Protection"] = "1";
   if (options.requestId) headers["X-Request-Id"] = options.requestId;
 
+  const controller = new AbortController();
+  const timer = setTimeout(
+    () => controller.abort(),
+    options.timeoutMs ?? (form ? 120_000 : DEFAULT_TIMEOUT_MS),
+  );
   let res: Response;
+  let body: SuccessEnvelope<T> | ErrorEnvelope | null;
   try {
-    res = await fetch(`${API_BASE_URL}${path}${buildQuery(query)}`, {
-      method,
-      credentials: "include",
-      headers,
-      body: form ?? (json !== undefined ? JSON.stringify(json) : undefined),
-      cache: "no-store",
-    });
-  } catch {
-    throw new ApiError(0, "network_error", "No response from the server.", options.requestId);
+    try {
+      res = await fetch(`${API_BASE_URL}${path}${buildQuery(query)}`, {
+        method,
+        credentials: "include",
+        headers,
+        body: form ?? (json !== undefined ? JSON.stringify(json) : undefined),
+        cache: "no-store",
+        signal: controller.signal,
+      });
+    } catch {
+      throw new ApiError(
+        0,
+        controller.signal.aborted ? "timeout" : "network_error",
+        safeMessage(0, "", options.requestId),
+        options.requestId,
+      );
+    }
+    body = (await res.json().catch(() => null)) as SuccessEnvelope<T> | ErrorEnvelope | null;
+  } finally {
+    clearTimeout(timer);
   }
-
-  const body = (await res.json().catch(() => null)) as SuccessEnvelope<T> | ErrorEnvelope | null;
 
   if (!res.ok || !body || "error" in body) {
     const errBody = body && "error" in body ? body.error : null;
+    const requestId = errBody?.request_id ?? res.headers.get("X-Request-Id") ?? options.requestId;
     throw new ApiError(
       res.status,
       errBody?.code ?? "unknown_error",
-      errBody?.message ?? `Request failed with status ${res.status}`,
-      errBody?.request_id ?? res.headers.get("X-Request-Id") ?? options.requestId,
+      safeMessage(res.status, errBody?.message ?? "", requestId ?? undefined),
+      requestId ?? undefined,
     );
   }
 
@@ -2356,6 +2391,9 @@ export type Review = {
   verified_purchase: boolean;
   images: ReviewImage[];
   reply?: ReviewReply;
+  hidden_reason_id?: string;
+  hidden_note?: string;
+  hidden_at?: string;
   created_at: string;
 };
 export type ReviewSummary = {
@@ -2390,6 +2428,9 @@ export type ReviewReport = {
   note?: string;
   status: "open" | "resolved";
   decision?: "keep" | "hide";
+  resolution_reason_id?: string;
+  resolution_note?: string;
+  resolved_at?: string;
   created_at: string;
 };
 
@@ -2495,6 +2536,34 @@ export function listAdminReviews(
       rating: params.rating,
     },
   });
+}
+export function hideReview(
+  token: string,
+  reviewId: string,
+  reasonId: string,
+  note: string,
+): Promise<{ status: string }> {
+  return request(`/api/reviews/admin/${reviewId}/hide`, {
+    method: "POST",
+    token,
+    json: { reason_id: reasonId, note },
+  });
+}
+export function restoreReview(
+  token: string,
+  reviewId: string,
+  note: string,
+): Promise<{ status: string }> {
+  return request(`/api/reviews/admin/${reviewId}/restore`, {
+    method: "POST",
+    token,
+    json: { note },
+  });
+}
+export function getReviewOperations(
+  token: string,
+): Promise<{ counts: Record<string, number>; generated_at: string }> {
+  return request("/api/reviews/admin/operations", { token });
 }
 export function listReviewReports(token: string, status?: string): Promise<ReviewReport[]> {
   return request<ReviewReport[]>("/api/reviews/admin/reports", { token, query: { status } });
@@ -2654,4 +2723,76 @@ export type AuditFilter = {
 
 export function searchAdminAudit(token: string, filter: AuditFilter): Promise<AuditPage> {
   return request<AuditPage>("/api/admin/audit", { token, query: filter });
+}
+
+// ---------- Admin: notification delivery ----------
+
+export type NotificationStatus = "pending" | "sending" | "sent" | "failed" | "parked";
+
+// recipient is masked by the server (e.g. "b***@example.com").
+export type AdminNotification = {
+  id: string;
+  event_id: string;
+  source: string;
+  user_id: string;
+  type: string;
+  template_version: string;
+  reference_id: string;
+  status: NotificationStatus;
+  recipient?: string;
+  fail_reason?: string;
+  attempts: number;
+  max_attempts: number;
+  next_attempt_at: string;
+  sent_at?: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export type NotificationAttempt = {
+  attempt: number;
+  outcome: "sent" | "retry" | "failed" | "parked";
+  error?: string;
+  duration_ms: number;
+  created_at: string;
+};
+
+export function listAdminNotifications(
+  token: string,
+  params: {
+    status?: string;
+    type?: string;
+    user_id?: string;
+    limit?: number;
+    offset?: number;
+  } = {},
+): Promise<AdminNotification[]> {
+  return request<AdminNotification[]>("/api/notifications/admin", { token, query: params });
+}
+
+export function getNotificationOperations(
+  token: string,
+): Promise<{ counts: Record<string, number> }> {
+  return request("/api/notifications/admin/operations", { token });
+}
+
+export function listNotificationAttempts(
+  token: string,
+  id: string,
+): Promise<NotificationAttempt[]> {
+  return request<NotificationAttempt[]>(`/api/notifications/admin/${id}/attempts`, { token });
+}
+
+// retryNotification queues a failed or parked notification again; the
+// reason is kept in the audit.
+export function retryNotification(
+  token: string,
+  id: string,
+  reason: string,
+): Promise<AdminNotification> {
+  return request<AdminNotification>(`/api/notifications/admin/${id}/retry`, {
+    method: "POST",
+    token,
+    json: { reason },
+  });
 }

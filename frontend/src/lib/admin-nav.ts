@@ -5,6 +5,7 @@ import {
   FolderTree,
   History,
   LayoutDashboard,
+  Mail,
   MessageSquareWarning,
   PackagePlus,
   PackageSearch,
@@ -51,6 +52,7 @@ export const ADMIN_NAV_GROUPS: AdminNavGroup[] = [
       { href: "/admin/refunds", label: "Refunds", icon: Banknote },
       { href: "/admin/payments", label: "Payment reconciliation", icon: CreditCard },
       { href: "/admin/payouts", label: "Vendor payouts", icon: Wallet },
+      { href: "/admin/notifications", label: "Notifications", icon: Mail },
     ],
   },
   {

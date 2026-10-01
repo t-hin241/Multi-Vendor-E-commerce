@@ -93,7 +93,7 @@ export default function OrderDetailPage() {
           real order, so it can't be used to show items grouped by package. */}
       <Card className="mt-6 gap-0 py-0">
         {order.items?.map((item, i) => (
-          <div key={item.product_id}>
+          <div key={item.id}>
             {i > 0 && <Separator />}
             <CardContent className="flex items-center justify-between p-4">
               <div>
@@ -309,8 +309,8 @@ export default function OrderDetailPage() {
                 <AlertDialogHeader>
                   <AlertDialogTitle>Hủy đơn hàng này?</AlertDialogTitle>
                   <AlertDialogDescription>
-                    Không thể hoàn tác. Nếu bạn đã bắt đầu thanh toán, hãy tự mô phỏng lại trạng
-                    thái đó.
+                    Không thể hoàn tác. Nếu bạn vừa thanh toán xong, hãy đợi vài phút để đơn cập
+                    nhật trước khi hủy.
                   </AlertDialogDescription>
                 </AlertDialogHeader>
                 <AlertDialogFooter>

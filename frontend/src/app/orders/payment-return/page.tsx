@@ -1,25 +1,16 @@
 "use client";
 
-import { Suspense, useEffect } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { Suspense } from "react";
 
-// The provider redirect is informational only. The destination order page
-// fetches its state again from our API, which is updated exclusively by the
-// signature-verified server webhook.
-function PaymentReturnRedirect() {
-  const router = useRouter();
-  const params = useSearchParams();
-  useEffect(() => {
-    const orderId = params.get("order_id");
-    router.replace(orderId ? `/orders/${orderId}` : "/orders");
-  }, [params, router]);
-  return null;
-}
+import { PaymentOutcome } from "@/components/orders/payment-outcome";
 
+// The provider sends the buyer here after paying. Its query string is a
+// navigation hint only: the page reads the order from our API, which only
+// Payment's signature-verified webhook can mark paid.
 export default function PaymentReturnPage() {
   return (
     <Suspense fallback={null}>
-      <PaymentReturnRedirect />
+      <PaymentOutcome returned={true} />
     </Suspense>
   );
 }

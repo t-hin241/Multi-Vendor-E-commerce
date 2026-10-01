@@ -5,6 +5,8 @@ export default defineConfig({
   plugins: [react()],
   test: {
     environment: "node",
+    // Browser tests (e2e/) run with Playwright, not Vitest.
+    include: ["src/**/*.test.{ts,tsx}"],
   },
   resolve: {
     alias: {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"strings"
@@ -12,8 +13,9 @@ import (
 	"shopee/backend/pkg/apperror"
 )
 
-// IdentityGateway resolves the public display name for a review author. It
-// deliberately returns no credential or contact information.
+// IdentityGateway resolves a review author's name, which Review masks
+// before storing (domain.MaskName); no credential or contact information
+// is read.
 type IdentityGateway interface {
 	DisplayName(ctx context.Context, userID string) (string, error)
 }
@@ -50,7 +52,7 @@ func (c *HTTPIdentityClient) DisplayName(ctx context.Context, userID string) (st
 			FullName string `json:"full_name"`
 		} `json:"data"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&body); err != nil {
 		return "", apperror.Internal(err)
 	}
 	return strings.TrimSpace(body.Data.FullName), nil
