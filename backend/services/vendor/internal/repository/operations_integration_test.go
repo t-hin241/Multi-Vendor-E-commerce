@@ -95,10 +95,6 @@ func (a actors) RequireRole(ctx context.Context, id, role string) error {
 	return nil
 }
 
-type noNotifications struct{}
-
-func (noNotifications) Notify(context.Context, string, string, string) error { return nil }
-
 type fixture struct {
 	db                  *pgxpool.Pool
 	vendors             *repository.VendorRepository

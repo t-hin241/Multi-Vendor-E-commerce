@@ -27,7 +27,7 @@ func TestValidateReview(t *testing.T) {
 		{"rating below range", 0, "comment"},
 		{"rating above range", 6, "comment"},
 		{"empty comment", 4, "  "},
-		{"only control characters", 4, "\u0000‮‏"},
+		{"only control characters", 4, "\u0000\u202e\u200f"},
 		{"comment is too long", 4, strings.Repeat("a", 2001)},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -39,7 +39,7 @@ func TestValidateReview(t *testing.T) {
 }
 
 func TestCleanTextKeepsPlainTextOnly(t *testing.T) {
-	got := CleanText("Tốt\r\n\r\n\r\n\r\nlắm\u0007\t<b>x</b> ‮evil‬ ")
+	got := CleanText("Tốt\r\n\r\n\r\n\r\nlắm\u0007\t<b>x</b> \u202eevil\u202c ")
 	if got != "Tốt\n\nlắm <b>x</b> evil" {
 		t.Fatalf("CleanText() = %q", got)
 	}

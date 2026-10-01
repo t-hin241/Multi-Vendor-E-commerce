@@ -61,15 +61,3 @@ func (t Transactions) Run(ctx context.Context, fn func(ctx context.Context) erro
 	}
 	return tx.Commit(ctx)
 }
-
-// inTx runs fn with the transaction, joining one already in ctx.
-func inTx(ctx context.Context, pool *pgxpool.Pool, fn func(pgx.Tx) error) error {
-	return Transactions{Pool: pool}.Run(ctx, func(ctx context.Context) error {
-		return fn(ctx.Value(txKey{}).(pgx.Tx))
-	})
-}
-
-func isUniqueViolation(err error, constraint string) bool {
-	var pgErr *pgconn.PgError
-	return errors.As(err, &pgErr) && pgErr.Code == "23505" && (constraint == "" || pgErr.ConstraintName == constraint)
-}
