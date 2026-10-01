@@ -39,7 +39,7 @@ func scanCarrier(row pgx.Row) (*domain.Carrier, error) {
 
 func (r *CarrierRepository) Create(ctx context.Context, c *domain.Carrier) error {
 	const query = `INSERT INTO carriers (name, code) VALUES ($1, $2) RETURNING id, is_active, created_at, updated_at`
-	err := r.pool.QueryRow(ctx, query, c.Name, c.Code).Scan(&c.ID, &c.IsActive, &c.CreatedAt, &c.UpdatedAt)
+	err := connection(ctx, r.pool).QueryRow(ctx, query, c.Name, c.Code).Scan(&c.ID, &c.IsActive, &c.CreatedAt, &c.UpdatedAt)
 	if err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
@@ -51,12 +51,12 @@ func (r *CarrierRepository) Create(ctx context.Context, c *domain.Carrier) error
 }
 
 func (r *CarrierRepository) FindByID(ctx context.Context, id string) (*domain.Carrier, error) {
-	row := r.pool.QueryRow(ctx, `SELECT `+carrierColumns+` FROM carriers WHERE id = $1`, id)
+	row := connection(ctx, r.pool).QueryRow(ctx, `SELECT `+carrierColumns+` FROM carriers WHERE id = $1`, id)
 	return scanCarrier(row)
 }
 
 func (r *CarrierRepository) List(ctx context.Context) ([]*domain.Carrier, error) {
-	rows, err := r.pool.Query(ctx, `SELECT `+carrierColumns+` FROM carriers ORDER BY name ASC`)
+	rows, err := connection(ctx, r.pool).Query(ctx, `SELECT `+carrierColumns+` FROM carriers ORDER BY name ASC`)
 	if err != nil {
 		return nil, err
 	}
@@ -74,7 +74,7 @@ func (r *CarrierRepository) List(ctx context.Context) ([]*domain.Carrier, error)
 }
 
 func (r *CarrierRepository) SetActive(ctx context.Context, id string, isActive bool) error {
-	tag, err := r.pool.Exec(ctx, `UPDATE carriers SET is_active = $1, updated_at = now() WHERE id = $2`, isActive, id)
+	tag, err := connection(ctx, r.pool).Exec(ctx, `UPDATE carriers SET is_active = $1, updated_at = now() WHERE id = $2`, isActive, id)
 	if err != nil {
 		return err
 	}

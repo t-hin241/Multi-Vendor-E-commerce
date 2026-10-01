@@ -51,7 +51,7 @@ func TestCheckout_TwoVendorsSnapshotsPricesShippingAndCommission(t *testing.T) {
 	// A later price, fee or commission change never alters the order.
 	f.catalog.products["p1"].PriceAmount = 1
 	f.shipments.fee = 1
-	if _, err := f.uc.SetCommissionRule(t.Context(), "admin-1", 5000); err != nil {
+	if _, err := f.uc.SetCommissionRule(t.Context(), "admin-1", 5000, "Raise marketplace fee"); err != nil {
 		t.Fatal(err)
 	}
 	if again := f.orders.get(order.ID); again.TotalAmount != 285000 {

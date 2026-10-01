@@ -23,9 +23,12 @@ type Refund struct {
 	PaymentRefundID *string
 	FailureReason   *string
 	RequestedBy     string
-	CreatedAt       time.Time
-	UpdatedAt       time.Time
-	ResolvedAt      *time.Time
+	// IdempotencyKey makes an admin's resend of the same request return
+	// the refund already created instead of a second one.
+	IdempotencyKey *string
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
+	ResolvedAt     *time.Time
 }
 
 type RefundStatus string

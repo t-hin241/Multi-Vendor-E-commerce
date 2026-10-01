@@ -165,7 +165,7 @@ func TestReturnFlow_ApprovalReceiptRefundAndRestock(t *testing.T) {
 	if stored, _ := f.returns.FindByID(t.Context(), rr.ID); stored.Status != domain.ReturnRefundFailed {
 		t.Fatalf("expected refund_failed, got %s", stored.Status)
 	}
-	if _, err := f.uc.RetryReturnRefund(t.Context(), "admin-1", rr.ID); err != nil {
+	if _, err := f.uc.RetryReturnRefund(t.Context(), "admin-1", rr.ID, "Bank details corrected"); err != nil {
 		t.Fatal(err)
 	}
 	var retry *domain.Refund

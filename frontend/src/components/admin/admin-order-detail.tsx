@@ -4,6 +4,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { useState } from "react";
 
+import { ActionError } from "@/components/admin/action-error";
 import { OrderStatusBadge } from "@/components/admin/status-badges";
 import { SectionHeader } from "@/components/section-header";
 import {
@@ -230,8 +231,12 @@ function RefundDialog({
   const [open, setOpen] = useState(false);
   const [amount, setAmount] = useState(String(max));
   const [reason, setReason] = useState("");
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<unknown>(null);
   const [busy, setBusy] = useState(false);
+  // One operation id per refund request: kept when the outcome is unknown,
+  // so sending again returns the refund Order may already have created.
+  const [operationId, setOperationId] = useState(api.newOperationId);
+  const unknown = api.isOutcomeUnknown(error);
   const value = Math.floor(Number(amount));
   const valid = value >= 1 && value <= max && reason.trim().length > 0;
 
@@ -240,13 +245,22 @@ function RefundDialog({
     setBusy(true);
     try {
       await callWithAuth((token) =>
-        api.requestOrderRefund(token, orderId, { ...base, amount: value, reason: reason.trim() }),
+        api.requestOrderRefund(
+          token,
+          orderId,
+          { ...base, amount: value, reason: reason.trim() },
+          operationId,
+        ),
       );
       await queryClient.invalidateQueries({ queryKey: ["admin-order", orderId] });
       setOpen(false);
       setReason("");
+      setOperationId(api.newOperationId());
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not request the refund.");
+      setError(err);
+      // A refused request changed nothing: the next attempt is a new one.
+      if (!api.isOutcomeUnknown(err)) setOperationId(api.newOperationId());
+      await queryClient.invalidateQueries({ queryKey: ["admin-order", orderId] });
     } finally {
       setBusy(false);
     }
@@ -277,6 +291,7 @@ function RefundDialog({
             min={1}
             max={max}
             value={amount}
+            disabled={unknown}
             onChange={(e) => setAmount(e.target.value)}
           />
           <Label htmlFor="refund-reason">Reason</Label>
@@ -285,14 +300,21 @@ function RefundDialog({
             rows={3}
             maxLength={500}
             value={reason}
+            disabled={unknown}
             onChange={(e) => setReason(e.target.value)}
           />
         </div>
-        {error && <p className="text-sm text-destructive">{error}</p>}
+        <ActionError error={error} />
+        {unknown && (
+          <p className="text-xs text-muted-foreground">
+            Sending again repeats the same request: Order returns the refund it may already have
+            created instead of making a second one.
+          </p>
+        )}
         <AlertDialogFooter>
           <AlertDialogCancel>Cancel</AlertDialogCancel>
           <Button variant="destructive" disabled={!valid || busy} onClick={submit}>
-            {busy ? "Working…" : "Request refund"}
+            {busy ? "Working…" : unknown ? "Send the same request again" : "Request refund"}
           </Button>
         </AlertDialogFooter>
       </AlertDialogContent>

@@ -8,6 +8,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"shopee/backend/pkg/middleware"
 	"shopee/backend/services/identity/internal/domain"
 )
 
@@ -23,7 +24,7 @@ var ErrEmailTaken = errors.New("repository: email already registered")
 var ErrUserNotFound = errors.New("repository: user not found")
 
 func (r *UserRepository) Audit(ctx context.Context, actorID, userID, action, reason string) error {
-	_, err := connection(ctx, r.pool).Exec(ctx, `INSERT INTO identity_audit_logs(actor_id,user_id,action,reason) VALUES(NULLIF($1,'')::uuid,$2,$3,$4)`, actorID, userID, action, reason)
+	_, err := connection(ctx, r.pool).Exec(ctx, `INSERT INTO identity_audit_logs(actor_id,user_id,action,reason,request_id) VALUES(NULLIF($1,'')::uuid,$2,$3,$4,$5)`, actorID, userID, action, reason, middleware.CorrelationID(ctx))
 	return err
 }
 

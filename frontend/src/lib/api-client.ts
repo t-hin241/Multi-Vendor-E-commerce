@@ -6,11 +6,29 @@ const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8
 export class ApiError extends Error {
   code: string;
   status: number;
-  constructor(status: number, code: string, message: string) {
+  // requestId identifies the request in server logs and in the admin
+  // audit (request_id), also when no response arrived.
+  requestId?: string;
+  constructor(status: number, code: string, message: string, requestId?: string) {
     super(message);
     this.code = code;
     this.status = status;
+    this.requestId = requestId;
   }
+}
+
+// isOutcomeUnknown is true when a change may or may not have been applied:
+// the response was lost (network failure, timeout) or the server failed.
+// The UI should then look the operation up instead of sending it again.
+export function isOutcomeUnknown(err: unknown): boolean {
+  return err instanceof ApiError && (err.status === 0 || err.status >= 500);
+}
+
+// newOperationId names one admin operation before it is sent: used as the
+// request id (searchable in the audit) and as the idempotency key.
+export function newOperationId(): string {
+  if (typeof crypto !== "undefined" && "randomUUID" in crypto) return crypto.randomUUID();
+  return `op-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
 }
 
 type ErrorEnvelope = { error: { code: string; message: string; request_id?: string } };
@@ -23,6 +41,9 @@ type RequestOptions = {
   form?: FormData;
   query?: Record<string, string | number | undefined>;
   headers?: Record<string, string>;
+  // requestId is sent as X-Request-Id so the operation can be found in the
+  // audit even if the response is lost.
+  requestId?: string;
 };
 
 function buildQuery(query?: Record<string, string | number | undefined>): string {
@@ -42,14 +63,20 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
   if (token) headers.Authorization = `Bearer ${token}`;
   if (json !== undefined) headers["Content-Type"] = "application/json";
   if (method !== "GET" && method !== "HEAD") headers["X-CSRF-Protection"] = "1";
+  if (options.requestId) headers["X-Request-Id"] = options.requestId;
 
-  const res = await fetch(`${API_BASE_URL}${path}${buildQuery(query)}`, {
-    method,
-    credentials: "include",
-    headers,
-    body: form ?? (json !== undefined ? JSON.stringify(json) : undefined),
-    cache: "no-store",
-  });
+  let res: Response;
+  try {
+    res = await fetch(`${API_BASE_URL}${path}${buildQuery(query)}`, {
+      method,
+      credentials: "include",
+      headers,
+      body: form ?? (json !== undefined ? JSON.stringify(json) : undefined),
+      cache: "no-store",
+    });
+  } catch {
+    throw new ApiError(0, "network_error", "No response from the server.", options.requestId);
+  }
 
   const body = (await res.json().catch(() => null)) as SuccessEnvelope<T> | ErrorEnvelope | null;
 
@@ -59,6 +86,7 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
       res.status,
       errBody?.code ?? "unknown_error",
       errBody?.message ?? `Request failed with status ${res.status}`,
+      errBody?.request_id ?? res.headers.get("X-Request-Id") ?? options.requestId,
     );
   }
 
@@ -1363,15 +1391,21 @@ export type OrderRefundInput = {
   payment_id?: string;
 };
 
+// requestOrderRefund sends one refund request. operationId is reused when
+// the admin resends after an unknown outcome: Order then returns the
+// refund already created instead of a second one.
 export function requestOrderRefund(
   token: string,
   orderId: string,
   input: OrderRefundInput,
+  operationId: string,
 ): Promise<OrderRefund> {
   return request<OrderRefund>(`/api/orders/admin/${orderId}/refunds`, {
     method: "POST",
     token,
     json: input,
+    requestId: operationId,
+    headers: { "Idempotency-Key": operationId },
   });
 }
 
@@ -1394,16 +1428,25 @@ export type OrderOperations = {
   parked: number;
   oldest_pending?: string;
   parked_effects: OrderEffect[];
+  counts?: Record<string, number>;
+  generated_at?: string;
 };
 
 export function getOrderOperations(token: string): Promise<OrderOperations> {
   return request<OrderOperations>("/api/orders/admin/operations", { token });
 }
 
-export function replayOrderEffect(token: string, effectId: string): Promise<{ replayed: boolean }> {
+// replayOrderEffect requeues a parked effect; replayed is false when it was
+// already queued or done.
+export function replayOrderEffect(
+  token: string,
+  effectId: string,
+  reason: string,
+): Promise<{ replayed: boolean }> {
   return request(`/api/orders/admin/operations/effects/${effectId}/replay`, {
     method: "POST",
     token,
+    json: { reason },
   });
 }
 
@@ -1427,10 +1470,15 @@ export function decideReturn(
   });
 }
 
-export function retryReturnRefund(token: string, returnId: string): Promise<ReturnRequest> {
+export function retryReturnRefund(
+  token: string,
+  returnId: string,
+  reason: string,
+): Promise<ReturnRequest> {
   return request<ReturnRequest>(`/api/orders/admin/return-requests/${returnId}/retry-refund`, {
     method: "POST",
     token,
+    json: { reason },
   });
 }
 
@@ -1542,11 +1590,15 @@ export function listCommissionRules(token: string): Promise<CommissionRule[]> {
   return request<CommissionRule[]>("/api/orders/admin/commission-rules", { token });
 }
 
-export function setCommissionRule(token: string, rateBps: number): Promise<CommissionRule> {
+export function setCommissionRule(
+  token: string,
+  rateBps: number,
+  reason: string,
+): Promise<CommissionRule> {
   return request<CommissionRule>("/api/orders/admin/commission-rules", {
     method: "POST",
     token,
-    json: { rate_bps: rateBps },
+    json: { rate_bps: rateBps, reason },
   });
 }
 
@@ -2177,11 +2229,16 @@ export function setDefaultVendorAddress(
 
 export type Carrier = { id: string; name: string; code: string; is_active: boolean };
 
-export function createCarrier(token: string, name: string, code: string): Promise<Carrier> {
+export function createCarrier(
+  token: string,
+  name: string,
+  code: string,
+  note = "",
+): Promise<Carrier> {
   return request<Carrier>("/api/shipments/admin/carriers", {
     method: "POST",
     token,
-    json: { name, code },
+    json: { name, code, note },
   });
 }
 
@@ -2200,21 +2257,27 @@ export function setCarrierActive(
   token: string,
   carrierId: string,
   isActive: boolean,
+  reason: string,
 ): Promise<{ updated: boolean }> {
   return request(`/api/shipments/admin/carriers/${carrierId}/active`, {
     method: "PATCH",
     token,
-    json: { is_active: isActive },
+    json: { is_active: isActive, reason },
   });
 }
 
 export type ShippingZone = { id: string; name: string; code: string };
 
-export function createZone(token: string, name: string, code: string): Promise<ShippingZone> {
+export function createZone(
+  token: string,
+  name: string,
+  code: string,
+  note = "",
+): Promise<ShippingZone> {
   return request<ShippingZone>("/api/shipments/admin/zones", {
     method: "POST",
     token,
-    json: { name, code },
+    json: { name, code, note },
   });
 }
 
@@ -2226,11 +2289,12 @@ export function addProvinceToZone(
   token: string,
   zoneId: string,
   provinceCode: string,
+  note = "",
 ): Promise<{ added: boolean }> {
   return request(`/api/shipments/admin/zones/${zoneId}/provinces`, {
     method: "POST",
     token,
-    json: { province_code: provinceCode },
+    json: { province_code: provinceCode, note },
   });
 }
 
@@ -2255,6 +2319,7 @@ export function setFeeRule(
   baseFeeAmount: number,
   freeWeightGrams: number,
   extraFeePerKg: number,
+  reason: string,
 ): Promise<FeeRule> {
   return request<FeeRule>("/api/shipments/admin/fee-rules", {
     method: "POST",
@@ -2265,6 +2330,7 @@ export function setFeeRule(
       base_fee_amount: baseFeeAmount,
       free_weight_grams: freeWeightGrams,
       extra_fee_per_kg: extraFeePerKg,
+      reason,
     },
   });
 }
@@ -2517,4 +2583,75 @@ export function repairInventoryOperation(
     method: "POST",
     json: input,
   });
+}
+
+// ---------- Admin: operations dashboard and audit (Admin service, read-only) ----------
+
+export type AdminSourceStatus = {
+  name: string;
+  status: "ok" | "unavailable";
+  fetched_at?: string;
+  generated_at?: string;
+  error?: string;
+};
+
+// count is null when a service it depends on did not answer: never read
+// an unavailable figure as zero.
+export type AdminDashboardTile = {
+  key: string;
+  group: string;
+  label: string;
+  hint: string;
+  link: string;
+  count: number | null;
+  status: "ok" | "attention" | "unavailable";
+  sources: string[];
+};
+
+export type AdminDashboard = {
+  generated_at: string;
+  sources: AdminSourceStatus[];
+  tiles: AdminDashboardTile[];
+};
+
+export function getAdminDashboard(token: string): Promise<AdminDashboard> {
+  return request<AdminDashboard>("/api/admin/dashboard", { token });
+}
+
+export type AuditEntry = {
+  id: string;
+  source: string;
+  occurred_at: string;
+  actor_id?: string;
+  action: string;
+  entity_type: string;
+  entity_id: string;
+  reason?: string;
+  request_id?: string;
+  changes?: Record<string, unknown>;
+};
+
+export type AuditPage = {
+  entries: AuditEntry[];
+  next_cursor?: string;
+  sources: AdminSourceStatus[];
+  // false when a service did not answer: its rows are missing.
+  complete: boolean;
+};
+
+export type AuditFilter = {
+  source?: string;
+  actor_id?: string;
+  entity_type?: string;
+  entity_id?: string;
+  action?: string;
+  request_id?: string;
+  from?: string;
+  to?: string;
+  limit?: number;
+  cursor?: string;
+};
+
+export function searchAdminAudit(token: string, filter: AuditFilter): Promise<AuditPage> {
+  return request<AuditPage>("/api/admin/audit", { token, query: filter });
 }

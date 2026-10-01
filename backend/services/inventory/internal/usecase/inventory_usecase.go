@@ -172,6 +172,10 @@ func (uc *InventoryUseCase) approveRestockRequest(ctx context.Context, adminUser
 	if err := uc.restockRequests.UpdateStatus(ctx, req.ID, domain.RestockApproved, adminUserID, nil); err != nil {
 		return nil, inventoryError(err)
 	}
+	if err := uc.ops.audit(ctx, "restock_request", req.ID, adminUserID, "restock_approved", nil, map[string]any{
+		"status": []any{req.Status, domain.RestockApproved}, "quantity": req.RequestedQuantity, "product_id": req.ProductID}); err != nil {
+		return nil, err
+	}
 	req.Status = domain.RestockApproved
 	return req, nil
 }
@@ -194,6 +198,10 @@ func (uc *InventoryUseCase) rejectRestockRequest(ctx context.Context, adminUserI
 
 	if err := uc.restockRequests.UpdateStatus(ctx, req.ID, domain.RestockRejected, adminUserID, &reason); err != nil {
 		return nil, inventoryError(err)
+	}
+	if err := uc.ops.audit(ctx, "restock_request", req.ID, adminUserID, "restock_rejected", &reason, map[string]any{
+		"status": []any{req.Status, domain.RestockRejected}, "quantity": req.RequestedQuantity, "product_id": req.ProductID}); err != nil {
+		return nil, err
 	}
 	req.Status = domain.RestockRejected
 	req.RejectionReason = &reason

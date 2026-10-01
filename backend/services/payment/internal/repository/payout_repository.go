@@ -8,6 +8,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"shopee/backend/pkg/middleware"
 	"shopee/backend/services/payment/internal/domain"
 )
 
@@ -168,8 +169,8 @@ func NewAuditRepository(pool *pgxpool.Pool) *AuditRepository { return &AuditRepo
 
 func (r *AuditRepository) Record(ctx context.Context, actor, action, targetType, targetID, reason string) error {
 	_, err := connection(ctx, r.pool).Exec(ctx, `
-		INSERT INTO payment_admin_audit (actor_id, action, target_type, target_id, reason) VALUES ($1, $2, $3, $4, $5)`,
-		actor, action, targetType, targetID, reason)
+		INSERT INTO payment_admin_audit (actor_id, action, target_type, target_id, reason, request_id) VALUES ($1, $2, $3, $4, $5, $6)`,
+		actor, action, targetType, targetID, reason, middleware.CorrelationID(ctx))
 	return err
 }
 

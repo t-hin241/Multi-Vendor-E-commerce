@@ -117,10 +117,12 @@ type interceptionDecisionRequest struct {
 type createCarrierRequest struct {
 	Name string `json:"name" binding:"required"`
 	Code string `json:"code" binding:"required"`
+	Note string `json:"note" binding:"max=500"`
 }
 
 type setCarrierActiveRequest struct {
-	IsActive bool `json:"is_active"`
+	IsActive bool   `json:"is_active"`
+	Reason   string `json:"reason" binding:"required,max=500"`
 }
 
 type carrierResponse struct {
@@ -145,10 +147,12 @@ func toCarrierResponseList(carriers []*domain.Carrier) []carrierResponse {
 type createZoneRequest struct {
 	Name string `json:"name" binding:"required"`
 	Code string `json:"code" binding:"required"`
+	Note string `json:"note" binding:"max=500"`
 }
 
 type addProvinceRequest struct {
 	ProvinceCode string `json:"province_code" binding:"required"`
+	Note         string `json:"note" binding:"max=500"`
 }
 
 type zoneResponse struct {
@@ -175,6 +179,7 @@ type setFeeRuleRequest struct {
 	BaseFeeAmount   int64  `json:"base_fee_amount"`
 	FreeWeightGrams int64  `json:"free_weight_grams"`
 	ExtraFeePerKg   int64  `json:"extra_fee_per_kg"`
+	Reason          string `json:"reason" binding:"required,max=500"`
 }
 
 type feeRuleResponse struct {

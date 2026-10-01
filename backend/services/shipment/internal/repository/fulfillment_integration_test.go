@@ -145,7 +145,7 @@ func newEnv(t *testing.T, withMock bool) *env {
 	deps := usecase.Deps{Tx: repository.Transactions{Pool: pool}, Shipments: repository.NewShipmentRepository(pool),
 		VendorMethods: repository.NewVendorShippingMethodRepository(pool), Zones: repository.NewZoneRepository(pool),
 		FeeRules: repository.NewFeeRuleRepository(pool), Events: repository.NewTrackingEventRepository(pool), Outbox: repository.OrderOutbox{Pool: pool},
-		Vendors: e.vendors, Orders: e.orders, Identity: allowAdmin{}, Carrier: manual.Provider{}, Verifier: manual.Provider{}, Log: zerolog.Nop()}
+		Vendors: e.vendors, Orders: e.orders, Identity: allowAdmin{}, Audit: repository.AuditRepository{Pool: pool}, Carrier: manual.Provider{}, Verifier: manual.Provider{}, Log: zerolog.Nop()}
 	if withMock {
 		e.mock = mock.New("fake-carrier-secret-not-a-real-secret")
 		deps.Carrier, deps.Verifier, deps.Simulator = e.mock, e.mock, e.mock

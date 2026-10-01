@@ -19,6 +19,7 @@ export function CommissionRuleManager() {
   const { callWithAuth } = useAuth();
   const queryClient = useQueryClient();
   const [percent, setPercent] = useState("");
+  const [reason, setReason] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -42,10 +43,17 @@ export function CommissionRuleManager() {
       setError("Enter a percentage between 0 and 100.");
       return;
     }
+    if (!reason.trim()) {
+      setError("Give the reason for the change; it is kept in the audit.");
+      return;
+    }
     setIsSubmitting(true);
     try {
-      await callWithAuth((token) => api.setCommissionRule(token, Math.round(percentValue * 100)));
+      await callWithAuth((token) =>
+        api.setCommissionRule(token, Math.round(percentValue * 100), reason.trim()),
+      );
       setPercent("");
+      setReason("");
       await queryClient.invalidateQueries({ queryKey: ["commission-rules"] });
     } catch (err) {
       setError(err instanceof api.ApiError ? err.message : "Could not update the commission rate.");
@@ -74,7 +82,7 @@ export function CommissionRuleManager() {
           )}
           {loadError && <p className="text-sm text-destructive">{loadError}</p>}
 
-          <form onSubmit={handleSubmit} className="flex items-end gap-3">
+          <form onSubmit={handleSubmit} className="flex flex-wrap items-end gap-3">
             <Label className="flex flex-col items-start gap-1.5 text-sm">
               New rate (%)
               <Input
@@ -86,6 +94,15 @@ export function CommissionRuleManager() {
                 onChange={(e) => setPercent(e.target.value)}
                 required
                 className="w-32"
+              />
+            </Label>
+            <Label className="flex min-w-48 flex-1 flex-col items-start gap-1.5 text-sm">
+              Reason
+              <Input
+                value={reason}
+                maxLength={500}
+                onChange={(e) => setReason(e.target.value)}
+                required
               />
             </Label>
             <Button type="submit" disabled={isSubmitting}>

@@ -144,7 +144,7 @@ func newEnv(t *testing.T) *env {
 		Audit: repository.NewAuditRepository(pool), Roles: allowRoles{}, Orders: e.orders, Vendors: fakeVendors{missing: map[string]bool{}}, Log: zerolog.Nop(), Now: clock})
 	e.refunds = usecase.NewRefundUseCase(repository.NewRefundRepository(pool), allowRoles{}, zerolog.Nop()).WithSettlement(tx, e.settle)
 	e.recon = usecase.NewReconciliationUseCase(usecase.ReconciliationDeps{Tx: tx, Payments: e.payments, Refunds: e.refunds, Intents: repository.NewPaymentIntentRepository(pool),
-		Receipts: repository.NewReceiptRepository(pool), OrderSync: sync, RefundSync: repository.RefundSync{Pool: pool}, Audit: repository.NewAuditRepository(pool), Roles: allowRoles{}, Log: zerolog.Nop()})
+		Receipts: repository.NewReceiptRepository(pool), OrderSync: sync, RefundSync: repository.RefundSync{Pool: pool}, RefundStore: repository.NewRefundRepository(pool), Audit: repository.NewAuditRepository(pool), Roles: allowRoles{}, Log: zerolog.Nop()})
 	return e
 }
 

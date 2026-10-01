@@ -61,6 +61,7 @@ export function ShippingConfigManager() {
   const [baseFee, setBaseFee] = useState("");
   const [freeWeightKg, setFreeWeightKg] = useState("0");
   const [extraFeePerKg, setExtraFeePerKg] = useState("0");
+  const [ruleReason, setRuleReason] = useState("");
   const [error, setError] = useState<string | null>(null);
 
   const carriers = carriersQuery.data ?? [];
@@ -121,6 +122,10 @@ export function ShippingConfigManager() {
       setError("Fill in carrier, zone and valid numbers for the fee.");
       return;
     }
+    if (!ruleReason.trim()) {
+      setError("Give the reason for the new fee; it is kept in the audit.");
+      return;
+    }
     try {
       await callWithAuth((token) =>
         api.setFeeRule(
@@ -130,9 +135,11 @@ export function ShippingConfigManager() {
           Math.round(base),
           Math.round(freeKg * 1000),
           Math.round(perKg),
+          ruleReason.trim(),
         ),
       );
       setBaseFee("");
+      setRuleReason("");
       await queryClient.invalidateQueries({ queryKey: ["fee-rules"] });
     } catch (err) {
       setError(err instanceof api.ApiError ? err.message : "Could not set fee rule.");
@@ -315,6 +322,15 @@ export function ShippingConfigManager() {
                 value={extraFeePerKg}
                 onChange={(e) => setExtraFeePerKg(e.target.value)}
                 className="w-28"
+              />
+            </Label>
+            <Label className="flex min-w-48 flex-1 flex-col items-start gap-1.5 text-xs">
+              Reason
+              <Input
+                value={ruleReason}
+                maxLength={500}
+                onChange={(e) => setRuleReason(e.target.value)}
+                required
               />
             </Label>
             <Button type="submit" size="sm">

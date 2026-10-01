@@ -5,6 +5,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"shopee/backend/pkg/middleware"
 	"shopee/backend/services/vendorsvc/internal/domain"
 )
 
@@ -17,8 +18,8 @@ func NewAuditLogRepository(pool *pgxpool.Pool) *AuditLogRepository {
 }
 
 func (r *AuditLogRepository) Create(ctx context.Context, vendorID, actorUserID, action string, reason *string, version int64) error {
-	const query = `INSERT INTO vendor_audit_logs (vendor_id, actor_user_id, action, reason, version) VALUES ($1, $2, $3, $4, $5)`
-	_, err := connection(ctx, r.pool).Exec(ctx, query, vendorID, actorUserID, action, reason, version)
+	const query = `INSERT INTO vendor_audit_logs (vendor_id, actor_user_id, action, reason, version, request_id) VALUES ($1, $2, $3, $4, $5, $6)`
+	_, err := connection(ctx, r.pool).Exec(ctx, query, vendorID, actorUserID, action, reason, version, middleware.CorrelationID(ctx))
 	return err
 }
 

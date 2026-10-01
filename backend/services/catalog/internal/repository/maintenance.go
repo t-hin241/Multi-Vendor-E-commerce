@@ -12,7 +12,8 @@ type Maintenance struct{ Pool *pgxpool.Pool }
 
 func (r Maintenance) Stats(ctx context.Context) (map[string]int64, error) {
 	result := map[string]int64{}
-	rows, err := r.Pool.Query(ctx, `SELECT 'status_pending',count(*) FROM product_status_outbox UNION ALL
+	rows, err := r.Pool.Query(ctx, `SELECT 'pending_review',count(*) FROM products WHERE status='pending_review' UNION ALL
+ SELECT 'status_pending',count(*) FROM product_status_outbox UNION ALL
  SELECT 'status_delivery_failures',COALESCE(sum(attempts),0)::bigint FROM product_status_outbox UNION ALL
  SELECT 'cleanup_failures',COALESCE(sum(attempts),0)::bigint FROM catalog_object_cleanup UNION ALL
  SELECT 'status_parked',count(*) FROM product_status_outbox WHERE attempts>=10 UNION ALL

@@ -584,6 +584,16 @@ func (f *fakeEffectRepository) Replay(_ context.Context, id string) (bool, error
 	return true, nil
 }
 
+func (f *fakeEffectRepository) Find(_ context.Context, id string) (*domain.Effect, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if e := f.find(id); e != nil {
+		cp := *e
+		return &cp, nil
+	}
+	return nil, repository.ErrEffectNotFound
+}
+
 func (f *fakeEffectRepository) ListByOrder(_ context.Context, orderID string) ([]*domain.Effect, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -665,6 +675,18 @@ func (f *fakeRefundRepository) Create(_ context.Context, r *domain.Refund) error
 	cp := *r
 	f.refunds[r.ID] = &cp
 	return nil
+}
+
+func (f *fakeRefundRepository) FindByIdempotencyKey(_ context.Context, orderID, key string) (*domain.Refund, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, r := range f.refunds {
+		if r.OrderID == orderID && r.IdempotencyKey != nil && *r.IdempotencyKey == key {
+			cp := *r
+			return &cp, nil
+		}
+	}
+	return nil, nil
 }
 
 func (f *fakeRefundRepository) FindByID(_ context.Context, id string) (*domain.Refund, error) {
@@ -1267,6 +1289,40 @@ func (f *fakePaymentGateway) RequestRefund(_ context.Context, r adapter.RefundRe
 	f.requests = append(f.requests, r)
 	return &adapter.RefundReceipt{PaymentRefundID: "pr-" + r.RefundID, Status: "awaiting_provider_refund"}, nil
 }
+
+// fakeAudit keeps recorded admin actions; fail makes the next writes fail.
+type fakeAudit struct {
+	mu      sync.Mutex
+	actions []domain.AdminAction
+	fail    error
+}
+
+func (f *fakeAudit) Record(_ context.Context, a domain.AdminAction) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.fail != nil {
+		return f.fail
+	}
+	f.actions = append(f.actions, a)
+	return nil
+}
+
+func (f *fakeAudit) count(action string) int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	n := 0
+	for _, a := range f.actions {
+		if a.Action == action {
+			n++
+		}
+	}
+	return n
+}
+
+// inlineTx runs fn without a database (the fakes are not transactional).
+type inlineTx struct{}
+
+func (inlineTx) Run(ctx context.Context, fn func(context.Context) error) error { return fn(ctx) }
 
 type fakeIdentityGateway struct {
 	denied map[string]bool

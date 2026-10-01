@@ -158,7 +158,13 @@ func (uc *OrderUseCase) MarkReturnReceived(ctx context.Context, actorID, role, r
 }
 
 // RetryReturnRefund requests a new refund for a return whose refund failed.
-func (uc *OrderUseCase) RetryReturnRefund(ctx context.Context, adminID, returnID string) (*domain.ReturnRequest, error) {
+// It needs a reason; a resend after success is refused (the return is no
+// longer refund_failed), so it cannot create a second refund.
+func (uc *OrderUseCase) RetryReturnRefund(ctx context.Context, adminID, returnID, reason string) (*domain.ReturnRequest, error) {
+	note, err := adminReason(reason)
+	if err != nil {
+		return nil, err
+	}
 	if err := uc.requireAdmin(ctx, adminID); err != nil {
 		return nil, err
 	}
@@ -179,7 +185,8 @@ func (uc *OrderUseCase) RetryReturnRefund(ctx context.Context, adminID, returnID
 			return err
 		}
 		result = current
-		return nil
+		return uc.audit(ctx, domain.AdminAction{ActorID: adminID, Action: "return_refund_retried", EntityType: domain.AuditReturn, EntityID: current.ID,
+			OrderID: &current.OrderID, Reason: note, Changes: map[string]any{"status": domain.Change(domain.ReturnRefundFailed, current.Status)}})
 	})
 	if err != nil {
 		return nil, err
@@ -249,8 +256,15 @@ func (uc *OrderUseCase) stepReturn(ctx context.Context, rr *domain.ReturnRequest
 		return err
 	}
 	fromStatus := string(from)
-	return uc.Returns.AddEvent(ctx, &domain.ReturnEvent{ReturnID: rr.ID, ActorUserID: actor, ActorRole: role, Action: action,
-		FromStatus: &fromStatus, ToStatus: string(to), Note: note})
+	if err := uc.Returns.AddEvent(ctx, &domain.ReturnEvent{ReturnID: rr.ID, ActorUserID: actor, ActorRole: role, Action: action,
+		FromStatus: &fromStatus, ToStatus: string(to), Note: note}); err != nil {
+		return err
+	}
+	if role != "admin" || actor == nil {
+		return nil
+	}
+	return uc.audit(ctx, domain.AdminAction{ActorID: *actor, Action: "return_" + action, EntityType: domain.AuditReturn, EntityID: rr.ID,
+		OrderID: &rr.OrderID, Reason: note, Changes: map[string]any{"status": domain.Change(from, to)}})
 }
 
 // moveReturn applies a system step driven by a refund outcome.

@@ -180,7 +180,7 @@ func setup(t *testing.T) *fixture {
 		}
 		admin.Close()
 	})
-	for _, name := range []string{"000002_identity_core.up.sql", "000003_identity_sessions.up.sql"} {
+	for _, name := range []string{"000002_identity_core.up.sql", "000003_identity_sessions.up.sql", "000004_audit_search.up.sql"} {
 		sql, e := os.ReadFile(filepath.Join("..", "..", "migrations", name))
 		if e != nil {
 			t.Fatal(e)

@@ -312,7 +312,14 @@ func toInternalOrderResponse(o *domain.Order) internalOrderResponse {
 }
 
 type setCommissionRuleRequest struct {
-	RateBps int `json:"rate_bps" binding:"min=0,max=10000"`
+	RateBps int    `json:"rate_bps" binding:"min=0,max=10000"`
+	Reason  string `json:"reason" binding:"required,max=500"`
+}
+
+// adminReasonRequest is the body of a retry/replay: the reason is required
+// and goes to the audit.
+type adminReasonRequest struct {
+	Reason string `json:"reason" binding:"required,max=500"`
 }
 
 type commissionRuleResponse struct {
@@ -392,6 +399,8 @@ type createRefundRequest struct {
 	ReasonCode    string `json:"reason_code" binding:"required,oneof=dispute late_payment duplicate_payment"`
 	Amount        int64  `json:"amount" binding:"required,min=1"`
 	Reason        string `json:"reason" binding:"required,max=500"`
+	// IdempotencyKey may also come as the Idempotency-Key header.
+	IdempotencyKey string `json:"idempotency_key" binding:"omitempty,max=100"`
 }
 
 type orderPaymentResponse struct {

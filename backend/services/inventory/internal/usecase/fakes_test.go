@@ -397,6 +397,12 @@ func (fakeTransactions) Run(ctx context.Context, fn func(context.Context) error)
 	return fn(ctx)
 }
 
+type fakeAudit struct{}
+
+func (fakeAudit) Record(context.Context, string, string, string, string, *string, map[string]any) error {
+	return nil
+}
+
 type fakeIdentity struct{}
 
 func (fakeIdentity) RequireRole(context.Context, string, string) error { return nil }

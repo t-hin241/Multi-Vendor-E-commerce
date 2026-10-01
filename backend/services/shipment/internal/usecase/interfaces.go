@@ -66,6 +66,11 @@ type RoleVerifier interface {
 	RequireRole(ctx context.Context, userID, role string) error
 }
 
+// AuditPort appends an admin action in the caller's transaction.
+type AuditPort interface {
+	Record(ctx context.Context, a domain.AdminAction) error
+}
+
 type CarrierRepositoryPort interface {
 	Create(ctx context.Context, c *domain.Carrier) error
 	FindByID(ctx context.Context, id string) (*domain.Carrier, error)

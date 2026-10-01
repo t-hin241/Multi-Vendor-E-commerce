@@ -6,10 +6,13 @@ import (
 	"net/http"
 	"os"
 
+	"shopee/backend/pkg/adminaudit"
 	"shopee/backend/pkg/authjwt"
 	sessionconfig "shopee/backend/pkg/config"
 	"shopee/backend/pkg/health"
+	"shopee/backend/pkg/identityclient"
 	"shopee/backend/pkg/logger"
+	"shopee/backend/pkg/middleware"
 	"shopee/backend/pkg/platform/natsclient"
 	"shopee/backend/pkg/platform/objectstorage"
 	"shopee/backend/pkg/platform/postgres"
@@ -55,7 +58,8 @@ func main() {
 	if err != nil {
 		log.Fatal().Err(err).Msg("object storage connection failed")
 	}
-	uc := usecase.NewReviewUseCase(repository.NewReviewRepository(db), adapter.NewHTTPOrderClient(cfg.OrderServiceURL, internalServices.Key), adapter.NewHTTPVendorClient(cfg.VendorServiceURL, internalServices.Key), adapter.NewHTTPIdentityClient(cfg.IdentityServiceURL, cfg.IdentityServiceKey), store)
+	uc := usecase.NewReviewUseCase(repository.NewReviewRepository(db), adapter.NewHTTPOrderClient(cfg.OrderServiceURL, internalServices.Key), adapter.NewHTTPVendorClient(cfg.VendorServiceURL, internalServices.Key), adapter.NewHTTPIdentityClient(cfg.IdentityServiceURL, cfg.IdentityServiceKey), store).
+		WithAdminVerification(identityclient.Client{URL: internalServices.IdentityURL, Key: internalServices.Key})
 	jwtManager := authjwt.NewManager(cfg.JWTSecret)
 	verifier, err := sessionconfig.LoadSessionVerifier()
 	if err != nil {
@@ -68,6 +72,9 @@ func main() {
 		}
 		return nil
 	}})
+	adminaudit.Register(router.Group("/api/reviews/admin", middleware.RequireAuth(jwtManager), middleware.RequireRole("admin")), "/audit-events",
+		adminaudit.Source{Name: "review", SQL: repository.AuditSearchSQL, DB: db, Roles: identityclient.Client{URL: internalServices.IdentityURL, Key: internalServices.Key}}, log)
+
 	srv := &http.Server{Addr: ":" + cfg.Base.Port, Handler: router, ReadHeaderTimeout: cfg.Base.HTTPReadTimeout, ReadTimeout: cfg.Base.HTTPReadTimeout, IdleTimeout: cfg.Base.HTTPIdleTimeout}
 	go func() {
 		log.Info().Str("port", cfg.Base.Port).Msg("review_starting")

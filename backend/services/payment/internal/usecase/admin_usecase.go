@@ -34,9 +34,11 @@ type ReconciliationDeps struct {
 	Receipts   ReceiptRepositoryPort
 	OrderSync  OrderSyncPort
 	RefundSync RefundSyncPort
-	Audit      AuditRepositoryPort
-	Roles      RoleVerifier
-	Log        zerolog.Logger
+	// RefundStore (optional) adds the open refund counts to the report.
+	RefundStore RefundRepositoryPort
+	Audit       AuditRepositoryPort
+	Roles       RoleVerifier
+	Log         zerolog.Logger
 }
 
 // ReconciliationUseCase is admin's view of what did not reconcile between
@@ -83,6 +85,15 @@ func (uc *ReconciliationUseCase) Report(ctx context.Context) (map[string]int64, 
 	counts["intents_expired_open"] = expired
 	counts["order_sync_pending"] = pending
 	counts["order_sync_review"] = review
+	if uc.RefundStore != nil {
+		for key, status := range map[string]domain.RefundStatus{"refunds_pending": domain.RefundPending, "refunds_awaiting_provider": domain.RefundAwaitingProvider} {
+			_, total, err := uc.RefundStore.List(ctx, string(status), 1, 0)
+			if err != nil {
+				return nil, err
+			}
+			counts[key] = int64(total)
+		}
+	}
 	return counts, nil
 }
 

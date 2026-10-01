@@ -7,11 +7,13 @@ import (
 	"net/http"
 	"os"
 
+	"shopee/backend/pkg/adminaudit"
 	"shopee/backend/pkg/authjwt"
 	sessionconfig "shopee/backend/pkg/config"
 	"shopee/backend/pkg/health"
 	"shopee/backend/pkg/identityclient"
 	"shopee/backend/pkg/logger"
+	"shopee/backend/pkg/middleware"
 	"shopee/backend/pkg/platform/natsclient"
 	"shopee/backend/pkg/platform/postgres"
 	"shopee/backend/pkg/platform/redisclient"
@@ -72,7 +74,7 @@ func main() {
 	reservationRepo := repository.NewReservationRepository(dbPool)
 	restockRequestRepo := repository.NewRestockRequestRepository(dbPool)
 
-	inventoryUseCase := usecase.NewInventoryUseCase(itemRepo, reservationRepo, restockRequestRepo, vendorClient, catalogClient, usecase.Operations{Transactions: repository.Transactions{Pool: dbPool}, Identity: identityclient.Client{URL: internalServices.IdentityURL, Key: internalServices.Key}})
+	inventoryUseCase := usecase.NewInventoryUseCase(itemRepo, reservationRepo, restockRequestRepo, vendorClient, catalogClient, usecase.Operations{Transactions: repository.Transactions{Pool: dbPool}, Identity: identityclient.Client{URL: internalServices.IdentityURL, Key: internalServices.Key}, Audit: repository.AdminAudit{Pool: dbPool}})
 
 	itemHandler := transport.NewItemHandler(inventoryUseCase, log)
 	internalHandler := transport.NewInternalHandler(inventoryUseCase, log)
@@ -94,6 +96,9 @@ func main() {
 	maintenance := usecase.Maintenance{InvalidateStock: catalogClient.InvalidateStock, Repository: repository.Maintenance{Pool: dbPool}, Reservations: reservationRepo, Orders: adapter.OrderClient{URL: cfg.OrderServiceURL, Key: internalServices.Key}, Identity: identityclient.Client{URL: internalServices.IdentityURL, Key: internalServices.Key}, Log: log, ExpiryEnabled: cfg.ExpiryEnabled}
 	transport.RegisterOperations(router, jwtManager, maintenance, log)
 	go maintenance.Run(workerCtx)
+	adminaudit.Register(router.Group("/api/inventory/admin", middleware.RequireAuth(jwtManager), middleware.RequireRole("admin")), "/audit-events",
+		adminaudit.Source{Name: "inventory", SQL: repository.AuditSearchSQL, DB: dbPool, Roles: identityclient.Client{URL: internalServices.IdentityURL, Key: internalServices.Key}}, log)
+
 	srv := &http.Server{
 		Addr:              ":" + cfg.Base.Port,
 		Handler:           router,

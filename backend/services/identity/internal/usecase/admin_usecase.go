@@ -76,6 +76,15 @@ func (uc *AdminUseCase) setActive(ctx context.Context, actorID, targetUserID str
 	return target, nil
 }
 
+// RequireRole lets this service's own read-only admin endpoints (the audit
+// search) verify the caller the same way other services ask Identity.
+func (uc *AdminUseCase) RequireRole(ctx context.Context, id, role string) error {
+	if role != string(domain.RoleAdmin) {
+		return apperror.Forbidden("Admin access required")
+	}
+	return uc.requireAdmin(ctx, id)
+}
+
 func (uc *AdminUseCase) requireAdmin(ctx context.Context, id string) error {
 	user, err := uc.users.FindByID(ctx, id)
 	if errors.Is(err, repository.ErrUserNotFound) {

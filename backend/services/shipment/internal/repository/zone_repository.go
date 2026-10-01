@@ -40,7 +40,7 @@ func scanZone(row pgx.Row) (*domain.Zone, error) {
 
 func (r *ZoneRepository) Create(ctx context.Context, z *domain.Zone) error {
 	const query = `INSERT INTO shipping_zones (name, code) VALUES ($1, $2) RETURNING id, created_at`
-	err := r.pool.QueryRow(ctx, query, z.Name, z.Code).Scan(&z.ID, &z.CreatedAt)
+	err := connection(ctx, r.pool).QueryRow(ctx, query, z.Name, z.Code).Scan(&z.ID, &z.CreatedAt)
 	if err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
@@ -52,12 +52,12 @@ func (r *ZoneRepository) Create(ctx context.Context, z *domain.Zone) error {
 }
 
 func (r *ZoneRepository) FindByID(ctx context.Context, id string) (*domain.Zone, error) {
-	row := r.pool.QueryRow(ctx, `SELECT `+zoneColumns+` FROM shipping_zones WHERE id = $1`, id)
+	row := connection(ctx, r.pool).QueryRow(ctx, `SELECT `+zoneColumns+` FROM shipping_zones WHERE id = $1`, id)
 	return scanZone(row)
 }
 
 func (r *ZoneRepository) List(ctx context.Context) ([]*domain.Zone, error) {
-	rows, err := r.pool.Query(ctx, `SELECT `+zoneColumns+` FROM shipping_zones ORDER BY name ASC`)
+	rows, err := connection(ctx, r.pool).Query(ctx, `SELECT `+zoneColumns+` FROM shipping_zones ORDER BY name ASC`)
 	if err != nil {
 		return nil, err
 	}
@@ -80,7 +80,7 @@ func (r *ZoneRepository) List(ctx context.Context) ([]*domain.Zone, error) {
 // silently moving it.
 func (r *ZoneRepository) AddProvince(ctx context.Context, zoneID, provinceCode string) error {
 	const query = `INSERT INTO shipping_zone_provinces (zone_id, province_code) VALUES ($1, $2)`
-	_, err := r.pool.Exec(ctx, query, zoneID, provinceCode)
+	_, err := connection(ctx, r.pool).Exec(ctx, query, zoneID, provinceCode)
 	if err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
@@ -92,7 +92,7 @@ func (r *ZoneRepository) AddProvince(ctx context.Context, zoneID, provinceCode s
 }
 
 func (r *ZoneRepository) ListProvinces(ctx context.Context, zoneID string) ([]string, error) {
-	rows, err := r.pool.Query(ctx, `SELECT province_code FROM shipping_zone_provinces WHERE zone_id = $1 ORDER BY province_code ASC`, zoneID)
+	rows, err := connection(ctx, r.pool).Query(ctx, `SELECT province_code FROM shipping_zone_provinces WHERE zone_id = $1 ORDER BY province_code ASC`, zoneID)
 	if err != nil {
 		return nil, err
 	}
@@ -117,6 +117,6 @@ func (r *ZoneRepository) FindZoneByProvinceCode(ctx context.Context, provinceCod
 		FROM shipping_zones z
 		JOIN shipping_zone_provinces p ON p.zone_id = z.id
 		WHERE p.province_code = $1`
-	row := r.pool.QueryRow(ctx, query, provinceCode)
+	row := connection(ctx, r.pool).QueryRow(ctx, query, provinceCode)
 	return scanZone(row)
 }

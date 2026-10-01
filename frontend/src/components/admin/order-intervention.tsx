@@ -5,7 +5,7 @@ import { ShieldAlert } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
 
-import { ConfirmDialog, ReasonDialog } from "@/components/admin/confirm-dialogs";
+import { ReasonDialog } from "@/components/admin/confirm-dialogs";
 import { OrderStatusBadge } from "@/components/admin/status-badges";
 import { StatusFilter } from "@/components/admin/status-filter";
 import { SectionHeader } from "@/components/section-header";
@@ -215,17 +215,18 @@ function OrderOperationsPanel() {
                 <span className="block text-xs text-muted-foreground">{effect.last_error}</span>
               )}
             </span>
-            <ConfirmDialog
+            <ReasonDialog
               trigger={
                 <Button size="sm" variant="outline">
                   Replay
                 </Button>
               }
               title="Replay this side effect?"
-              description="Only replay once the cause (for example a service outage) is fixed. Every effect is idempotent."
+              description="Only replay once the cause (for example a service outage) is fixed. Every effect is idempotent; the reason is kept in the audit."
               confirmLabel="Replay"
-              onConfirm={async () => {
-                await callWithAuth((token) => api.replayOrderEffect(token, effect.id));
+              variant="default"
+              onConfirm={async (reason) => {
+                await callWithAuth((token) => api.replayOrderEffect(token, effect.id, reason));
                 await queryClient.invalidateQueries({ queryKey: ["admin-order-operations"] });
               }}
             />

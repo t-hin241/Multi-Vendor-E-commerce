@@ -1,14 +1,5 @@
-"use client";
-
-import { useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { OperationsDashboard } from "@/components/admin/operations-dashboard";
 
 export default function AdminIndexPage() {
-  const router = useRouter();
-
-  useEffect(() => {
-    router.replace("/admin/vendors");
-  }, [router]);
-
-  return null;
+  return <OperationsDashboard />;
 }

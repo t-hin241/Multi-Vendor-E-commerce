@@ -515,3 +515,26 @@ func TestIntegrationAPIAuthAndPayoutScopes(t *testing.T) {
 		t.Fatalf("expected the masked verified destination, got %d %s", w.Code, body)
 	}
 }
+
+// ADM-05: a status replay needs an admin and a reason, and is audited.
+func TestIntegrationReplayIsAuditedWithReason(t *testing.T) {
+	f := setup(t)
+	v := f.shop(t)
+	ctx := t.Context()
+	if err := f.uc.Replay(ctx, f.admin, v.ID, " "); err == nil {
+		t.Fatal("a replay needs a reason")
+	}
+	if err := f.uc.Replay(ctx, f.owner, v.ID, "Catalog was down"); err == nil {
+		t.Fatal("a vendor cannot replay")
+	}
+	if err := f.uc.Replay(ctx, f.admin, v.ID, "Catalog was down"); err != nil {
+		t.Fatal(err)
+	}
+	var n int
+	if err := f.db.QueryRow(ctx, `SELECT count(*) FROM vendor_audit_logs WHERE vendor_id=$1 AND action='event_replayed' AND actor_user_id=$2`, v.ID, f.admin).Scan(&n); err != nil || n != 1 {
+		t.Fatalf("expected one replay audit row, got %d %v", n, err)
+	}
+	if _, err := f.db.Exec(ctx, `DELETE FROM vendor_audit_logs WHERE vendor_id=$1`, v.ID); err == nil {
+		t.Fatal("audit rows must not be deletable")
+	}
+}

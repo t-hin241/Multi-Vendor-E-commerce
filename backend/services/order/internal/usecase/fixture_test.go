@@ -34,6 +34,7 @@ type checkoutFixture struct {
 	notifications   *fakeNotificationGateway
 	payment         *fakePaymentGateway
 	identity        fakeIdentityGateway
+	audit           *fakeAudit
 	addressID       string
 	now             time.Time
 }
@@ -46,7 +47,7 @@ func newCheckoutFixture() *checkoutFixture {
 		refunds: newFakeRefundRepository(), returns: newFakeReturnRepository(), cart: newFakeCartGateway(),
 		catalog: newFakeCatalogGateway(), vendors: newFakeVendorGateway(), inventory: newFakeInventoryGateway(),
 		shipments: newFakeShipmentGateway(20000), notifications: &fakeNotificationGateway{}, payment: &fakePaymentGateway{},
-		identity: fakeIdentityGateway{denied: map[string]bool{}}, now: time.Now(),
+		identity: fakeIdentityGateway{denied: map[string]bool{}}, audit: &fakeAudit{}, now: time.Now(),
 	}
 	f.orders = newFakeOrderRepository(f.vendorOrders)
 	f.orders.consumptions, f.orders.checkoutOps = f.consumptions, f.checkoutOps
@@ -65,7 +66,7 @@ func newCheckoutFixture() *checkoutFixture {
 		Orders: f.orders, VendorOrders: f.vendorOrders, BuyerAddresses: f.buyerAddresses, CommissionRules: f.commissionRules,
 		CartConsumption: f.consumptions, CheckoutOps: f.checkoutOps, Payments: f.payments, Effects: f.effects,
 		Refunds: f.refunds, Returns: f.returns, Cart: f.cart, Catalog: f.catalog, Vendors: f.vendors, Inventory: f.inventory,
-		Shipments: f.shipments, Notifications: f.notifications, Payment: f.payment, Identity: f.identity,
+		Shipments: f.shipments, Notifications: f.notifications, Payment: f.payment, Identity: f.identity, Audit: f.audit, Tx: inlineTx{},
 		ReturnPolicy: domain.ReturnPolicy{Version: "window-7d", WindowDays: 7}, Log: zerolog.Nop(),
 		Now: func() time.Time { return f.now },
 	})

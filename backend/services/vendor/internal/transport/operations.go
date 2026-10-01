@@ -44,7 +44,14 @@ func (h *AdminHandler) changeStatus(c *gin.Context, restore bool) {
 	httpresponse.OK(c, http.StatusAccepted, toVendorResponse(v))
 }
 func (h *AdminHandler) Replay(c *gin.Context) {
-	if err := h.vendors.Replay(c.Request.Context(), middleware.GetUserID(c), c.Param("id")); err != nil {
+	var req struct {
+		Reason string `json:"reason" binding:"required,max=500"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		httpresponse.Error(c, http.StatusBadRequest, "validation_error", "A reason of at most 500 characters is required")
+		return
+	}
+	if err := h.vendors.Replay(c.Request.Context(), middleware.GetUserID(c), c.Param("id"), req.Reason); err != nil {
 		httpresponse.HandleError(c, h.log, err)
 		return
 	}

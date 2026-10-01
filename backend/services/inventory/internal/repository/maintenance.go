@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"shopee/backend/pkg/apperror"
+	"shopee/backend/pkg/middleware"
 	"shopee/backend/services/inventory/internal/domain"
 
 	"github.com/jackc/pgx/v5"
@@ -137,7 +138,7 @@ func (r Maintenance) Repair(ctx context.Context, id, actor, action, reason strin
 		default:
 			return apperror.Validation("Invalid repair action")
 		}
-		_, err = q.Exec(ctx, `INSERT INTO inventory_operation_audit(order_id,actor_user_id,action,reason) VALUES($1,$2,$3,$4)`, id, actor, action, reason)
+		_, err = q.Exec(ctx, `INSERT INTO inventory_operation_audit(order_id,entity_id,actor_user_id,action,reason,request_id) VALUES($1,$2,$3,$4,$5,$6)`, id, id, actor, action, reason, middleware.CorrelationID(ctx))
 		return err
 	})
 }

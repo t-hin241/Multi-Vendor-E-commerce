@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"shopee/backend/pkg/middleware"
 	"shopee/backend/services/review/internal/domain"
 
 	"github.com/jackc/pgx/v5"
@@ -226,7 +227,7 @@ func (r *ReviewRepository) ResolveReport(ctx context.Context, reportID string, d
 			return err
 		}
 	}
-	if _, err := tx.Exec(ctx, `INSERT INTO review_moderation_audit_logs(review_id,report_id,reason_id,actor_id,action,note) VALUES($1,$2,$3,$4,$5,$6)`, reviewID, reportID, resolutionReasonID, adminID, fmt.Sprintf("report_%s", decision), note); err != nil {
+	if _, err := tx.Exec(ctx, `INSERT INTO review_moderation_audit_logs(review_id,report_id,reason_id,actor_id,action,note,request_id) VALUES($1,$2,$3,$4,$5,$6,$7)`, reviewID, reportID, resolutionReasonID, adminID, fmt.Sprintf("report_%s", decision), note, middleware.CorrelationID(ctx)); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)

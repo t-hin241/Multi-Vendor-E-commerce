@@ -49,6 +49,33 @@ type ReviewUseCase struct {
 	vendors  adapter.VendorGateway
 	identity adapter.IdentityGateway
 	store    ObjectStore
+	roles    RoleVerifier
+}
+
+// RoleVerifier re-verifies an admin with Identity (identityclient.Client).
+type RoleVerifier interface {
+	RequireRole(ctx context.Context, userID, role string) error
+}
+
+// WithAdminVerification sets how moderation actions re-verify the admin.
+// Without it they are refused.
+func (u *ReviewUseCase) WithAdminVerification(r RoleVerifier) *ReviewUseCase {
+	u.roles = r
+	return u
+}
+
+func (u *ReviewUseCase) requireAdmin(ctx context.Context, adminID string) error {
+	if u.roles == nil {
+		return apperror.Internal(errors.New("admin verification is not configured"))
+	}
+	if err := u.roles.RequireRole(ctx, adminID, "admin"); err != nil {
+		var app *apperror.Error
+		if errors.As(err, &app) {
+			return app
+		}
+		return apperror.Internal(err)
+	}
+	return nil
 }
 
 func NewReviewUseCase(repo ReviewRepository, orders adapter.OrderGateway, vendors adapter.VendorGateway, identity adapter.IdentityGateway, store ObjectStore) *ReviewUseCase {
@@ -247,7 +274,10 @@ func (u *ReviewUseCase) ListReasons(ctx context.Context) ([]*domain.Reason, erro
 	}
 	return x, nil
 }
-func (u *ReviewUseCase) CreateReason(ctx context.Context, code, label string, description *string) (*domain.Reason, error) {
+func (u *ReviewUseCase) CreateReason(ctx context.Context, adminID, code, label string, description *string) (*domain.Reason, error) {
+	if err := u.requireAdmin(ctx, adminID); err != nil {
+		return nil, err
+	}
 	code = strings.TrimSpace(strings.ToLower(code))
 	label = strings.TrimSpace(label)
 	if code == "" || label == "" {
@@ -259,7 +289,10 @@ func (u *ReviewUseCase) CreateReason(ctx context.Context, code, label string, de
 	}
 	return x, nil
 }
-func (u *ReviewUseCase) UpdateReason(ctx context.Context, id, code, label string, description *string, active bool) (*domain.Reason, error) {
+func (u *ReviewUseCase) UpdateReason(ctx context.Context, adminID, id, code, label string, description *string, active bool) (*domain.Reason, error) {
+	if err := u.requireAdmin(ctx, adminID); err != nil {
+		return nil, err
+	}
 	x, err := u.repo.FindReason(ctx, id)
 	if err != nil {
 		return nil, internal(err)
@@ -308,6 +341,9 @@ func (u *ReviewUseCase) ListReports(ctx context.Context, status, vendorID, produ
 	return x, nil
 }
 func (u *ReviewUseCase) ResolveReport(ctx context.Context, adminID, reportID string, decision domain.ReportDecision, reasonID string, note *string) error {
+	if err := u.requireAdmin(ctx, adminID); err != nil {
+		return err
+	}
 	if decision != domain.DecisionKeep && decision != domain.DecisionHide {
 		return apperror.Validation("Decision must be keep or hide")
 	}

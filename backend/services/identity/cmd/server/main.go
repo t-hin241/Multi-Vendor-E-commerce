@@ -7,9 +7,11 @@ import (
 	"net/http"
 	"os"
 
+	"shopee/backend/pkg/adminaudit"
 	"shopee/backend/pkg/authjwt"
 	"shopee/backend/pkg/health"
 	"shopee/backend/pkg/logger"
+	"shopee/backend/pkg/middleware"
 	"shopee/backend/pkg/platform/natsclient"
 	"shopee/backend/pkg/platform/postgres"
 	"shopee/backend/pkg/platform/redisclient"
@@ -84,6 +86,9 @@ func main() {
 			return nil
 		}},
 	)
+
+	adminaudit.Register(router.Group("/api/auth/admin", middleware.RequireAuth(jwtManager), middleware.RequireRole("admin")), "/audit-events",
+		adminaudit.Source{Name: "identity", SQL: repository.AuditSearchSQL, DB: dbPool, Roles: adminUseCase}, log)
 
 	srv := &http.Server{
 		Addr:              ":" + cfg.Base.Port,

@@ -9,6 +9,7 @@ import (
 	"shopee/backend/pkg/apperror"
 	"shopee/backend/services/order/internal/adapter"
 	"shopee/backend/services/order/internal/domain"
+	"shopee/backend/services/order/internal/repository"
 )
 
 // inlineEffectTimeout bounds the effects run right after a transition in
@@ -186,6 +187,16 @@ func (uc *OrderUseCase) EffectBacklog(ctx context.Context) (domain.EffectStats, 
 	return uc.Effects.Stats(ctx)
 }
 
+// OperationCounts is the work waiting for an operator (empty when not
+// configured).
+func (uc *OrderUseCase) OperationCounts(ctx context.Context) (map[string]int64, error) {
+	if uc.Operations == nil {
+		return map[string]int64{}, nil
+	}
+	counts, err := uc.Operations.Counts(ctx)
+	return counts, asError(err)
+}
+
 // ListParkedEffects returns effects that ran out of retries (admin).
 func (uc *OrderUseCase) ListParkedEffects(ctx context.Context, limit, offset int) ([]*domain.Effect, error) {
 	effects, err := uc.Effects.ListParked(ctx, limit, offset)
@@ -193,18 +204,37 @@ func (uc *OrderUseCase) ListParkedEffects(ctx context.Context, limit, offset int
 }
 
 // ReplayEffect puts a parked effect back in the queue after the cause was
-// fixed (admin, audited in the log).
-func (uc *OrderUseCase) ReplayEffect(ctx context.Context, adminID, effectID string) error {
-	if err := uc.requireAdmin(ctx, adminID); err != nil {
-		return err
-	}
-	ok, err := uc.Effects.Replay(ctx, effectID)
+// fixed. It needs a reason and is audited; replaying an effect that is
+// already queued or done changes nothing and reports false, so a resend
+// is harmless (each effect is itself idempotent at its target).
+func (uc *OrderUseCase) ReplayEffect(ctx context.Context, adminID, effectID, reason string) (bool, error) {
+	note, err := adminReason(reason)
 	if err != nil {
-		return appError(err)
+		return false, err
 	}
-	if !ok {
-		return apperror.NotFound("No parked effect with this id")
+	if err := uc.requireAdmin(ctx, adminID); err != nil {
+		return false, err
 	}
-	uc.Log.Info().Str("effect_id", effectID).Str("admin_id", adminID).Msg("order_effect_replayed")
-	return nil
+	effect, err := uc.Effects.Find(ctx, effectID)
+	if err != nil {
+		return false, notFoundOrInternal(err, repository.ErrEffectNotFound, "Side effect not found")
+	}
+	replayed := false
+	err = uc.withOrder(ctx, effect.OrderID, func(ctx context.Context) error {
+		ok, err := uc.Effects.Replay(ctx, effectID)
+		if err != nil || !ok {
+			return err
+		}
+		replayed = true
+		return uc.audit(ctx, domain.AdminAction{ActorID: adminID, Action: "effect_replayed", EntityType: domain.AuditEffect, EntityID: effectID,
+			OrderID: &effect.OrderID, Reason: note, Changes: map[string]any{"kind": effect.Kind, "status": domain.Change("parked", "pending")}})
+	})
+	if err != nil {
+		return false, err
+	}
+	if replayed {
+		uc.Log.Info().Str("effect_id", effectID).Str("admin_id", adminID).Msg("order_effect_replayed")
+		uc.runEffectsSoon(ctx, effect.OrderID)
+	}
+	return replayed, nil
 }

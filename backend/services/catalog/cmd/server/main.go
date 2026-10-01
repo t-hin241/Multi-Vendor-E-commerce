@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 
+	"shopee/backend/pkg/adminaudit"
 	"shopee/backend/pkg/authjwt"
 	sessionconfig "shopee/backend/pkg/config"
 	"shopee/backend/pkg/health"
@@ -130,6 +131,9 @@ func main() {
 	go (repository.ObjectCleanup{Pool: dbPool}).Run(reconcileCtx, objectStore, log)
 	go (repository.StatusOutbox{Pool: dbPool, Publish: (adapter.ProductStatusPublisher{URL: cfg.OrderServiceURL, Key: internalServices.Key}).Publish}).Run(reconcileCtx, log)
 	go (vendorsales.Client{URL: cfg.VendorServiceURL, Key: internalServices.Key}).Reconcile(reconcileCtx, salesStore, log)
+
+	adminaudit.Register(router.Group("/api/catalog/admin", middleware.RequireAuth(jwtManager), middleware.RequireRole("admin")), "/audit-events",
+		adminaudit.Source{Name: "catalog", SQL: repository.AuditSearchSQL, DB: dbPool, Roles: identityclient.Client{URL: internalServices.IdentityURL, Key: internalServices.Key}}, log)
 
 	srv := &http.Server{
 		Addr:              ":" + cfg.Base.Port,

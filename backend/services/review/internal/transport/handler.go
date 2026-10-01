@@ -338,7 +338,7 @@ func (h *Handler) CreateReason(c *gin.Context) {
 		httpresponse.Error(c, 400, "validation_error", err.Error())
 		return
 	}
-	x, err := h.reviews.CreateReason(c.Request.Context(), req.Code, req.Label, req.Description)
+	x, err := h.reviews.CreateReason(c.Request.Context(), middleware.GetUserID(c), req.Code, req.Label, req.Description)
 	if err != nil {
 		httpresponse.HandleError(c, h.log, err)
 		return
@@ -366,7 +366,7 @@ func (h *Handler) UpdateReason(c *gin.Context) {
 	if req.IsActive != nil {
 		active = *req.IsActive
 	}
-	x, err := h.reviews.UpdateReason(c.Request.Context(), c.Param("id"), req.Code, req.Label, req.Description, active)
+	x, err := h.reviews.UpdateReason(c.Request.Context(), middleware.GetUserID(c), c.Param("id"), req.Code, req.Label, req.Description, active)
 	if err != nil {
 		httpresponse.HandleError(c, h.log, err)
 		return

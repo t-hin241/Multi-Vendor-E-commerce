@@ -168,17 +168,20 @@ export function ReturnModeration() {
                         />
                       )}
                       {adminCanRetryRefund(r) && (
-                        <ConfirmDialog
+                        <ReasonDialog
                           trigger={
                             <Button size="sm" variant="outline">
                               Retry refund
                             </Button>
                           }
                           title="Request the refund again?"
-                          description="Use after the reason for the failed refund was fixed."
+                          description="Use after the reason for the failed refund was fixed. The reason is kept in the audit."
                           confirmLabel="Retry"
-                          onConfirm={async () => {
-                            await callWithAuth((token) => api.retryReturnRefund(token, r.id));
+                          variant="default"
+                          onConfirm={async (reason) => {
+                            await callWithAuth((token) =>
+                              api.retryReturnRefund(token, r.id, reason),
+                            );
                             await refresh();
                           }}
                         />

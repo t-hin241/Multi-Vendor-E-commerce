@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"shopee/backend/pkg/adminaudit"
+	"shopee/backend/pkg/middleware"
 
 	"shopee/backend/pkg/authjwt"
 	sessionconfig "shopee/backend/pkg/config"
@@ -81,7 +83,8 @@ func main() {
 		Tx: repository.Transactions{Pool: dbPool}, Shipments: shipmentRepo, VendorMethods: vendorMethodRepo, Zones: zoneRepo,
 		FeeRules: feeRuleRepo, Events: repository.NewTrackingEventRepository(dbPool), Outbox: outbox,
 		Vendors: vendorClient, Orders: orderClient, Identity: identityclient.Client{URL: internalServices.IdentityURL, Key: internalServices.Key},
-		Log: log,
+		Audit: repository.AuditRepository{Pool: dbPool},
+		Log:   log,
 	}
 	if cfg.CarrierProvider == "mock" {
 		mockCarrier := mock.New(cfg.CarrierMockWebhookSecret)
@@ -97,9 +100,11 @@ func main() {
 		}
 	}
 	shipmentUseCase := usecase.NewShipmentUseCase(deps)
-	carrierUseCase := usecase.NewCarrierUseCase(carrierRepo)
-	zoneUseCase := usecase.NewZoneUseCase(zoneRepo)
-	feeRuleUseCase := usecase.NewFeeRuleUseCase(feeRuleRepo, carrierRepo, zoneRepo)
+	adminConfig := usecase.AdminConfig{Tx: repository.Transactions{Pool: dbPool}, Identity: identityclient.Client{URL: internalServices.IdentityURL, Key: internalServices.Key},
+		Audit: repository.AuditRepository{Pool: dbPool}}
+	carrierUseCase := usecase.NewCarrierUseCase(carrierRepo, adminConfig)
+	zoneUseCase := usecase.NewZoneUseCase(zoneRepo, adminConfig)
+	feeRuleUseCase := usecase.NewFeeRuleUseCase(feeRuleRepo, carrierRepo, zoneRepo, adminConfig)
 	vendorMethodUseCase := usecase.NewVendorShippingMethodUseCase(vendorMethodRepo, carrierRepo, vendorClient)
 
 	router := transport.NewRouter(cfg.Base.Env, log, jwtManager,
@@ -128,6 +133,8 @@ func main() {
 	}, log, wake)
 	go (usecase.Worker{Shipments: shipmentUseCase, Retention: cfg.AddressRetention, Log: log}).Run(workerCtx)
 
+	adminaudit.Register(router.Group("/api/shipments/admin", middleware.RequireAuth(jwtManager), middleware.RequireRole("admin")), "/audit-events",
+		adminaudit.Source{Name: "shipment", SQL: repository.AuditSearchSQL, DB: dbPool, Roles: identityclient.Client{URL: internalServices.IdentityURL, Key: internalServices.Key}}, log)
 	srv := &http.Server{
 		Addr:              ":" + cfg.Base.Port,
 		Handler:           router,

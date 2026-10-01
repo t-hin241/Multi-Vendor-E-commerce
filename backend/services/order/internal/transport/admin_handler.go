@@ -103,9 +103,13 @@ func (h *AdminHandler) CreateRefund(c *gin.Context) {
 			"reason_code (dispute, late_payment, duplicate_payment), a positive amount and a reason are required")
 		return
 	}
+	key := c.GetHeader("Idempotency-Key")
+	if key == "" {
+		key = req.IdempotencyKey
+	}
 	refund, err := h.orders.AdminRequestRefund(c.Request.Context(), middleware.GetUserID(c), usecase.RefundInput{
 		OrderID: c.Param("id"), VendorOrderID: req.VendorOrderID, PaymentID: req.PaymentID, ReasonCode: req.ReasonCode,
-		Amount: req.Amount, Reason: req.Reason,
+		Amount: req.Amount, Reason: req.Reason, IdempotencyKey: key,
 	})
 	if err != nil {
 		httpresponse.HandleError(c, h.log, err)
@@ -156,31 +160,45 @@ func (h *AdminHandler) Operations(c *gin.Context) {
 		httpresponse.HandleError(c, h.log, err)
 		return
 	}
+	counts, err := h.orders.OperationCounts(c.Request.Context())
+	if err != nil {
+		httpresponse.HandleError(c, h.log, err)
+		return
+	}
 	out := make([]effectResponse, 0, len(parked))
 	for _, e := range parked {
 		out = append(out, toEffectResponse(e))
 	}
-	httpresponse.OK(c, http.StatusOK, gin.H{"pending": stats.Pending, "parked": stats.Parked, "oldest_pending": stats.OldestPending, "parked_effects": out})
+	httpresponse.OK(c, http.StatusOK, gin.H{"pending": stats.Pending, "parked": stats.Parked, "oldest_pending": stats.OldestPending,
+		"parked_effects": out, "counts": counts, "generated_at": time.Now().UTC()})
 }
 
+// ReplayEffect requeues a parked effect; "replayed" is false when it was
+// already queued or done, so a resend is harmless.
 func (h *AdminHandler) ReplayEffect(c *gin.Context) {
 	if !validID(c, c.Param("effectID")) {
 		return
 	}
-	if err := h.orders.ReplayEffect(c.Request.Context(), middleware.GetUserID(c), c.Param("effectID")); err != nil {
+	var req adminReasonRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		httpresponse.Error(c, http.StatusBadRequest, "validation_error", "A reason of at most 500 characters is required")
+		return
+	}
+	replayed, err := h.orders.ReplayEffect(c.Request.Context(), middleware.GetUserID(c), c.Param("effectID"), req.Reason)
+	if err != nil {
 		httpresponse.HandleError(c, h.log, err)
 		return
 	}
-	httpresponse.OK(c, http.StatusOK, gin.H{"replayed": true})
+	httpresponse.OK(c, http.StatusOK, gin.H{"replayed": replayed})
 }
 
 func (h *AdminHandler) SetCommissionRule(c *gin.Context) {
 	var req setCommissionRuleRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		httpresponse.Error(c, http.StatusBadRequest, "validation_error", "rate_bps must be between 0 and 10000")
+		httpresponse.Error(c, http.StatusBadRequest, "validation_error", "rate_bps must be between 0 and 10000 and a reason of at most 500 characters is required")
 		return
 	}
-	rule, err := h.orders.SetCommissionRule(c.Request.Context(), middleware.GetUserID(c), req.RateBps)
+	rule, err := h.orders.SetCommissionRule(c.Request.Context(), middleware.GetUserID(c), req.RateBps, req.Reason)
 	if err != nil {
 		httpresponse.HandleError(c, h.log, err)
 		return

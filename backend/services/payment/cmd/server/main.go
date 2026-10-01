@@ -9,11 +9,13 @@ import (
 	"os"
 	"time"
 
+	"shopee/backend/pkg/adminaudit"
 	"shopee/backend/pkg/authjwt"
 	sessionconfig "shopee/backend/pkg/config"
 	"shopee/backend/pkg/health"
 	"shopee/backend/pkg/identityclient"
 	"shopee/backend/pkg/logger"
+	"shopee/backend/pkg/middleware"
 	"shopee/backend/pkg/platform/natsclient"
 	"shopee/backend/pkg/platform/postgres"
 	"shopee/backend/pkg/platform/redisclient"
@@ -121,10 +123,11 @@ func main() {
 		Tx: tx, Settlement: repository.NewSettlementRepository(dbPool), Payouts: repository.NewPayoutRepository(dbPool),
 		Audit: repository.NewAuditRepository(dbPool), Roles: roles, Orders: orderClient, Vendors: vendorClient, Log: log,
 	})
-	refundUseCase := usecase.NewRefundUseCase(repository.NewRefundRepository(dbPool), roles, log).WithSettlement(tx, settlementUseCase)
+	refundRepo := repository.NewRefundRepository(dbPool)
+	refundUseCase := usecase.NewRefundUseCase(refundRepo, roles, log).WithSettlement(tx, settlementUseCase)
 	reconUseCase := usecase.NewReconciliationUseCase(usecase.ReconciliationDeps{
 		Tx: tx, Payments: paymentUseCase, Refunds: refundUseCase, Intents: intentRepo, Receipts: receiptRepo,
-		OrderSync: orderSync, RefundSync: refundSync, Audit: repository.NewAuditRepository(dbPool), Roles: roles, Log: log,
+		OrderSync: orderSync, RefundSync: refundSync, RefundStore: refundRepo, Audit: repository.NewAuditRepository(dbPool), Roles: roles, Log: log,
 	})
 	limiter := adapter.RedisRateLimiter{Client: redisClient, Prefix: "payment:webhook:", Limit: cfg.WebhookRatePerMinute, Window: time.Minute}
 
@@ -151,6 +154,9 @@ func main() {
 	go orderSync.Run(syncCtx, deliverOutcome, log, wakeSync)
 	go refundSync.Run(syncCtx, orderClient.ReportRefund, log)
 	go (usecase.PaymentWorker{Payments: paymentUseCase, Reconciliation: reconUseCase, Log: log}).Run(syncCtx)
+	adminaudit.Register(router.Group("/api/payments/admin", middleware.RequireAuth(jwtManager), middleware.RequireRole("admin")), "/audit-events",
+		adminaudit.Source{Name: "payment", SQL: repository.AuditSearchSQL, DB: dbPool, Roles: roles}, log)
+
 	srv := &http.Server{
 		Addr:              ":" + cfg.Base.Port,
 		Handler:           router,

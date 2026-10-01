@@ -286,7 +286,7 @@ func TestInventoryInitialStockAndRestockRollback(t *testing.T) {
 		t.Fatal(err)
 	}
 	admin := uuid.NewString()
-	uc := usecase.NewInventoryUseCase(items, repository.NewReservationRepository(pool), requests, nil, nil, usecase.Operations{Transactions: repository.Transactions{Pool: pool}, Identity: testIdentity{admin}})
+	uc := usecase.NewInventoryUseCase(items, repository.NewReservationRepository(pool), requests, nil, nil, usecase.Operations{Transactions: repository.Transactions{Pool: pool}, Identity: testIdentity{admin}, Audit: repository.AdminAudit{Pool: pool}})
 	if _, err := pool.Exec(ctx, `CREATE FUNCTION reject_decision() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'test decision failure'; END $$; CREATE TRIGGER reject_decision BEFORE UPDATE ON restock_requests FOR EACH ROW EXECUTE FUNCTION reject_decision()`); err != nil {
 		t.Fatal(err)
 	}
@@ -314,6 +314,10 @@ func TestInventoryInitialStockAndRestockRollback(t *testing.T) {
 	current, err = items.FindByProductID(ctx, item.ProductID)
 	if err != nil || current.AvailableQuantity != 12 {
 		t.Fatal("approval retry changed stock twice")
+	}
+	var audits int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM inventory_operation_audit WHERE entity_type='restock_request' AND entity_id=$1 AND actor_user_id=$2`, req.ID, admin).Scan(&audits); err != nil || audits != 1 {
+		t.Fatalf("expected the approval audited once, got %d %v", audits, err)
 	}
 	if _, err := uc.ApproveRestockRequest(ctx, uuid.NewString(), req.ID); err == nil {
 		t.Fatal("non-admin approval accepted")

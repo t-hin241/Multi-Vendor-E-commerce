@@ -347,6 +347,16 @@ services:
       <<: *service-env-defaults
       PORT: "8089"
       DATABASE_URL: postgres://${POSTGRES_USER:-shopee}:${POSTGRES_PASSWORD}@postgres:5432/admin_db?sslmode=disable
+      # Read-only dashboard and audit search over these services, as the
+      # signed-in admin (the admin's token is forwarded; no extra secret).
+      VENDOR_SERVICE_URL: http://vendor:8082
+      CATALOG_SERVICE_URL: http://catalog:8083
+      INVENTORY_SERVICE_URL: http://inventory:8084
+      ORDER_SERVICE_URL: http://order:8086
+      PAYMENT_SERVICE_URL: http://payment:8087
+      SHIPMENT_SERVICE_URL: http://shipment:8088
+      REVIEW_SERVICE_URL: ${ADMIN_REVIEW_SERVICE_URL-http://review:8091}
+      ADMIN_UPSTREAM_TIMEOUT: ${ADMIN_UPSTREAM_TIMEOUT:-4s}
     ports:
       - "8089:8089"
 

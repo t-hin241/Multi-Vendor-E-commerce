@@ -127,6 +127,11 @@ func (shipmentStub) CreateShipment(context.Context, adapter.CreateShipmentInput)
 }
 func (shipmentStub) CancelForVendorOrder(context.Context, string) error { return nil }
 
+// adminStub treats every caller as a verified admin.
+type adminStub struct{}
+
+func (adminStub) RequireRole(context.Context, string, string) error { return nil }
+
 // realUseCase wires the use case on the real repositories of pool.
 func realUseCase(pool *pgxpool.Pool, stock usecase.InventoryGateway) *usecase.OrderUseCase {
 	return usecase.NewOrderUseCase(usecase.Deps{
@@ -136,6 +141,7 @@ func realUseCase(pool *pgxpool.Pool, stock usecase.InventoryGateway) *usecase.Or
 		Payments: repository.NewPaymentRecordRepository(pool), Effects: repository.NewEffectRepository(pool),
 		Refunds: repository.NewRefundRepository(pool), Returns: repository.NewReturnRequestRepository(pool),
 		Inventory: stock, Shipments: shipmentStub{}, Notifications: notifyStub{}, Log: zerolog.Nop(),
+		Identity: adminStub{}, Audit: repository.NewAuditRepository(pool), Tx: repository.Transactions{Pool: pool},
 	})
 }
 

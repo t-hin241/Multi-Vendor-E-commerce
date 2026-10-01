@@ -12,10 +12,8 @@ import (
 )
 
 // AdminHandler serves the admin-only carrier/zone/fee-rule management
-// routes — plain admin-authored reference data and rules, guarded purely
-// by middleware.RequireRole("admin") in this service's own router, the
-// same convention Vendor and Catalog already use for their own admin
-// groups rather than a centralized Admin service.
+// routes. The router requires an admin token; the use cases re-verify the
+// admin with Identity and audit every change.
 type AdminHandler struct {
 	carriers *usecase.CarrierUseCase
 	zones    *usecase.ZoneUseCase
@@ -33,7 +31,7 @@ func (h *AdminHandler) CreateCarrier(c *gin.Context) {
 		httpresponse.Error(c, http.StatusBadRequest, "validation_error", err.Error())
 		return
 	}
-	carrier, err := h.carriers.Create(c.Request.Context(), req.Name, req.Code)
+	carrier, err := h.carriers.Create(c.Request.Context(), middleware.GetUserID(c), req.Name, req.Code, req.Note)
 	if err != nil {
 		httpresponse.HandleError(c, h.log, err)
 		return
@@ -69,7 +67,7 @@ func (h *AdminHandler) SetCarrierActive(c *gin.Context) {
 		httpresponse.Error(c, http.StatusBadRequest, "validation_error", err.Error())
 		return
 	}
-	if err := h.carriers.SetActive(c.Request.Context(), c.Param("id"), req.IsActive); err != nil {
+	if err := h.carriers.SetActive(c.Request.Context(), middleware.GetUserID(c), c.Param("id"), req.IsActive, req.Reason); err != nil {
 		httpresponse.HandleError(c, h.log, err)
 		return
 	}
@@ -82,7 +80,7 @@ func (h *AdminHandler) CreateZone(c *gin.Context) {
 		httpresponse.Error(c, http.StatusBadRequest, "validation_error", err.Error())
 		return
 	}
-	zone, err := h.zones.Create(c.Request.Context(), req.Name, req.Code)
+	zone, err := h.zones.Create(c.Request.Context(), middleware.GetUserID(c), req.Name, req.Code, req.Note)
 	if err != nil {
 		httpresponse.HandleError(c, h.log, err)
 		return
@@ -105,7 +103,7 @@ func (h *AdminHandler) AddProvinceToZone(c *gin.Context) {
 		httpresponse.Error(c, http.StatusBadRequest, "validation_error", err.Error())
 		return
 	}
-	if err := h.zones.AddProvince(c.Request.Context(), c.Param("id"), req.ProvinceCode); err != nil {
+	if err := h.zones.AddProvince(c.Request.Context(), middleware.GetUserID(c), c.Param("id"), req.ProvinceCode, req.Note); err != nil {
 		httpresponse.HandleError(c, h.log, err)
 		return
 	}
@@ -128,7 +126,7 @@ func (h *AdminHandler) SetFeeRule(c *gin.Context) {
 		return
 	}
 	actorUserID := middleware.GetUserID(c)
-	rule, err := h.feeRules.SetCurrent(c.Request.Context(), req.CarrierID, req.ZoneID, req.BaseFeeAmount, req.FreeWeightGrams, req.ExtraFeePerKg, actorUserID)
+	rule, err := h.feeRules.SetCurrent(c.Request.Context(), req.CarrierID, req.ZoneID, req.BaseFeeAmount, req.FreeWeightGrams, req.ExtraFeePerKg, actorUserID, req.Reason)
 	if err != nil {
 		httpresponse.HandleError(c, h.log, err)
 		return

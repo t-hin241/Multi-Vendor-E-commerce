@@ -24,7 +24,7 @@ func newFixture() *fixture {
 	catalog := newFakeCatalogGateway()
 	restockRequests := newFakeRestockRequestRepository()
 
-	uc := usecase.NewInventoryUseCase(items, reservations, restockRequests, vendors, catalog, usecase.Operations{Transactions: fakeTransactions{}, Identity: fakeIdentity{}})
+	uc := usecase.NewInventoryUseCase(items, reservations, restockRequests, vendors, catalog, usecase.Operations{Transactions: fakeTransactions{}, Identity: fakeIdentity{}, Audit: fakeAudit{}})
 	return &fixture{uc: uc, items: items, vendors: vendors, catalog: catalog, restockRequests: restockRequests}
 }
 

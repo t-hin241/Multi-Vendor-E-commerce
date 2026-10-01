@@ -94,6 +94,7 @@ type EffectRepositoryPort interface {
 	MarkDone(ctx context.Context, id string) error
 	RecordFailure(ctx context.Context, id, reason string, park bool) (bool, error)
 	Replay(ctx context.Context, id string) (bool, error)
+	Find(ctx context.Context, id string) (*domain.Effect, error)
 	ListByOrder(ctx context.Context, orderID string) ([]*domain.Effect, error)
 	ListParked(ctx context.Context, limit, offset int) ([]*domain.Effect, error)
 	Stats(ctx context.Context) (domain.EffectStats, error)
@@ -102,6 +103,7 @@ type EffectRepositoryPort interface {
 type RefundRepositoryPort interface {
 	Create(ctx context.Context, f *domain.Refund) error
 	FindByID(ctx context.Context, id string) (*domain.Refund, error)
+	FindByIdempotencyKey(ctx context.Context, orderID, key string) (*domain.Refund, error)
 	Transition(ctx context.Context, id string, from, to domain.RefundStatus, paymentRefundID, failure *string) error
 	OpenTotals(ctx context.Context, orderID, vendorOrderID string) (int64, int64, error)
 	ListByOrder(ctx context.Context, orderID string) ([]*domain.Refund, error)
@@ -177,4 +179,19 @@ type PaymentGateway interface {
 // instead of trusting the token claim alone.
 type IdentityGateway interface {
 	RequireRole(ctx context.Context, userID, role string) error
+}
+
+// AuditRepositoryPort appends admin actions in the caller's transaction.
+type AuditRepositoryPort interface {
+	Record(ctx context.Context, a domain.AdminAction) error
+}
+
+// OperationsReader counts work waiting for an operator.
+type OperationsReader interface {
+	Counts(ctx context.Context) (map[string]int64, error)
+}
+
+// TransactionRunner runs fn in one database transaction.
+type TransactionRunner interface {
+	Run(ctx context.Context, fn func(context.Context) error) error
 }

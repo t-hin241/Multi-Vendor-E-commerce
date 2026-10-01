@@ -36,11 +36,28 @@ func (uc *VendorUseCase) Operations(ctx context.Context, actor string) (*domain.
 	out, err := uc.vendors.Operations(ctx)
 	return out, wrap(err)
 }
-func (uc *VendorUseCase) Replay(ctx context.Context, actor, id string) error {
+
+// Replay resends a shop's latest status to Catalog and Order. It needs a
+// reason and is audited; resending the same status again is harmless (the
+// consumers keep the highest version).
+func (uc *VendorUseCase) Replay(ctx context.Context, actor, id, reason string) error {
+	why := strings.TrimSpace(reason)
+	if why == "" || len(why) > 500 {
+		return apperror.Validation("A reason of at most 500 characters is required")
+	}
 	if err := uc.ops.Actors.RequireRole(ctx, actor, "admin"); err != nil {
 		return err
 	}
-	return wrap(uc.ops.Events.Replay(ctx, id))
+	return wrap(uc.ops.Tx.Run(ctx, func(ctx context.Context) error {
+		v, err := uc.vendors.FindByID(ctx, id)
+		if err != nil {
+			return err
+		}
+		if err := uc.ops.Events.Replay(ctx, id); err != nil {
+			return err
+		}
+		return uc.auditLogs.Create(ctx, id, actor, "event_replayed", &why, v.Version)
+	}))
 }
 func (uc *VendorUseCase) SaleStatus(ctx context.Context, ids []string, after string) ([]*domain.Vendor, error) {
 	if len(ids) > 0 {

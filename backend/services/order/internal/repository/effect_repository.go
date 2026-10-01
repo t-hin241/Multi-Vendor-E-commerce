@@ -114,6 +114,25 @@ func (r *EffectRepository) Replay(ctx context.Context, id string) (bool, error) 
 	return tag.RowsAffected() == 1, nil
 }
 
+// ErrEffectNotFound is returned by Find for an unknown id.
+var ErrEffectNotFound = errors.New("repository: effect not found")
+
+// Find returns one effect, or ErrEffectNotFound.
+func (r *EffectRepository) Find(ctx context.Context, id string) (*domain.Effect, error) {
+	rows, err := connection(ctx, r.pool).Query(ctx, `SELECT `+effectColumns+` FROM order_effects WHERE id = $1`, id)
+	if err != nil {
+		return nil, err
+	}
+	effects, err := scanEffects(rows)
+	if err != nil {
+		return nil, err
+	}
+	if len(effects) == 0 {
+		return nil, ErrEffectNotFound
+	}
+	return effects[0], nil
+}
+
 func (r *EffectRepository) ListByOrder(ctx context.Context, orderID string) ([]*domain.Effect, error) {
 	rows, err := connection(ctx, r.pool).Query(ctx, `SELECT `+effectColumns+` FROM order_effects WHERE order_id = $1 ORDER BY created_at, id`, orderID)
 	if err != nil {

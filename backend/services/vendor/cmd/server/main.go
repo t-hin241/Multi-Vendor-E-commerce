@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 
+	"shopee/backend/pkg/adminaudit"
 	"shopee/backend/pkg/authjwt"
 	sessionconfig "shopee/backend/pkg/config"
 	"shopee/backend/pkg/health"
@@ -105,6 +106,9 @@ func main() {
 
 	dashboard := usecase.Dashboard{Vendors: vendorUseCase, Orders: adapter.ReportClient{URL: cfg.OrderURL, Key: cfg.Internal.Key}, Payments: adapter.ReportClient{URL: cfg.PaymentURL, Key: cfg.Internal.Key}}
 	router.GET("/api/vendor/:vendorId/dashboard", middleware.RequireAuth(jwtManager), middleware.RequireRole("vendor"), transport.DashboardHandler(dashboard, log))
+
+	adminaudit.Register(router.Group("/api/vendor/admin", middleware.RequireAuth(jwtManager), middleware.RequireRole("admin")), "/audit-events",
+		adminaudit.Source{Name: "vendor", SQL: repository.AuditSearchSQL, DB: dbPool, Roles: identityclient.Client{URL: cfg.Internal.IdentityURL, Key: cfg.Internal.Key}}, log)
 
 	srv := &http.Server{
 		Addr:              ":" + cfg.Base.Port,

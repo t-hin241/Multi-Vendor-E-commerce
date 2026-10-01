@@ -2,6 +2,7 @@ package usecase
 
 import (
 	"context"
+	"regexp"
 	"strings"
 
 	"shopee/backend/pkg/apperror"
@@ -20,19 +21,54 @@ type RefundInput struct {
 	ReasonCode    string
 	Amount        int64
 	Reason        string
+	// IdempotencyKey (optional) makes a resend of the same request after a
+	// timeout return the refund already created.
+	IdempotencyKey string
+}
+
+var idempotencyKeyPattern = regexp.MustCompile(`^[A-Za-z0-9._:-]{8,100}$`)
+
+// sameRefundRequest tells whether a resend with an idempotency key asks for
+// exactly the refund that key already created.
+func sameRefundRequest(f *domain.Refund, in RefundInput) bool {
+	str := func(p *string) string {
+		if p == nil {
+			return ""
+		}
+		return *p
+	}
+	return f.ReasonCode == in.ReasonCode && f.Amount == in.Amount &&
+		str(f.VendorOrderID) == in.VendorOrderID && str(f.PaymentID) == in.PaymentID
 }
 
 // AdminRequestRefund records a refund and queues it for Payment. Nothing
 // is marked refunded until Payment confirms the money was returned.
 func (uc *OrderUseCase) AdminRequestRefund(ctx context.Context, adminID string, in RefundInput) (*domain.Refund, error) {
+	if in.IdempotencyKey != "" && !idempotencyKeyPattern.MatchString(in.IdempotencyKey) {
+		return nil, apperror.Validation("Idempotency-Key must be 8-100 letters, digits or ._:-")
+	}
 	if err := uc.requireAdmin(ctx, adminID); err != nil {
 		return nil, err
 	}
 	var refund *domain.Refund
+	created := false
 	err := uc.withOrder(ctx, in.OrderID, func(ctx context.Context) error {
 		order, err := uc.findOrder(ctx, in.OrderID)
 		if err != nil {
 			return err
+		}
+		if in.IdempotencyKey != "" {
+			existing, err := uc.Refunds.FindByIdempotencyKey(ctx, order.ID, in.IdempotencyKey)
+			if err != nil {
+				return err
+			}
+			if existing != nil {
+				if !sameRefundRequest(existing, in) {
+					return apperror.Conflict("This Idempotency-Key was already used for a different refund request")
+				}
+				refund = existing
+				return nil
+			}
 		}
 		refund = &domain.Refund{OrderID: order.ID, ReasonCode: in.ReasonCode, Amount: in.Amount, Currency: order.Currency, RequestedBy: adminID}
 		switch in.ReasonCode {
@@ -73,10 +109,28 @@ func (uc *OrderUseCase) AdminRequestRefund(ctx context.Context, adminID string, 
 		default:
 			return apperror.Validation("reason_code must be dispute, late_payment or duplicate_payment; returns are refunded from the return flow")
 		}
-		return uc.createRefund(ctx, refund)
+		if in.IdempotencyKey != "" {
+			refund.IdempotencyKey = &in.IdempotencyKey
+		}
+		if err := uc.createRefund(ctx, refund); err != nil {
+			return err
+		}
+		created = true
+		changes := map[string]any{"amount": refund.Amount, "currency": refund.Currency, "reason_code": refund.ReasonCode}
+		if refund.VendorOrderID != nil {
+			changes["vendor_order_id"] = *refund.VendorOrderID
+		}
+		if refund.PaymentID != nil {
+			changes["payment_id"] = *refund.PaymentID
+		}
+		return uc.audit(ctx, domain.AdminAction{ActorID: adminID, Action: "refund_requested", EntityType: domain.AuditRefund,
+			EntityID: refund.ID, OrderID: &order.ID, Reason: &refund.Reason, Changes: changes})
 	})
 	if err != nil {
 		return nil, err
+	}
+	if !created {
+		return refund, nil
 	}
 	uc.Log.Info().Str("order_id", in.OrderID).Str("refund_id", refund.ID).Str("admin_id", adminID).Int64("amount", refund.Amount).Msg("order_refund_requested")
 	uc.runEffectsSoon(ctx, in.OrderID)

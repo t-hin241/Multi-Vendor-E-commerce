@@ -2,6 +2,7 @@ package usecase
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"time"
 
@@ -86,7 +87,12 @@ func (uc *OrderUseCase) AdminCancel(ctx context.Context, adminID, orderID, reaso
 		if !domain.CanTransition(order.Status, domain.StatusCancelled) {
 			return apperror.Conflict("Only an unpaid order can be cancelled; use a refund for a paid order")
 		}
-		return uc.cancelLocked(ctx, order, reason, true)
+		from := order.Status
+		if err := uc.cancelLocked(ctx, order, reason, true); err != nil {
+			return err
+		}
+		return uc.audit(ctx, domain.AdminAction{ActorID: adminID, Action: "order_cancelled", EntityType: domain.AuditOrder,
+			EntityID: order.ID, OrderID: &order.ID, Reason: &reason, Changes: map[string]any{"status": domain.Change(from, domain.StatusCancelled)}})
 	})
 	if err != nil {
 		return nil, err
@@ -262,18 +268,39 @@ func (uc *OrderUseCase) recomputeOrderStatus(ctx context.Context, orderID string
 	return uc.Orders.TransitionStatus(ctx, orderID, order.Status, target, nil)
 }
 
-// SetCommissionRule adds a new commission rule version. Existing orders
-// keep the version they snapshotted at checkout.
-func (uc *OrderUseCase) SetCommissionRule(ctx context.Context, adminUserID string, rateBps int) (*domain.CommissionRule, error) {
+// SetCommissionRule adds a new commission rule version with the admin's
+// reason. Existing orders keep the version they snapshotted at checkout.
+func (uc *OrderUseCase) SetCommissionRule(ctx context.Context, adminUserID string, rateBps int, reason string) (*domain.CommissionRule, error) {
 	if err := domain.ValidateCommissionRateBps(rateBps); err != nil {
+		return nil, err
+	}
+	note, err := adminReason(reason)
+	if err != nil {
 		return nil, err
 	}
 	if err := uc.requireAdmin(ctx, adminUserID); err != nil {
 		return nil, err
 	}
+	if uc.Tx == nil {
+		return nil, apperror.Internal(errors.New("transactions are not configured"))
+	}
 	rule := &domain.CommissionRule{RateBps: rateBps, CreatedBy: &adminUserID}
-	if err := uc.CommissionRules.Create(ctx, rule); err != nil {
-		return nil, apperror.Internal(err)
+	err = uc.Tx.Run(ctx, func(ctx context.Context) error {
+		var previous any
+		current, err := uc.CommissionRules.FindCurrent(ctx)
+		if err == nil {
+			previous = current.RateBps
+		} else if !errors.Is(err, repository.ErrCommissionRuleNotFound) {
+			return err
+		}
+		if err := uc.CommissionRules.Create(ctx, rule); err != nil {
+			return err
+		}
+		return uc.audit(ctx, domain.AdminAction{ActorID: adminUserID, Action: "commission_rule_set", EntityType: domain.AuditCommissionRule,
+			EntityID: rule.ID, Reason: note, Changes: map[string]any{"rate_bps": domain.Change(previous, rateBps)}})
+	})
+	if err != nil {
+		return nil, appError(err)
 	}
 	return rule, nil
 }

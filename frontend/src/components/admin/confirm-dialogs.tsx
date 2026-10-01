@@ -12,6 +12,7 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
+import { ActionError } from "@/components/admin/action-error";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 
@@ -37,7 +38,7 @@ export function ConfirmDialog({
   onConfirm: () => Promise<void>;
 }) {
   const [open, setOpen] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<unknown>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   async function handleConfirm() {
@@ -47,7 +48,7 @@ export function ConfirmDialog({
       await onConfirm();
       setOpen(false);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Something went wrong.");
+      setError(err);
     } finally {
       setIsSubmitting(false);
     }
@@ -61,7 +62,7 @@ export function ConfirmDialog({
           <AlertDialogTitle>{title}</AlertDialogTitle>
           {description && <AlertDialogDescription>{description}</AlertDialogDescription>}
         </AlertDialogHeader>
-        {error && <p className="text-sm text-destructive">{error}</p>}
+        <ActionError error={error} />
         <AlertDialogFooter>
           <AlertDialogCancel>Cancel</AlertDialogCancel>
           <Button variant={variant} disabled={isSubmitting} onClick={handleConfirm}>
@@ -94,7 +95,7 @@ export function ReasonDialog({
 }) {
   const [open, setOpen] = useState(false);
   const [reason, setReason] = useState("");
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<unknown>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   async function handleConfirm() {
@@ -105,7 +106,7 @@ export function ReasonDialog({
       setOpen(false);
       setReason("");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Something went wrong.");
+      setError(err);
     } finally {
       setIsSubmitting(false);
     }
@@ -132,7 +133,7 @@ export function ReasonDialog({
           rows={3}
           autoFocus
         />
-        {error && <p className="text-sm text-destructive">{error}</p>}
+        <ActionError error={error} />
         <AlertDialogFooter>
           <AlertDialogCancel>Cancel</AlertDialogCancel>
           <Button

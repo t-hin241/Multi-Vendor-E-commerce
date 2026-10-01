@@ -23,12 +23,12 @@ func NewRefundRepository(pool *pgxpool.Pool) *RefundRepository {
 var ErrRefundNotFound = errors.New("repository: refund not found")
 
 const refundColumns = `id, order_id, vendor_order_id, return_request_id, payment_id, reason_code, amount, currency, reason, status,
-	payment_refund_id, failure_reason, requested_by, created_at, updated_at, resolved_at`
+	payment_refund_id, failure_reason, requested_by, idempotency_key, created_at, updated_at, resolved_at`
 
 func scanRefund(row pgx.Row) (*domain.Refund, error) {
 	var f domain.Refund
 	err := row.Scan(&f.ID, &f.OrderID, &f.VendorOrderID, &f.ReturnRequestID, &f.PaymentID, &f.ReasonCode, &f.Amount, &f.Currency,
-		&f.Reason, &f.Status, &f.PaymentRefundID, &f.FailureReason, &f.RequestedBy, &f.CreatedAt, &f.UpdatedAt, &f.ResolvedAt)
+		&f.Reason, &f.Status, &f.PaymentRefundID, &f.FailureReason, &f.RequestedBy, &f.IdempotencyKey, &f.CreatedAt, &f.UpdatedAt, &f.ResolvedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrRefundNotFound
 	}
@@ -39,10 +39,10 @@ func scanRefund(row pgx.Row) (*domain.Refund, error) {
 // for the same return or rejected capture is refused by a unique index.
 func (r *RefundRepository) Create(ctx context.Context, f *domain.Refund) error {
 	err := connection(ctx, r.pool).QueryRow(ctx, `
-		INSERT INTO order_refunds (order_id, vendor_order_id, return_request_id, payment_id, reason_code, amount, currency, reason, requested_by)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+		INSERT INTO order_refunds (order_id, vendor_order_id, return_request_id, payment_id, reason_code, amount, currency, reason, requested_by, idempotency_key)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 		RETURNING id, status, created_at, updated_at`,
-		f.OrderID, f.VendorOrderID, f.ReturnRequestID, f.PaymentID, f.ReasonCode, f.Amount, f.Currency, f.Reason, f.RequestedBy,
+		f.OrderID, f.VendorOrderID, f.ReturnRequestID, f.PaymentID, f.ReasonCode, f.Amount, f.Currency, f.Reason, f.RequestedBy, f.IdempotencyKey,
 	).Scan(&f.ID, &f.Status, &f.CreatedAt, &f.UpdatedAt)
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) && pgErr.Code == "23505" {
@@ -53,6 +53,17 @@ func (r *RefundRepository) Create(ctx context.Context, f *domain.Refund) error {
 
 func (r *RefundRepository) FindByID(ctx context.Context, id string) (*domain.Refund, error) {
 	return scanRefund(connection(ctx, r.pool).QueryRow(ctx, `SELECT `+refundColumns+` FROM order_refunds WHERE id = $1`, id))
+}
+
+// FindByIdempotencyKey returns the refund an admin request with this key
+// already created for the order, or nil.
+func (r *RefundRepository) FindByIdempotencyKey(ctx context.Context, orderID, key string) (*domain.Refund, error) {
+	f, err := scanRefund(connection(ctx, r.pool).QueryRow(ctx,
+		`SELECT `+refundColumns+` FROM order_refunds WHERE order_id = $1 AND idempotency_key = $2`, orderID, key))
+	if errors.Is(err, ErrRefundNotFound) {
+		return nil, nil
+	}
+	return f, err
 }
 
 // Transition moves a refund to a new status only from the expected one.

@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"shopee/backend/pkg/adminaudit"
+	"shopee/backend/pkg/middleware"
 
 	"shopee/backend/pkg/authjwt"
 	sessionconfig "shopee/backend/pkg/config"
@@ -98,6 +100,9 @@ func main() {
 		Notifications:   notificationClient,
 		Payment:         paymentClient,
 		Identity:        identityclient.Client{URL: internalServices.IdentityURL, Key: internalServices.Key},
+		Audit:           repository.NewAuditRepository(dbPool),
+		Tx:              repository.Transactions{Pool: dbPool},
+		Operations:      repository.Operations{Pool: dbPool},
 		ReturnPolicy:    domain.ReturnPolicy{Version: cfg.ReturnPolicyVersion(), WindowDays: cfg.ReturnWindowDays},
 		Log:             log,
 	})
@@ -132,6 +137,8 @@ func main() {
 
 	router.GET("/internal/orders/:id/inventory-status", serviceauth.Require(internalServices.Key, serviceauth.Header), internalHandler.InventoryStatus)
 	router.POST("/internal/inventory-events", serviceauth.Require(internalServices.Key, serviceauth.Header), internalHandler.InventoryEvent)
+	adminaudit.Register(router.Group("/api/orders/admin", middleware.RequireAuth(jwtManager), middleware.RequireRole("admin")), "/audit-events",
+		adminaudit.Source{Name: "order", SQL: repository.AuditSearchSQL, DB: dbPool, Roles: identityclient.Client{URL: internalServices.IdentityURL, Key: internalServices.Key}}, log)
 	srv := &http.Server{
 		Addr:              ":" + cfg.Base.Port,
 		Handler:           router,

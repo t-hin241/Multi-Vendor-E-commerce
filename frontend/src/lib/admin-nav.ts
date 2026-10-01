@@ -3,6 +3,8 @@ import {
   ClipboardList,
   CreditCard,
   FolderTree,
+  History,
+  LayoutDashboard,
   MessageSquareWarning,
   PackagePlus,
   PackageSearch,
@@ -23,6 +25,13 @@ export type AdminNavLink = {
 export type AdminNavGroup = { label: string; items: AdminNavLink[] };
 
 export const ADMIN_NAV_GROUPS: AdminNavGroup[] = [
+  {
+    label: "Overview",
+    items: [
+      { href: "/admin", label: "Dashboard", icon: LayoutDashboard },
+      { href: "/admin/audit", label: "Audit log", icon: History },
+    ],
+  },
   {
     label: "Moderation",
     items: [

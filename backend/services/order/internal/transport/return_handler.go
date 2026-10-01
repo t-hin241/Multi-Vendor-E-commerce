@@ -145,7 +145,12 @@ func (h *ReturnHandler) RetryRefund(c *gin.Context) {
 	if !validID(c, c.Param("id")) {
 		return
 	}
-	item, err := h.orders.RetryReturnRefund(c.Request.Context(), middleware.GetUserID(c), c.Param("id"))
+	var req adminReasonRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		httpresponse.Error(c, http.StatusBadRequest, "validation_error", "A reason of at most 500 characters is required")
+		return
+	}
+	item, err := h.orders.RetryReturnRefund(c.Request.Context(), middleware.GetUserID(c), c.Param("id"), req.Reason)
 	if err != nil {
 		httpresponse.HandleError(c, h.log, err)
 		return

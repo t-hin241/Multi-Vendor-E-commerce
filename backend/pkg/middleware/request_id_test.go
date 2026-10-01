@@ -53,3 +53,19 @@ func TestRequestID_ReusesInboundHeader(t *testing.T) {
 		t.Errorf("expected inbound request id to be reused, got %q", got)
 	}
 }
+
+func TestRequestID_ReplacesUnsafeInboundHeader(t *testing.T) {
+	router := gin.New()
+	router.Use(middleware.RequestID())
+	router.GET("/", func(c *gin.Context) { c.Status(http.StatusOK) })
+
+	for _, bad := range []string{"short", "has space in it", "semi;colon-0000000", "a123456789b123456789c123456789d123456789e123456789f123456789g12345"} {
+		req := httptest.NewRequest(http.MethodGet, "/", nil)
+		req.Header.Set(middleware.RequestIDHeader, bad)
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+		if got := w.Header().Get(middleware.RequestIDHeader); got == bad || got == "" {
+			t.Errorf("inbound id %q should have been replaced, got %q", bad, got)
+		}
+	}
+}

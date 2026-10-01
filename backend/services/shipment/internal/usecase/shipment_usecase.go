@@ -29,6 +29,7 @@ type Deps struct {
 	Vendors       VendorGateway
 	Orders        OrderGateway
 	Identity      RoleVerifier
+	Audit         AuditPort
 	Carrier       carrier.Provider
 	Verifier      carrier.Verifier
 	// Simulator is set only with the mock carrier (never in production).
@@ -205,6 +206,18 @@ func (uc *ShipmentUseCase) authorize(ctx context.Context, actor Actor, s *domain
 	return apperror.Forbidden("You do not have access to this shipment")
 }
 
+// auditAdmin records an admin's action on a shipment in the caller's
+// transaction; a vendor's own actions stay on the shipment timeline only.
+func (uc *ShipmentUseCase) auditAdmin(ctx context.Context, actor Actor, action, entityType, entityID string, reason *string, changes map[string]any) error {
+	if actor.Role != domain.ActorAdmin {
+		return nil
+	}
+	if uc.Audit == nil {
+		return apperror.Internal(errors.New("admin audit is not configured"))
+	}
+	return uc.Audit.Record(ctx, domain.AdminAction{ActorID: actor.ID, Action: action, EntityType: entityType, EntityID: entityID, Reason: reason, Changes: changes})
+}
+
 func (uc *ShipmentUseCase) load(ctx context.Context, id string) (*domain.Shipment, error) {
 	s, err := uc.Shipments.FindByID(ctx, id)
 	if errors.Is(err, repository.ErrShipmentNotFound) {
@@ -274,6 +287,7 @@ func (uc *ShipmentUseCase) transition(ctx context.Context, s *domain.Shipment, t
 	if !domain.CanTransition(s.Status, to) {
 		return apperror.Conflict("Cannot move this shipment from " + string(s.Status) + " to " + string(to))
 	}
+	from := s.Status
 	if err := uc.Shipments.Transition(ctx, s, to, c); err != nil {
 		return err
 	}
@@ -282,6 +296,10 @@ func (uc *ShipmentUseCase) transition(ctx context.Context, s *domain.Shipment, t
 		e.ActorID = &actor.ID
 	}
 	if _, err := uc.Events.Insert(ctx, e); err != nil {
+		return err
+	}
+	if err := uc.auditAdmin(ctx, actor, "shipment_"+string(to), domain.AuditShipment, s.ID, note,
+		map[string]any{"status": domain.Change(from, to)}); err != nil {
 		return err
 	}
 	if event, ok := domain.OrderEventFor(to); ok {
@@ -360,10 +378,14 @@ func (uc *ShipmentUseCase) UpdateTracking(ctx context.Context, actor Actor, id, 
 		if err := uc.Shipments.UpdateTracking(ctx, s, tracking); err != nil {
 			return err
 		}
+		previous := s.TrackingNumber
 		s.TrackingNumber = &tracking
 		note := "Tracking number changed to " + tracking + ": " + *why
-		_, err := uc.Events.Insert(ctx, &domain.TrackingEvent{ShipmentID: s.ID, Status: s.Status, Note: &note, ActorID: &actor.ID, ActorRole: actor.Role})
-		return err
+		if _, err := uc.Events.Insert(ctx, &domain.TrackingEvent{ShipmentID: s.ID, Status: s.Status, Note: &note, ActorID: &actor.ID, ActorRole: actor.Role}); err != nil {
+			return err
+		}
+		return uc.auditAdmin(ctx, actor, "tracking_number_changed", domain.AuditShipment, s.ID, why,
+			map[string]any{"tracking_number": domain.Change(previous, tracking)})
 	})
 }
 
@@ -383,8 +405,11 @@ func (uc *ShipmentUseCase) RecordFailedAttempt(ctx context.Context, actor Actor,
 		}
 		s.LastAttemptReason = why
 		note := "Delivery attempt failed: " + *why
-		_, err := uc.Events.Insert(ctx, &domain.TrackingEvent{ShipmentID: s.ID, Status: s.Status, Note: &note, ActorID: &actor.ID, ActorRole: actor.Role})
-		return err
+		if _, err := uc.Events.Insert(ctx, &domain.TrackingEvent{ShipmentID: s.ID, Status: s.Status, Note: &note, ActorID: &actor.ID, ActorRole: actor.Role}); err != nil {
+			return err
+		}
+		return uc.auditAdmin(ctx, actor, "delivery_attempt_failed", domain.AuditShipment, s.ID, why,
+			map[string]any{"failed_attempts": s.FailedAttempts})
 	})
 }
 
@@ -743,8 +768,11 @@ func (uc *ShipmentUseCase) RetryOrderEvent(ctx context.Context, adminID, outboxI
 			return err
 		}
 		note := "Order notification resent by admin: " + *why
-		_, err := uc.Events.Insert(ctx, &domain.TrackingEvent{ShipmentID: s.ID, Status: s.Status, Note: &note, ActorID: &adminID, ActorRole: domain.ActorAdmin})
-		return err
+		if _, err := uc.Events.Insert(ctx, &domain.TrackingEvent{ShipmentID: s.ID, Status: s.Status, Note: &note, ActorID: &adminID, ActorRole: domain.ActorAdmin}); err != nil {
+			return err
+		}
+		return uc.auditAdmin(ctx, Actor{ID: adminID, Role: domain.ActorAdmin}, "order_event_resent", domain.AuditOrderEvent, outboxID, why,
+			map[string]any{"shipment_id": s.ID})
 	})
 	if err != nil {
 		return mapError(err)

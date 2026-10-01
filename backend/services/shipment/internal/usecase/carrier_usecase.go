@@ -10,25 +10,40 @@ import (
 )
 
 // CarrierUseCase is admin-only reference-data management — plain CRUD, no
-// versioning, since a carrier is a structural identity, not a rule.
+// versioning, since a carrier is a structural identity, not a rule. Every
+// change is made by a re-verified admin and audited.
 type CarrierUseCase struct {
 	carriers CarrierRepositoryPort
+	admin    AdminConfig
 }
 
-func NewCarrierUseCase(carriers CarrierRepositoryPort) *CarrierUseCase {
-	return &CarrierUseCase{carriers: carriers}
+func NewCarrierUseCase(carriers CarrierRepositoryPort, admin AdminConfig) *CarrierUseCase {
+	return &CarrierUseCase{carriers: carriers, admin: admin}
 }
 
-func (uc *CarrierUseCase) Create(ctx context.Context, name, code string) (*domain.Carrier, error) {
+// Create adds a carrier (inactive until an admin turns it on); the note is
+// optional.
+func (uc *CarrierUseCase) Create(ctx context.Context, actorID, name, code, note string) (*domain.Carrier, error) {
 	if err := domain.ValidateCarrier(name, code); err != nil {
 		return nil, err
 	}
+	why, err := domain.ValidateNote(note, false, "Note")
+	if err != nil {
+		return nil, err
+	}
 	carrier := &domain.Carrier{Name: name, Code: code}
-	if err := uc.carriers.Create(ctx, carrier); err != nil {
-		if errors.Is(err, repository.ErrCarrierAlreadyExists) {
-			return nil, apperror.Conflict("A carrier with this code already exists")
+	err = uc.admin.change(ctx, actorID, func(ctx context.Context) (domain.AdminAction, error) {
+		if err := uc.carriers.Create(ctx, carrier); err != nil {
+			if errors.Is(err, repository.ErrCarrierAlreadyExists) {
+				return domain.AdminAction{}, apperror.Conflict("A carrier with this code already exists")
+			}
+			return domain.AdminAction{}, err
 		}
-		return nil, apperror.Internal(err)
+		return domain.AdminAction{Action: "carrier_created", EntityType: domain.AuditCarrier, EntityID: carrier.ID, Reason: why,
+			Changes: map[string]any{"code": code, "name": name}}, nil
+	})
+	if err != nil {
+		return nil, err
 	}
 	return carrier, nil
 }
@@ -59,12 +74,25 @@ func (uc *CarrierUseCase) ListActive(ctx context.Context) ([]*domain.Carrier, er
 	return active, nil
 }
 
-func (uc *CarrierUseCase) SetActive(ctx context.Context, id string, isActive bool) error {
-	if err := uc.carriers.SetActive(ctx, id, isActive); err != nil {
-		if errors.Is(err, repository.ErrCarrierNotFound) {
-			return apperror.NotFound("Carrier not found")
-		}
-		return apperror.Internal(err)
+// SetActive turns a carrier on or off for new quotes; the reason is
+// required because it changes which shops can sell.
+func (uc *CarrierUseCase) SetActive(ctx context.Context, actorID, id string, isActive bool, reason string) error {
+	why, err := domain.ValidateNote(reason, true, "Reason")
+	if err != nil {
+		return err
 	}
-	return nil
+	return uc.admin.change(ctx, actorID, func(ctx context.Context) (domain.AdminAction, error) {
+		current, err := uc.carriers.FindByID(ctx, id)
+		if errors.Is(err, repository.ErrCarrierNotFound) {
+			return domain.AdminAction{}, apperror.NotFound("Carrier not found")
+		}
+		if err != nil {
+			return domain.AdminAction{}, err
+		}
+		if err := uc.carriers.SetActive(ctx, id, isActive); err != nil {
+			return domain.AdminAction{}, err
+		}
+		return domain.AdminAction{Action: "carrier_active_set", EntityType: domain.AuditCarrier, EntityID: id, Reason: why,
+			Changes: map[string]any{"is_active": domain.Change(current.IsActive, isActive)}}, nil
+	})
 }
