@@ -10,15 +10,14 @@ import (
 	"shopee/backend/pkg/adminaudit"
 	"shopee/backend/pkg/authjwt"
 	sessionconfig "shopee/backend/pkg/config"
+	"shopee/backend/pkg/eventbus"
+	"shopee/backend/pkg/events"
 	"shopee/backend/pkg/health"
 	"shopee/backend/pkg/identityclient"
 	"shopee/backend/pkg/logger"
 	"shopee/backend/pkg/middleware"
-	"shopee/backend/pkg/platform/natsclient"
 	"shopee/backend/pkg/platform/objectstorage"
 	"shopee/backend/pkg/platform/postgres"
-	"shopee/backend/pkg/platform/redisclient"
-	"shopee/backend/pkg/serviceauth"
 	"shopee/backend/pkg/shutdown"
 	"shopee/backend/pkg/vendorsales"
 	"shopee/backend/services/catalog/internal/adapter"
@@ -51,18 +50,21 @@ func main() {
 		log.Fatal().Err(err).Msg("database connection failed")
 	}
 	defer dbPool.Close()
-
-	redisClient, err := redisclient.NewClient(ctx, cfg.Base.RedisURL)
-	if err != nil {
-		log.Fatal().Err(err).Msg("redis connection failed")
+	// Plan 14: the runtime role reads and writes rows of this database only.
+	if problems, err := postgres.CheckRuntimeRole(ctx, dbPool, cfg.Base.Env == "production"); err != nil {
+		log.Fatal().Err(err).Msg("database role check failed")
+	} else if len(problems) > 0 {
+		log.Warn().Strs("problems", problems).Msg("database_role_too_powerful")
 	}
-	defer redisClient.Close()
 
-	natsConn, err := natsclient.Connect(cfg.Base.NATSURL)
+	busPassword, err := sessionconfig.RequireEventBusPassword()
 	if err != nil {
-		log.Fatal().Err(err).Msg("nats connection failed")
+		log.Fatal().Err(err).Msg("event bus configuration invalid")
 	}
-	defer natsConn.Close()
+	bus, err := eventbus.Start(cfg.Base.NATSURL, eventbus.Credentials{Service: serviceName, Password: busPassword}, cfg.Base.EventPublishing, dbPool, log)
+	if err != nil {
+		log.Fatal().Err(err).Msg("event bus configuration invalid")
+	}
 
 	objectStore, err := objectstorage.NewClient(ctx, cfg.ObjectStorage)
 	if err != nil {
@@ -107,39 +109,45 @@ func main() {
 	internalHandler := transport.NewInternalHandler(productUseCase, log)
 	attributeHandler := transport.NewAttributeHandler(attributeUseCase, log)
 
-	router := transport.NewRouter(cfg.Base.Env, log, jwtManager, categoryHandler, productHandler, storefrontHandler, adminHandler, internalHandler, attributeHandler, internalServices.Key,
+	router := transport.NewRouter(cfg.Base.Env, log, jwtManager, categoryHandler, productHandler, storefrontHandler, adminHandler, internalHandler, attributeHandler, internalServices.Verifier,
 		health.Checker{Name: "postgres", Ping: func(ctx context.Context) error { return dbPool.Ping(ctx) }},
-		health.Checker{Name: "redis", Ping: func(ctx context.Context) error { return redisClient.Ping(ctx).Err() }},
 		health.Checker{Name: "object_storage", Ping: objectStore.Ping},
-		health.Checker{Name: "nats", Ping: func(ctx context.Context) error {
-			if !natsConn.IsConnected() {
-				return fmt.Errorf("nats: not connected")
-			}
-			return nil
-		}},
 	)
 
 	maintenance := transport.MaintenanceHandler{Service: usecase.Maintenance{Repository: repository.Maintenance{Pool: dbPool}, Identity: identityclient.Client{URL: internalServices.IdentityURL, Key: internalServices.Key}}, Log: log}
 	router.GET("/api/catalog/operations", middleware.RequireAuth(jwtManager), middleware.RequireRole("admin"), maintenance.Stats)
 	router.POST("/api/catalog/operations/replay", middleware.RequireAuth(jwtManager), middleware.RequireRole("admin"), maintenance.Replay)
-	router.POST("/internal/stock-cache/invalidate", serviceauth.Require(internalServices.Key, serviceauth.Header), maintenance.InvalidateStock)
+	router.POST("/internal/stock-cache/invalidate", internalServices.Verifier.Allow("inventory"), maintenance.InvalidateStock)
 	salesStore := vendorsales.Store{Pool: dbPool}
-	router.POST("/internal/vendor-status", serviceauth.Require(internalServices.Key, serviceauth.Header), salesStore.Handler(log))
+	router.POST("/internal/vendor-status", internalServices.Verifier.Allow("vendor"), salesStore.Handler(log))
 	reconcileCtx, stopReconcile := context.WithCancel(ctx)
 	defer stopReconcile()
 	go productUseCase.ReconcileCache(reconcileCtx, storefrontCacheRepo)
 	go (repository.ObjectCleanup{Pool: dbPool}).Run(reconcileCtx, objectStore, log)
-	go (repository.StatusOutbox{Pool: dbPool, Publish: (adapter.ProductStatusPublisher{URL: cfg.OrderServiceURL, Key: internalServices.Key}).Publish}).Run(reconcileCtx, log)
+	publishStatus := adapter.BusProductStatusPublisher(bus.Bus)
+	if !bus.Publish {
+		publishStatus = (adapter.ProductStatusPublisher{URL: cfg.OrderServiceURL, Key: internalServices.Key}).Publish
+	}
+	go (repository.StatusOutbox{Pool: dbPool, Publish: publishStatus}).Run(reconcileCtx, log)
+	// PLT-03: shop status and stock changes arrive from the event bus; the
+	// internal HTTP routes stay for producers in rollback mode.
+	bus.Run(reconcileCtx,
+		eventbus.Subscription{Durable: "catalog-vendor-status", Types: []string{events.VendorStatusChanged}, Handle: salesStore.EventHandler()},
+		eventbus.Subscription{Durable: "catalog-stock-cache", Types: []string{events.StockChanged}, Handle: adapter.StockChangedHandler()},
+	)
 	go (vendorsales.Client{URL: cfg.VendorServiceURL, Key: internalServices.Key}).Reconcile(reconcileCtx, salesStore, log)
 
-	adminaudit.Register(router.Group("/api/catalog/admin", middleware.RequireAuth(jwtManager), middleware.RequireRole("admin")), "/audit-events",
-		adminaudit.Source{Name: "catalog", SQL: repository.AuditSearchSQL, DB: dbPool, Roles: identityclient.Client{URL: internalServices.IdentityURL, Key: internalServices.Key}}, log)
+	catalogAdmin := router.Group("/api/catalog/admin", middleware.RequireAuth(jwtManager), middleware.RequireRole("admin"))
+	bus.RegisterAdmin(catalogAdmin, identityclient.Client{URL: internalServices.IdentityURL, Key: internalServices.Key})
+	adminaudit.Register(catalogAdmin, "/audit-events",
+		adminaudit.Source{Name: "catalog", SQL: repository.AuditSearchSQL + " UNION ALL " + eventbus.InboxAuditSearchSQL, DB: dbPool, Roles: identityclient.Client{URL: internalServices.IdentityURL, Key: internalServices.Key}}, log)
 
 	srv := &http.Server{
 		Addr:              ":" + cfg.Base.Port,
 		Handler:           router,
 		ReadHeaderTimeout: cfg.Base.HTTPReadTimeout,
 		ReadTimeout:       cfg.Base.HTTPReadTimeout,
+		WriteTimeout:      cfg.Base.HTTPWriteTimeout,
 		IdleTimeout:       cfg.Base.HTTPIdleTimeout,
 	}
 
@@ -150,5 +158,8 @@ func main() {
 		}
 	}()
 
-	shutdown.WaitForSignal(log, srv, cfg.Base.ShutdownTimeout, nil)
+	shutdown.WaitForSignal(log, srv, cfg.Base.ShutdownTimeout, func() {
+		stopReconcile()
+		bus.Close(cfg.Base.ShutdownTimeout)
+	})
 }

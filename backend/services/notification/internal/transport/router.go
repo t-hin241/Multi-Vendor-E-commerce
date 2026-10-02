@@ -17,7 +17,7 @@ import (
 	"shopee/backend/pkg/serviceauth"
 )
 
-func NewRouter(env string, log zerolog.Logger, jwtManager *authjwt.Manager, serviceKey string, internalHandler *InternalHandler, adminHandler *AdminHandler, checkers ...health.Checker) *gin.Engine {
+func NewRouter(env string, log zerolog.Logger, jwtManager *authjwt.Manager, internal *serviceauth.Verifier, internalHandler *InternalHandler, adminHandler *AdminHandler, checkers ...health.Checker) *gin.Engine {
 	if env == "production" {
 		gin.SetMode(gin.ReleaseMode)
 	}
@@ -37,7 +37,7 @@ func NewRouter(env string, log zerolog.Logger, jwtManager *authjwt.Manager, serv
 	health.RegisterRoutes(r, checkers...)
 
 	// Only services holding the internal key may queue a notification.
-	r.POST("/internal/notifications", serviceauth.Require(serviceKey, serviceauth.Header), internalHandler.Notify)
+	r.POST("/internal/notifications", internal.Allow("order", "vendor"), internalHandler.Notify)
 
 	adminGroup := r.Group("/api/notifications/admin", middleware.RequireAuth(jwtManager), middleware.RequireRole("admin"), func(c *gin.Context) {
 		c.Header("Cache-Control", "no-store")

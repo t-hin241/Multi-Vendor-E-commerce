@@ -23,7 +23,7 @@ func NewRouter(
 	itemHandler *ItemHandler,
 	internalHandler *InternalHandler,
 	adminHandler *AdminHandler,
-	internalKey string,
+	internal *serviceauth.Verifier,
 	checkers ...health.Checker,
 ) *gin.Engine {
 	if env == "production" {
@@ -61,16 +61,18 @@ func NewRouter(
 		adminGroup.PATCH("/restock-requests/:id/reject", adminHandler.Reject)
 	}
 
-	internalGroup := r.Group("/internal/inventory", serviceauth.Require(internalKey, serviceauth.Header))
+	internalGroup := r.Group("/internal/inventory")
 	{
-		internalGroup.GET("/operations/:orderID", internalHandler.Operation)
-		internalGroup.POST("/reserve", internalHandler.Reserve)
-		internalGroup.POST("/release", internalHandler.Release)
-		internalGroup.POST("/commit", internalHandler.Commit)
-		internalGroup.POST("/returns", internalHandler.RestockReturn)
-		internalGroup.GET("/variants/stock", internalHandler.GetVariantStock)
-		internalGroup.GET("/products/:productID/readiness", internalHandler.CheckStockReadiness)
-		internalGroup.GET("/products/:productID/stock", internalHandler.GetProductStock)
+		orderOnly := internal.Allow("order")
+		stockReaders := internal.Allow("cart", "catalog", "order")
+		internalGroup.GET("/operations/:orderID", orderOnly, internalHandler.Operation)
+		internalGroup.POST("/reserve", orderOnly, internalHandler.Reserve)
+		internalGroup.POST("/release", orderOnly, internalHandler.Release)
+		internalGroup.POST("/commit", orderOnly, internalHandler.Commit)
+		internalGroup.POST("/returns", orderOnly, internalHandler.RestockReturn)
+		internalGroup.GET("/variants/stock", stockReaders, internalHandler.GetVariantStock)
+		internalGroup.GET("/products/:productID/readiness", stockReaders, internalHandler.CheckStockReadiness)
+		internalGroup.GET("/products/:productID/stock", stockReaders, internalHandler.GetProductStock)
 	}
 
 	return r

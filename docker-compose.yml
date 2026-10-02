@@ -5,16 +5,18 @@ name: shopee
 # or "up --build" builds every image in parallel and can time out with
 # "failed to solve: context deadline exceeded" on a slow network or host.
 
+# Published ports listen on loopback only (INTERNAL_BIND_ADDRESS,
+# PUBLIC_BIND_ADDRESS). On a VPS the public entry point is Caddy with TLS:
+# add -f deploy/compose.edge.yml (see deploy/edge-runbook.md).
+
 x-service-defaults: &service-defaults
   restart: unless-stopped
   networks:
     - shopee
+  # Each service waits for what it uses: Redis only for identity, payment,
+  # review and notification; NATS only for the services on the event bus.
   depends_on:
     postgres:
-      condition: service_healthy
-    redis:
-      condition: service_healthy
-    nats:
       condition: service_healthy
 
 x-service-env-defaults: &service-env-defaults
@@ -27,7 +29,14 @@ x-service-env-defaults: &service-env-defaults
   HTTP_IDLE_TIMEOUT: "60"
   JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env}
   IDENTITY_SERVICE_URL: http://identity:8081
+  # PLT-01: each service's own key (per service below) and the registry of
+  # key hashes every service checks callers against. Without per-service
+  # keys (local development) services fall back to the shared key.
   IDENTITY_SERVICE_KEY: ${IDENTITY_SERVICE_KEY:?set IDENTITY_SERVICE_KEY in .env}
+  INTERNAL_SERVICE_KEYS: ${INTERNAL_SERVICE_KEYS:-}
+  INTERNAL_AUTH_ACCEPT_SHARED_KEY: ${INTERNAL_AUTH_ACCEPT_SHARED_KEY:-false}
+  # PLT-03: producers publish domain events to JetStream; "http" = rollback.
+  EVENT_PUBLISHING: ${EVENT_PUBLISHING:-jetstream}
 
 services:
   postgres:
@@ -37,8 +46,24 @@ services:
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-shopee}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      # Per-service roles (deploy/postgres-init/db-roles.psql): the services
+      # connect as <service>_app (rows of their own database only), the
+      # migrations as shopee_migrator; POSTGRES_USER stays the superuser for
+      # operations (backups, deploy/db-roles.sh).
+      MIGRATOR_DB_PASSWORD: ${MIGRATOR_DB_PASSWORD:?set MIGRATOR_DB_PASSWORD in .env}
+      IDENTITY_DB_PASSWORD: ${IDENTITY_DB_PASSWORD:?set IDENTITY_DB_PASSWORD in .env}
+      VENDOR_DB_PASSWORD: ${VENDOR_DB_PASSWORD:?set VENDOR_DB_PASSWORD in .env}
+      CATALOG_DB_PASSWORD: ${CATALOG_DB_PASSWORD:?set CATALOG_DB_PASSWORD in .env}
+      INVENTORY_DB_PASSWORD: ${INVENTORY_DB_PASSWORD:?set INVENTORY_DB_PASSWORD in .env}
+      CART_DB_PASSWORD: ${CART_DB_PASSWORD:?set CART_DB_PASSWORD in .env}
+      ORDER_DB_PASSWORD: ${ORDER_DB_PASSWORD:?set ORDER_DB_PASSWORD in .env}
+      PAYMENT_DB_PASSWORD: ${PAYMENT_DB_PASSWORD:?set PAYMENT_DB_PASSWORD in .env}
+      SHIPMENT_DB_PASSWORD: ${SHIPMENT_DB_PASSWORD:?set SHIPMENT_DB_PASSWORD in .env}
+      ADMIN_DB_PASSWORD: ${ADMIN_DB_PASSWORD:?set ADMIN_DB_PASSWORD in .env}
+      NOTIFICATION_DB_PASSWORD: ${NOTIFICATION_DB_PASSWORD:?set NOTIFICATION_DB_PASSWORD in .env}
+      REVIEW_DB_PASSWORD: ${REVIEW_DB_PASSWORD:?set REVIEW_DB_PASSWORD in .env}
     ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+      - "${INTERNAL_BIND_ADDRESS:-127.0.0.1}:${POSTGRES_PORT:-5432}:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
       - ./deploy/postgres-init:/docker-entrypoint-initdb.d:ro
@@ -57,7 +82,7 @@ services:
     # can rebuild lost jobs, but eviction would make that routine).
     command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec", "--maxmemory-policy", "noeviction"]
     ports:
-      - "${REDIS_PORT:-6379}:6379"
+      - "${INTERNAL_BIND_ADDRESS:-127.0.0.1}:${REDIS_PORT:-6379}:6379"
     volumes:
       - redis-data:/data
     healthcheck:
@@ -70,12 +95,26 @@ services:
     image: nats:2-alpine
     restart: unless-stopped
     networks: [shopee]
-    command: ["-js", "-m", "8222"]
+    # Per-service users and permissions (deploy/nats/nats.conf): a service
+    # publishes only its own event types and reads only its own consumers.
+    # Each password is the value that service gets as EVENTBUS_PASSWORD,
+    # in double quotes: NATS parses a variable's value as configuration, so
+    # an unquoted hex key such as "5e62..." would read as a number.
+    command: ["-c", "/etc/nats/nats.conf"]
+    environment:
+      VENDOR_EVENTBUS_PASSWORD: '"${VENDOR_INTERNAL_KEY:-${IDENTITY_SERVICE_KEY}}"'
+      CATALOG_EVENTBUS_PASSWORD: '"${CATALOG_INTERNAL_KEY:-${IDENTITY_SERVICE_KEY}}"'
+      INVENTORY_EVENTBUS_PASSWORD: '"${INVENTORY_INTERNAL_KEY:-${IDENTITY_SERVICE_KEY}}"'
+      ORDER_EVENTBUS_PASSWORD: '"${ORDER_INTERNAL_KEY:-${IDENTITY_SERVICE_KEY}}"'
+      PAYMENT_EVENTBUS_PASSWORD: '"${PAYMENT_INTERNAL_KEY:-${IDENTITY_SERVICE_KEY}}"'
+      SHIPMENT_EVENTBUS_PASSWORD: '"${SHIPMENT_INTERNAL_KEY:-${IDENTITY_SERVICE_KEY}}"'
+      NOTIFICATION_EVENTBUS_PASSWORD: '"${NOTIFICATION_INTERNAL_KEY:-${IDENTITY_SERVICE_KEY}}"'
     ports:
-      - "${NATS_CLIENT_PORT:-4222}:4222"
-      - "${NATS_MONITOR_PORT:-8222}:8222"
+      - "${INTERNAL_BIND_ADDRESS:-127.0.0.1}:${NATS_CLIENT_PORT:-4222}:4222"
+      - "${INTERNAL_BIND_ADDRESS:-127.0.0.1}:${NATS_MONITOR_PORT:-8222}:8222"
     volumes:
       - nats-data:/data
+      - ./deploy/nats/nats.conf:/etc/nats/nats.conf:ro
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:8222/healthz"]
       interval: 5s
@@ -91,8 +130,8 @@ services:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:?set MINIO_ROOT_USER in .env}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD in .env}
     ports:
-      - "${MINIO_API_PORT:-9000}:9000"
-      - "${MINIO_CONSOLE_PORT:-9001}:9001"
+      - "${INTERNAL_BIND_ADDRESS:-127.0.0.1}:${MINIO_API_PORT:-9000}:9000"
+      - "${INTERNAL_BIND_ADDRESS:-127.0.0.1}:${MINIO_CONSOLE_PORT:-9001}:9001"
     volumes:
       - minio-data:/data
     healthcheck:
@@ -103,11 +142,18 @@ services:
 
   identity:
     <<: *service-defaults
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     build:
       context: ./backend
       dockerfile: services/identity/Dockerfile
     environment:
       <<: *service-env-defaults
+      INTERNAL_SERVICE_NAME: identity
+      INTERNAL_SERVICE_KEY: ${IDENTITY_INTERNAL_KEY:-}
       IDENTITY_RESET_DELIVERY_KEY: ${IDENTITY_RESET_DELIVERY_KEY:?set IDENTITY_RESET_DELIVERY_KEY in .env}
       IDENTITY_RESET_ENCRYPTION_KEY: ${IDENTITY_RESET_ENCRYPTION_KEY:?set IDENTITY_RESET_ENCRYPTION_KEY in .env}
       IDENTITY_TRUSTED_PROXY_CIDRS: ${IDENTITY_TRUSTED_PROXY_CIDRS:-172.16.0.0/12}
@@ -115,16 +161,14 @@ services:
       IDENTITY_PASSWORD_RESET_URL: ${IDENTITY_PASSWORD_RESET_URL:-http://localhost:3000/reset-password}
       NOTIFICATION_SERVICE_URL: http://notification:8090
       PORT: "8081"
-      DATABASE_URL: postgres://${POSTGRES_USER:-shopee}:${POSTGRES_PASSWORD}@postgres:5432/identity_db?sslmode=disable
+      DATABASE_URL: postgres://identity_app:${IDENTITY_DB_PASSWORD:?set IDENTITY_DB_PASSWORD in .env}@postgres:5432/identity_db?sslmode=disable
     ports:
-      - "8081:8081"
+      - "${INTERNAL_BIND_ADDRESS:-127.0.0.1}:8081:8081"
 
   vendor:
     <<: *service-defaults
     depends_on:
       postgres:
-        condition: service_healthy
-      redis:
         condition: service_healthy
       nats:
         condition: service_healthy
@@ -137,13 +181,16 @@ services:
       dockerfile: services/vendor/Dockerfile
     environment:
       <<: *service-env-defaults
+      INTERNAL_SERVICE_NAME: vendor
+      INTERNAL_SERVICE_KEY: ${VENDOR_INTERNAL_KEY:-}
+      EVENTBUS_PASSWORD: ${VENDOR_INTERNAL_KEY:-${IDENTITY_SERVICE_KEY}}
       PORT: "8082"
       CATALOG_SERVICE_URL: http://catalog:8083
       ORDER_SERVICE_URL: http://order:8086
       PAYMENT_SERVICE_URL: http://payment:8087
       VENDOR_PAYOUT_ENCRYPTION_KEY: ${VENDOR_PAYOUT_ENCRYPTION_KEY:?set VENDOR_PAYOUT_ENCRYPTION_KEY in .env}
       VENDOR_PAYOUT_SERVICE_KEY: ${VENDOR_PAYOUT_SERVICE_KEY:?set VENDOR_PAYOUT_SERVICE_KEY in .env}
-      DATABASE_URL: postgres://${POSTGRES_USER:-shopee}:${POSTGRES_PASSWORD}@postgres:5432/vendor_db?sslmode=disable
+      DATABASE_URL: postgres://vendor_app:${VENDOR_DB_PASSWORD:?set VENDOR_DB_PASSWORD in .env}@postgres:5432/vendor_db?sslmode=disable
       NOTIFICATION_SERVICE_URL: http://notification:8090
       OBJECT_STORAGE_ENDPOINT: minio:9000
       OBJECT_STORAGE_ACCESS_KEY: ${MINIO_ROOT_USER:?set MINIO_ROOT_USER in .env}
@@ -152,14 +199,12 @@ services:
       OBJECT_STORAGE_BUCKET: vendor-branding
       OBJECT_STORAGE_PUBLIC_BASE_URL: ${OBJECT_STORAGE_PUBLIC_BASE_URL:-http://localhost:9000}
     ports:
-      - "8082:8082"
+      - "${INTERNAL_BIND_ADDRESS:-127.0.0.1}:8082:8082"
 
   catalog:
     <<: *service-defaults
     depends_on:
       postgres:
-        condition: service_healthy
-      redis:
         condition: service_healthy
       nats:
         condition: service_healthy
@@ -172,8 +217,11 @@ services:
       dockerfile: services/catalog/Dockerfile
     environment:
       <<: *service-env-defaults
+      INTERNAL_SERVICE_NAME: catalog
+      INTERNAL_SERVICE_KEY: ${CATALOG_INTERNAL_KEY:-}
+      EVENTBUS_PASSWORD: ${CATALOG_INTERNAL_KEY:-${IDENTITY_SERVICE_KEY}}
       PORT: "8083"
-      DATABASE_URL: postgres://${POSTGRES_USER:-shopee}:${POSTGRES_PASSWORD}@postgres:5432/catalog_db?sslmode=disable
+      DATABASE_URL: postgres://catalog_app:${CATALOG_DB_PASSWORD:?set CATALOG_DB_PASSWORD in .env}@postgres:5432/catalog_db?sslmode=disable
       VENDOR_SERVICE_URL: http://vendor:8082
       ORDER_SERVICE_URL: http://order:8086
       INVENTORY_SERVICE_URL: http://inventory:8084
@@ -184,14 +232,12 @@ services:
       OBJECT_STORAGE_BUCKET: product-images
       OBJECT_STORAGE_PUBLIC_BASE_URL: ${OBJECT_STORAGE_PUBLIC_BASE_URL:-http://localhost:9000}
     ports:
-      - "8083:8083"
+      - "${INTERNAL_BIND_ADDRESS:-127.0.0.1}:8083:8083"
 
   inventory:
     <<: *service-defaults
     depends_on:
       postgres:
-        condition: service_healthy
-      redis:
         condition: service_healthy
       nats:
         condition: service_healthy
@@ -204,23 +250,22 @@ services:
       dockerfile: services/inventory/Dockerfile
     environment:
       <<: *service-env-defaults
+      INTERNAL_SERVICE_NAME: inventory
+      INTERNAL_SERVICE_KEY: ${INVENTORY_INTERNAL_KEY:-}
+      EVENTBUS_PASSWORD: ${INVENTORY_INTERNAL_KEY:-${IDENTITY_SERVICE_KEY}}
       PORT: "8084"
-      DATABASE_URL: postgres://${POSTGRES_USER:-shopee}:${POSTGRES_PASSWORD}@postgres:5432/inventory_db?sslmode=disable
+      DATABASE_URL: postgres://inventory_app:${INVENTORY_DB_PASSWORD:?set INVENTORY_DB_PASSWORD in .env}@postgres:5432/inventory_db?sslmode=disable
       VENDOR_SERVICE_URL: http://vendor:8082
       CATALOG_SERVICE_URL: http://catalog:8083
       ORDER_SERVICE_URL: http://order:8086
       INVENTORY_EXPIRY_ENABLED: ${INVENTORY_EXPIRY_ENABLED:-false}
     ports:
-      - "8084:8084"
+      - "${INTERNAL_BIND_ADDRESS:-127.0.0.1}:8084:8084"
 
   cart:
     <<: *service-defaults
     depends_on:
       postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-      nats:
         condition: service_healthy
       catalog:
         condition: service_started
@@ -231,22 +276,22 @@ services:
       dockerfile: services/cart/Dockerfile
     environment:
       <<: *service-env-defaults
+      INTERNAL_SERVICE_NAME: cart
+      INTERNAL_SERVICE_KEY: ${CART_INTERNAL_KEY:-}
       PORT: "8085"
-      DATABASE_URL: postgres://${POSTGRES_USER:-shopee}:${POSTGRES_PASSWORD}@postgres:5432/cart_db?sslmode=disable
+      DATABASE_URL: postgres://cart_app:${CART_DB_PASSWORD:?set CART_DB_PASSWORD in .env}@postgres:5432/cart_db?sslmode=disable
       CATALOG_SERVICE_URL: http://catalog:8083
       INVENTORY_SERVICE_URL: http://inventory:8084
       CART_RETENTION_ENABLED: ${CART_RETENTION_ENABLED:-true}
       CART_RETENTION_DAYS: ${CART_RETENTION_DAYS:-180}
       CART_OPERATION_RETENTION_DAYS: ${CART_OPERATION_RETENTION_DAYS:-90}
     ports:
-      - "8085:8085"
+      - "${INTERNAL_BIND_ADDRESS:-127.0.0.1}:8085:8085"
 
   order:
     <<: *service-defaults
     depends_on:
       postgres:
-        condition: service_healthy
-      redis:
         condition: service_healthy
       nats:
         condition: service_healthy
@@ -265,8 +310,11 @@ services:
       dockerfile: services/order/Dockerfile
     environment:
       <<: *service-env-defaults
+      INTERNAL_SERVICE_NAME: order
+      INTERNAL_SERVICE_KEY: ${ORDER_INTERNAL_KEY:-}
+      EVENTBUS_PASSWORD: ${ORDER_INTERNAL_KEY:-${IDENTITY_SERVICE_KEY}}
       PORT: "8086"
-      DATABASE_URL: postgres://${POSTGRES_USER:-shopee}:${POSTGRES_PASSWORD}@postgres:5432/order_db?sslmode=disable
+      DATABASE_URL: postgres://order_app:${ORDER_DB_PASSWORD:?set ORDER_DB_PASSWORD in .env}@postgres:5432/order_db?sslmode=disable
       CART_SERVICE_URL: http://cart:8085
       CATALOG_SERVICE_URL: http://catalog:8083
       VENDOR_SERVICE_URL: http://vendor:8082
@@ -278,7 +326,7 @@ services:
       PAYMENT_SERVICE_URL: http://payment:8087
       ORDER_RETURN_WINDOW_DAYS: ${ORDER_RETURN_WINDOW_DAYS:-7}
     ports:
-      - "8086:8086"
+      - "${INTERNAL_BIND_ADDRESS:-127.0.0.1}:8086:8086"
 
   payment:
     <<: *service-defaults
@@ -296,8 +344,11 @@ services:
       dockerfile: services/payment/Dockerfile
     environment:
       <<: *service-env-defaults
+      INTERNAL_SERVICE_NAME: payment
+      INTERNAL_SERVICE_KEY: ${PAYMENT_INTERNAL_KEY:-}
+      EVENTBUS_PASSWORD: ${PAYMENT_INTERNAL_KEY:-${IDENTITY_SERVICE_KEY}}
       PORT: "8087"
-      DATABASE_URL: postgres://${POSTGRES_USER:-shopee}:${POSTGRES_PASSWORD}@postgres:5432/payment_db?sslmode=disable
+      DATABASE_URL: postgres://payment_app:${PAYMENT_DB_PASSWORD:?set PAYMENT_DB_PASSWORD in .env}@postgres:5432/payment_db?sslmode=disable
       ORDER_SERVICE_URL: http://order:8086
       PAYMENT_PROVIDER: ${PAYMENT_PROVIDER:-mock}
       PAYMENT_MOCK_WEBHOOK_SECRET: ${PAYMENT_MOCK_WEBHOOK_SECRET:?set PAYMENT_MOCK_WEBHOOK_SECRET in .env}
@@ -310,14 +361,12 @@ services:
       VENDOR_SERVICE_URL: http://vendor:8082
       PAYMENT_WEBHOOK_RATE_PER_MINUTE: ${PAYMENT_WEBHOOK_RATE_PER_MINUTE:-600}
     ports:
-      - "8087:8087"
+      - "${INTERNAL_BIND_ADDRESS:-127.0.0.1}:8087:8087"
 
   shipment:
     <<: *service-defaults
     depends_on:
       postgres:
-        condition: service_healthy
-      redis:
         condition: service_healthy
       nats:
         condition: service_healthy
@@ -330,8 +379,11 @@ services:
       dockerfile: services/shipment/Dockerfile
     environment:
       <<: *service-env-defaults
+      INTERNAL_SERVICE_NAME: shipment
+      INTERNAL_SERVICE_KEY: ${SHIPMENT_INTERNAL_KEY:-}
+      EVENTBUS_PASSWORD: ${SHIPMENT_INTERNAL_KEY:-${IDENTITY_SERVICE_KEY}}
       PORT: "8088"
-      DATABASE_URL: postgres://${POSTGRES_USER:-shopee}:${POSTGRES_PASSWORD}@postgres:5432/shipment_db?sslmode=disable
+      DATABASE_URL: postgres://shipment_app:${SHIPMENT_DB_PASSWORD:?set SHIPMENT_DB_PASSWORD in .env}@postgres:5432/shipment_db?sslmode=disable
       VENDOR_SERVICE_URL: http://vendor:8082
       ORDER_SERVICE_URL: http://order:8086
       # manual (default): tracking entered by vendors/admins. mock: simulated
@@ -340,7 +392,7 @@ services:
       SHIPMENT_CARRIER_MOCK_WEBHOOK_SECRET: ${SHIPMENT_CARRIER_MOCK_WEBHOOK_SECRET:-}
       SHIPMENT_ADDRESS_RETENTION_DAYS: ${SHIPMENT_ADDRESS_RETENTION_DAYS:-180}
     ports:
-      - "8088:8088"
+      - "${INTERNAL_BIND_ADDRESS:-127.0.0.1}:8088:8088"
 
   admin:
     <<: *service-defaults
@@ -349,8 +401,10 @@ services:
       dockerfile: services/admin/Dockerfile
     environment:
       <<: *service-env-defaults
+      INTERNAL_SERVICE_NAME: admin
+      INTERNAL_SERVICE_KEY: ${ADMIN_INTERNAL_KEY:-}
       PORT: "8089"
-      DATABASE_URL: postgres://${POSTGRES_USER:-shopee}:${POSTGRES_PASSWORD}@postgres:5432/admin_db?sslmode=disable
+      DATABASE_URL: postgres://admin_app:${ADMIN_DB_PASSWORD:?set ADMIN_DB_PASSWORD in .env}@postgres:5432/admin_db?sslmode=disable
       # Read-only dashboard and audit search over these services, as the
       # signed-in admin (the admin's token is forwarded; no extra secret).
       VENDOR_SERVICE_URL: http://vendor:8082
@@ -363,7 +417,7 @@ services:
       REVIEW_SERVICE_URL: ${ADMIN_REVIEW_SERVICE_URL-http://review:8091}
       ADMIN_UPSTREAM_TIMEOUT: ${ADMIN_UPSTREAM_TIMEOUT:-4s}
     ports:
-      - "8089:8089"
+      - "${INTERNAL_BIND_ADDRESS:-127.0.0.1}:8089:8089"
 
   review:
     <<: *service-defaults
@@ -385,8 +439,10 @@ services:
       dockerfile: services/review/Dockerfile
     environment:
       <<: *service-env-defaults
+      INTERNAL_SERVICE_NAME: review
+      INTERNAL_SERVICE_KEY: ${REVIEW_INTERNAL_KEY:-}
       PORT: "8091"
-      DATABASE_URL: postgres://${POSTGRES_USER:-shopee}:${POSTGRES_PASSWORD}@postgres:5432/review_db?sslmode=disable
+      DATABASE_URL: postgres://review_app:${REVIEW_DB_PASSWORD:?set REVIEW_DB_PASSWORD in .env}@postgres:5432/review_db?sslmode=disable
       ORDER_SERVICE_URL: http://order:8086
       VENDOR_SERVICE_URL: http://vendor:8082
       IDENTITY_SERVICE_URL: http://identity:8081
@@ -400,7 +456,7 @@ services:
       # (local/staging demo data); refused when ENV=production.
       REVIEW_SHOW_UNVERIFIED: ${REVIEW_SHOW_UNVERIFIED:-false}
     ports:
-      - "8091:8091"
+      - "${INTERNAL_BIND_ADDRESS:-127.0.0.1}:8091:8091"
 
   notification:
     <<: *service-defaults
@@ -420,6 +476,9 @@ services:
       dockerfile: services/notification/Dockerfile
     environment:
       <<: *service-env-defaults
+      INTERNAL_SERVICE_NAME: notification
+      INTERNAL_SERVICE_KEY: ${NOTIFICATION_INTERNAL_KEY:-}
+      EVENTBUS_PASSWORD: ${NOTIFICATION_INTERNAL_KEY:-${IDENTITY_SERVICE_KEY}}
       IDENTITY_RESET_DELIVERY_KEY: ${IDENTITY_RESET_DELIVERY_KEY:?set IDENTITY_RESET_DELIVERY_KEY in .env}
       SMTP_HOST: ${SMTP_HOST:-}
       SMTP_PORT: ${SMTP_PORT:-587}
@@ -436,10 +495,10 @@ services:
       # Delivery jobs run at once (Asynq workers on REDIS_URL), 1-100.
       NOTIFICATION_WORKER_CONCURRENCY: ${NOTIFICATION_WORKER_CONCURRENCY:-10}
       PORT: "8090"
-      DATABASE_URL: postgres://${POSTGRES_USER:-shopee}:${POSTGRES_PASSWORD}@postgres:5432/notification_db?sslmode=disable
+      DATABASE_URL: postgres://notification_app:${NOTIFICATION_DB_PASSWORD:?set NOTIFICATION_DB_PASSWORD in .env}@postgres:5432/notification_db?sslmode=disable
       IDENTITY_SERVICE_URL: http://identity:8081
     ports:
-      - "8090:8090"
+      - "${INTERNAL_BIND_ADDRESS:-127.0.0.1}:8090:8090"
 
   gateway:
     restart: unless-stopped
@@ -477,7 +536,7 @@ services:
       - notification
       - review
     ports:
-      - "${GATEWAY_PORT:-8080}:8080"
+      - "${PUBLIC_BIND_ADDRESS:-127.0.0.1}:${GATEWAY_PORT:-8080}:8080"
 
   frontend:
     restart: unless-stopped
@@ -492,7 +551,7 @@ services:
     depends_on:
       - gateway
     ports:
-      - "${FRONTEND_PORT:-3000}:3000"
+      - "${PUBLIC_BIND_ADDRESS:-127.0.0.1}:${FRONTEND_PORT:-3000}:3000"
 
 networks:
   shopee:

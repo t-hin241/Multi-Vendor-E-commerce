@@ -28,7 +28,7 @@ func NewRouter(
 	internalHandler *InternalHandler,
 	webhookHandler *WebhookHandler,
 	opsHandler *OpsHandler,
-	internalKey string,
+	internal *serviceauth.Verifier,
 	checkers ...health.Checker,
 ) *gin.Engine {
 	if env == "production" {
@@ -104,7 +104,7 @@ func NewRouter(
 		adminGroup.POST("/order-events/:id/retry", opsHandler.RetryOrderEvent)
 	}
 
-	internalGroup := r.Group("/internal/shipments", serviceauth.Require(internalKey, serviceauth.Header))
+	internalGroup := r.Group("/internal/shipments", internal.Allow("order"))
 	{
 		internalGroup.POST("", internalHandler.CreateShipment)
 		internalGroup.POST("/quotes", internalHandler.Quote)

@@ -10,13 +10,12 @@ import (
 	"shopee/backend/pkg/adminaudit"
 	"shopee/backend/pkg/authjwt"
 	sessionconfig "shopee/backend/pkg/config"
+	"shopee/backend/pkg/eventbus"
 	"shopee/backend/pkg/health"
 	"shopee/backend/pkg/identityclient"
 	"shopee/backend/pkg/logger"
 	"shopee/backend/pkg/middleware"
-	"shopee/backend/pkg/platform/natsclient"
 	"shopee/backend/pkg/platform/postgres"
-	"shopee/backend/pkg/platform/redisclient"
 	"shopee/backend/pkg/shutdown"
 	"shopee/backend/services/inventory/internal/adapter"
 	"shopee/backend/services/inventory/internal/config"
@@ -48,18 +47,21 @@ func main() {
 		log.Fatal().Err(err).Msg("database connection failed")
 	}
 	defer dbPool.Close()
-
-	redisClient, err := redisclient.NewClient(ctx, cfg.Base.RedisURL)
-	if err != nil {
-		log.Fatal().Err(err).Msg("redis connection failed")
+	// Plan 14: the runtime role reads and writes rows of this database only.
+	if problems, err := postgres.CheckRuntimeRole(ctx, dbPool, cfg.Base.Env == "production"); err != nil {
+		log.Fatal().Err(err).Msg("database role check failed")
+	} else if len(problems) > 0 {
+		log.Warn().Strs("problems", problems).Msg("database_role_too_powerful")
 	}
-	defer redisClient.Close()
 
-	natsConn, err := natsclient.Connect(cfg.Base.NATSURL)
+	busPassword, err := sessionconfig.RequireEventBusPassword()
 	if err != nil {
-		log.Fatal().Err(err).Msg("nats connection failed")
+		log.Fatal().Err(err).Msg("event bus configuration invalid")
 	}
-	defer natsConn.Close()
+	bus, err := eventbus.Start(cfg.Base.NATSURL, eventbus.Credentials{Service: "inventory", Password: busPassword}, cfg.Base.EventPublishing, dbPool, log)
+	if err != nil {
+		log.Fatal().Err(err).Msg("event bus configuration invalid")
+	}
 
 	jwtManager := authjwt.NewManager(cfg.JWTSecret)
 	verifier, err := sessionconfig.LoadSessionVerifier()
@@ -80,20 +82,21 @@ func main() {
 	internalHandler := transport.NewInternalHandler(inventoryUseCase, log)
 	adminHandler := transport.NewAdminHandler(inventoryUseCase, log)
 
-	router := transport.NewRouter(cfg.Base.Env, log, jwtManager, itemHandler, internalHandler, adminHandler, internalServices.Key,
+	router := transport.NewRouter(cfg.Base.Env, log, jwtManager, itemHandler, internalHandler, adminHandler, internalServices.Verifier,
 		health.Checker{Name: "postgres", Ping: func(ctx context.Context) error { return dbPool.Ping(ctx) }},
-		health.Checker{Name: "redis", Ping: func(ctx context.Context) error { return redisClient.Ping(ctx).Err() }},
-		health.Checker{Name: "nats", Ping: func(ctx context.Context) error {
-			if !natsConn.IsConnected() {
-				return fmt.Errorf("nats: not connected")
-			}
-			return nil
-		}},
 	)
 
 	workerCtx, stopWorker := context.WithCancel(ctx)
 	defer stopWorker()
-	maintenance := usecase.Maintenance{InvalidateStock: catalogClient.InvalidateStock, Repository: repository.Maintenance{Pool: dbPool}, Reservations: reservationRepo, Orders: adapter.OrderClient{URL: cfg.OrderServiceURL, Key: internalServices.Key}, Identity: identityclient.Client{URL: internalServices.IdentityURL, Key: internalServices.Key}, Log: log, ExpiryEnabled: cfg.ExpiryEnabled}
+	// PLT-03: outbox events go to the event bus (HTTP in rollback mode).
+	orderClient := adapter.OrderClient{URL: cfg.OrderServiceURL, Key: internalServices.Key}
+	var orderEvents usecase.OrderOperations = orderClient
+	invalidateStock := catalogClient.InvalidateStock
+	if bus.Publish {
+		orderEvents = adapter.BusOrderEvents{OrderClient: orderClient, Bus: bus.Bus}
+		invalidateStock = adapter.BusStockInvalidator(bus.Bus)
+	}
+	maintenance := usecase.Maintenance{InvalidateStock: invalidateStock, Repository: repository.Maintenance{Pool: dbPool}, Reservations: reservationRepo, Orders: orderEvents, Identity: identityclient.Client{URL: internalServices.IdentityURL, Key: internalServices.Key}, Log: log, ExpiryEnabled: cfg.ExpiryEnabled}
 	transport.RegisterOperations(router, jwtManager, maintenance, log)
 	go maintenance.Run(workerCtx)
 	adminaudit.Register(router.Group("/api/inventory/admin", middleware.RequireAuth(jwtManager), middleware.RequireRole("admin")), "/audit-events",
@@ -104,6 +107,7 @@ func main() {
 		Handler:           router,
 		ReadHeaderTimeout: cfg.Base.HTTPReadTimeout,
 		ReadTimeout:       cfg.Base.HTTPReadTimeout,
+		WriteTimeout:      cfg.Base.HTTPWriteTimeout,
 		IdleTimeout:       cfg.Base.HTTPIdleTimeout,
 	}
 
@@ -114,5 +118,8 @@ func main() {
 		}
 	}()
 
-	shutdown.WaitForSignal(log, srv, cfg.Base.ShutdownTimeout, nil)
+	shutdown.WaitForSignal(log, srv, cfg.Base.ShutdownTimeout, func() {
+		stopWorker()
+		bus.Close(cfg.Base.ShutdownTimeout)
+	})
 }

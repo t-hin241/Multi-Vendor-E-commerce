@@ -21,7 +21,7 @@ func TestRoutesNeedServiceKeyOrAdmin(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	jwt := authjwt.NewManager("test-signing-secret-not-a-real-secret-000")
 	key := "test-internal-key-not-a-real-secret-0000"
-	router := transport.NewRouter("test", zerolog.Nop(), jwt, key, transport.NewInternalHandler(nil, zerolog.Nop()), transport.NewAdminHandler(nil, zerolog.Nop()))
+	router := transport.NewRouter("test", zerolog.Nop(), jwt, serviceauth.SharedKey(key), transport.NewInternalHandler(nil, zerolog.Nop()), transport.NewAdminHandler(nil, zerolog.Nop()))
 	send := func(method, path string, headers map[string]string) int {
 		req := httptest.NewRequest(method, path, strings.NewReader(`{}`))
 		for k, v := range headers {

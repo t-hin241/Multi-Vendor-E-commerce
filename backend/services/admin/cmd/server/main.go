@@ -14,9 +14,7 @@ import (
 	"shopee/backend/pkg/health"
 	"shopee/backend/pkg/identityclient"
 	"shopee/backend/pkg/logger"
-	"shopee/backend/pkg/platform/natsclient"
 	"shopee/backend/pkg/platform/postgres"
-	"shopee/backend/pkg/platform/redisclient"
 	"shopee/backend/pkg/shutdown"
 
 	"shopee/backend/services/admin/internal/adapter"
@@ -47,18 +45,12 @@ func main() {
 		log.Fatal().Err(err).Msg("database connection failed")
 	}
 	defer dbPool.Close()
-
-	redisClient, err := redisclient.NewClient(ctx, cfg.Base.RedisURL)
-	if err != nil {
-		log.Fatal().Err(err).Msg("redis connection failed")
+	// Plan 14: the runtime role reads and writes rows of this database only.
+	if problems, err := postgres.CheckRuntimeRole(ctx, dbPool, cfg.Base.Env == "production"); err != nil {
+		log.Fatal().Err(err).Msg("database role check failed")
+	} else if len(problems) > 0 {
+		log.Warn().Strs("problems", problems).Msg("database_role_too_powerful")
 	}
-	defer redisClient.Close()
-
-	natsConn, err := natsclient.Connect(cfg.Base.NATSURL)
-	if err != nil {
-		log.Fatal().Err(err).Msg("nats connection failed")
-	}
-	defer natsConn.Close()
 
 	jwtManager := authjwt.NewManager(cfg.JWTSecret)
 	verifier, err := sessionconfig.LoadSessionVerifier()
@@ -81,13 +73,6 @@ func main() {
 
 	router := transport.NewRouter(cfg.Base.Env, log, jwtManager, svc,
 		health.Checker{Name: "postgres", Ping: func(ctx context.Context) error { return dbPool.Ping(ctx) }},
-		health.Checker{Name: "redis", Ping: func(ctx context.Context) error { return redisClient.Ping(ctx).Err() }},
-		health.Checker{Name: "nats", Ping: func(ctx context.Context) error {
-			if !natsConn.IsConnected() {
-				return fmt.Errorf("nats: not connected")
-			}
-			return nil
-		}},
 	)
 
 	srv := &http.Server{

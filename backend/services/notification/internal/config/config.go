@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"shopee/backend/pkg/config"
+	"shopee/backend/pkg/serviceauth"
 )
 
 type Config struct {
@@ -19,7 +20,9 @@ type Config struct {
 	IdentityServiceURL string
 	// IdentityServiceKey authenticates internal calls both ways: producers
 	// queueing a notification, and Notification reading recipients.
-	IdentityServiceKey                                                         string
+	IdentityServiceKey string
+	// InternalVerifier checks which service calls the internal routes.
+	InternalVerifier                                                           *serviceauth.Verifier
 	ResetDeliveryKey, SMTPHost, SMTPPort, SMTPUsername, SMTPPassword, SMTPFrom string
 	SMTPAllowPlaintext                                                         bool
 	// EmailProvider is "smtp" or "mock" (local only).
@@ -97,7 +100,7 @@ func Load() (Config, error) {
 	}
 
 	return Config{
-		Base: base, JWTSecret: jwtSecret, IdentityServiceURL: identityServiceURL, IdentityServiceKey: internal.Key,
+		Base: base, JWTSecret: jwtSecret, IdentityServiceURL: identityServiceURL, IdentityServiceKey: internal.Key, InternalVerifier: internal.Verifier,
 		ResetDeliveryKey: key, SMTPHost: smtpHost, SMTPPort: port, SMTPUsername: os.Getenv("SMTP_USERNAME"),
 		SMTPPassword: os.Getenv("SMTP_PASSWORD"), SMTPFrom: smtpFrom, SMTPAllowPlaintext: plain,
 		EmailProvider: provider, AttemptRetention: time.Duration(days) * 24 * time.Hour,

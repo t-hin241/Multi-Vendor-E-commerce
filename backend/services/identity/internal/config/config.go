@@ -14,9 +14,11 @@ import (
 type Config struct {
 	Base                                                               baseconfig.Base
 	JWTSecret, ServiceKey, ResetDeliveryKey, NotificationURL, ResetURL string
-	ResetEncryptionKey                                                 []byte
-	Origins                                                            []string
-	TrustedProxies                                                     []string
+	// Internal verifies calling services (PLT-01).
+	Internal           baseconfig.InternalServices
+	ResetEncryptionKey []byte
+	Origins            []string
+	TrustedProxies     []string
 }
 
 func Load() (Config, error) {
@@ -35,11 +37,14 @@ func Load() (Config, error) {
 	}
 	c.ServiceKey = os.Getenv("IDENTITY_SERVICE_KEY")
 	c.ResetDeliveryKey = os.Getenv("IDENTITY_RESET_DELIVERY_KEY")
-	if len(c.ServiceKey) < 32 || len(c.ResetDeliveryKey) < 32 {
+	if (c.ServiceKey != "" && len(c.ServiceKey) < 32) || len(c.ResetDeliveryKey) < 32 {
 		return c, fmt.Errorf("identity service and delivery keys must have at least 32 characters")
 	}
-	if c.ServiceKey == c.ResetDeliveryKey {
-		return c, fmt.Errorf("session and reset delivery keys must be distinct")
+	if c.ServiceKey == c.ResetDeliveryKey || os.Getenv("INTERNAL_SERVICE_KEY") == c.ResetDeliveryKey {
+		return c, fmt.Errorf("service and reset delivery keys must be distinct")
+	}
+	if c.Internal, err = baseconfig.LoadInternalServices(); err != nil {
+		return c, err
 	}
 	secure := c.Base.Env == "production" || c.Base.Env == "staging"
 	if secure && len(c.JWTSecret) < 32 {

@@ -45,7 +45,7 @@ Mỗi ô lấy số từ service sở hữu dữ liệu, kèm thời điểm. Se
 | Fulfillment | Đã thanh toán chưa giao, chậm giao 3 ngày, tracking không cập nhật 7 ngày, chặn giao chưa có kết quả | Order, Shipment |
 | Money | Capture chưa áp vào đơn, capture Order từ chối chưa hoàn, link thanh toán kẹt, hoàn tiền chưa xác nhận, hoàn tiền trả hàng lỗi | Payment, Order |
 | Stock | Hold hết hạn chưa nhả, hold lệch với Order | Inventory |
-| Background jobs | Side effect Order dừng, event trạng thái shop, job Catalog, event Inventory, event Shipment bị Order từ chối, ảnh review lỗi chưa dọn | Từng service |
+| Background jobs | Side effect Order dừng, event trạng thái shop, job Catalog, event Inventory, event Shipment bị Order từ chối, ảnh review lỗi chưa dọn, event bị park ở bên nhận (`/admin/events`, PLT-03) | Từng service |
 | Notifications | Email dừng sau retry, chờ quá 15 phút, bị từ chối 24 giờ, hàng đợi Redis không truy cập được, thông báo shop bị Notification từ chối | Notification, Vendor |
 
 ### Phục hồi một capture chưa áp vào đơn (không chạy SQL)

@@ -2796,3 +2796,42 @@ export function retryNotification(
     json: { reason },
   });
 }
+
+// ---------- Event bus (PLT-03) ----------
+
+// Services that consume domain events, with their admin API prefix.
+export const EVENT_CONSUMER_SERVICES = [
+  { name: "order", prefix: "/api/orders/admin" },
+  { name: "catalog", prefix: "/api/catalog/admin" },
+  { name: "payment", prefix: "/api/payments/admin" },
+  { name: "shipment", prefix: "/api/shipments/admin" },
+  { name: "notification", prefix: "/api/notifications/admin" },
+] as const;
+
+export type ParkedEvent = {
+  consumer: string;
+  event_id: string;
+  event_type: string;
+  aggregate_id: string;
+  attempts: number;
+  last_error?: string;
+  parked_at: string;
+};
+
+export function listParkedEvents(token: string, prefix: string): Promise<ParkedEvent[]> {
+  return request<ParkedEvent[]>(`${prefix}/events/parked`, { token, query: { limit: 100 } });
+}
+
+export function resolveParkedEvent(
+  token: string,
+  prefix: string,
+  consumer: string,
+  eventId: string,
+  action: "replay" | "discard",
+  reason: string,
+): Promise<{ consumer: string; event_id: string; replayed: boolean }> {
+  return request(
+    `${prefix}/events/${encodeURIComponent(consumer)}/${encodeURIComponent(eventId)}/${action}`,
+    { method: "POST", token, json: { reason } },
+  );
+}

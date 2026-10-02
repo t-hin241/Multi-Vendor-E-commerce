@@ -18,6 +18,13 @@ var opsSources = []call{
 	{source: "shipment", path: "/api/shipments/admin/operations"},
 	{source: "notification", path: "/api/notifications/admin/operations"},
 	{source: "review", path: "/api/reviews/admin/operations"},
+	// PLT-03: each consumer's parked events (not applied, waiting for an
+	// operator to replay or discard).
+	{source: "catalog-events", upstream: "catalog", path: "/api/catalog/admin/events/stats"},
+	{source: "order-events", upstream: "order", path: "/api/orders/admin/events/stats"},
+	{source: "payment-events", upstream: "payment", path: "/api/payments/admin/events/stats"},
+	{source: "shipment-events", upstream: "shipment", path: "/api/shipments/admin/events/stats"},
+	{source: "notification-events", upstream: "notification", path: "/api/notifications/admin/events/stats"},
 }
 
 type counterRef struct{ source, key string }
@@ -85,6 +92,9 @@ var tiles = []tileDef{
 		[]counterRef{{"review", "open_reports"}}, false},
 	{"review_uploads_stuck", "Background jobs", "Review photos left behind by failed uploads", "Check object storage (review runbook).", "/admin/reviews",
 		[]counterRef{{"review", "image_cleanup_parked"}}, false},
+	{"events_parked", "Background jobs", "Events a service could not apply", "Replay or discard with a reason (platform runbook).", "/admin/events",
+		[]counterRef{{"catalog-events", "events_parked"}, {"order-events", "events_parked"}, {"payment-events", "events_parked"},
+			{"shipment-events", "events_parked"}, {"notification-events", "events_parked"}}, false},
 	{"notices_not_handed_over", "Notifications", "Shop decision notices Notification refused", "See the vendor notice outbox (runbook).", "/admin/notifications",
 		[]counterRef{{"vendor", "parked_notices"}}, false},
 }

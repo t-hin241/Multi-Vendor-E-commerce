@@ -3,6 +3,7 @@ package productsales
 import (
 	"context"
 	"shopee/backend/pkg/apperror"
+	"shopee/backend/pkg/eventbus"
 	"shopee/backend/pkg/httpresponse"
 	"sort"
 	"time"
@@ -10,6 +11,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rs/zerolog"
 )
@@ -22,12 +24,33 @@ type Status struct {
 type Store struct{ Pool *pgxpool.Pool }
 
 func (s Store) Apply(ctx context.Context, v Status) error {
+	return applyStatus(ctx, s.Pool, v)
+}
+
+// execer is a pool or a transaction.
+type execer interface {
+	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
+}
+
+// EventHandler applies catalog.product_status_changed events in the inbox
+// transaction (an older version than the one held is ignored).
+func (s Store) EventHandler() eventbus.Handler {
+	return func(ctx context.Context, tx pgx.Tx, env eventbus.Envelope) error {
+		var v Status
+		if err := env.Decode(&v); err != nil {
+			return err
+		}
+		return applyStatus(ctx, tx, v)
+	}
+}
+
+func applyStatus(ctx context.Context, q execer, v Status) error {
 	if _, err := uuid.Parse(v.ProductID); err != nil || v.Version < 1 {
 		return apperror.Validation("Invalid product status event")
 	}
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	_, err := s.Pool.Exec(ctx, `INSERT INTO product_sale_status(product_id,version,is_visible) VALUES($1,$2,$3)
+	_, err := q.Exec(ctx, `INSERT INTO product_sale_status(product_id,version,is_visible) VALUES($1,$2,$3)
  ON CONFLICT(product_id) DO UPDATE SET version=excluded.version,is_visible=excluded.is_visible,confirmed_at=now()
  WHERE product_sale_status.version<excluded.version OR (product_sale_status.version=excluded.version AND product_sale_status.is_visible=excluded.is_visible)`, v.ProductID, v.Version, v.Visible)
 	return err

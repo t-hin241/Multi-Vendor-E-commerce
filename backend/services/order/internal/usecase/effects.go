@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"shopee/backend/pkg/apperror"
+	"shopee/backend/pkg/eventbus"
+	"shopee/backend/pkg/events"
 	"shopee/backend/services/order/internal/adapter"
 	"shopee/backend/services/order/internal/domain"
 	"shopee/backend/services/order/internal/repository"
@@ -31,6 +33,11 @@ func (uc *OrderUseCase) ProcessEffects(ctx context.Context, orderID string, limi
 // runEffectsSoon tries an order's fresh effects once, without failing or
 // delaying the caller beyond a short timeout.
 func (uc *OrderUseCase) runEffectsSoon(ctx context.Context, orderID string) {
+	if repository.InTransaction(ctx) {
+		// Called while applying an event: the effects are not committed
+		// yet; the worker runs them right after.
+		return
+	}
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), inlineEffectTimeout)
 	defer cancel()
 	if _, err := uc.ProcessEffects(ctx, orderID, 20); err != nil {
@@ -78,6 +85,11 @@ func (uc *OrderUseCase) executeEffect(ctx context.Context, e *domain.Effect) err
 	case domain.EffectCreateShipment:
 		return uc.createShipment(ctx, e)
 	case domain.EffectCancelShipment:
+		if uc.Events != nil {
+			return uc.publish(ctx, e, func() (eventbus.Envelope, error) {
+				return events.FulfillmentCancelledEvent(e.ID, events.FulfillmentCancellation{VendorOrderID: e.Target})
+			})
+		}
 		return uc.Shipments.CancelForVendorOrder(ctx, e.Target)
 	case domain.EffectReleaseInventory:
 		return uc.Inventory.Release(ctx, e.OrderID)
@@ -86,13 +98,30 @@ func (uc *OrderUseCase) executeEffect(ctx context.Context, e *domain.Effect) err
 		if err := json.Unmarshal(e.Payload, &p); err != nil || p.UserID == "" {
 			return apperror.Validation("invalid notify payload")
 		}
+		if uc.Events != nil {
+			return uc.publish(ctx, e, func() (eventbus.Envelope, error) {
+				return events.OrderNotification(e.ID, e.OrderID, events.NotificationRequest{UserID: p.UserID, Type: p.Type, ReferenceID: e.OrderID})
+			})
+		}
 		return uc.Notifications.Notify(ctx, e.ID, p.UserID, p.Type, e.OrderID)
 	case domain.EffectRequestRefund:
 		return uc.submitRefund(ctx, e.Target)
 	case domain.EffectRestockReturn:
 		return uc.restockReturn(ctx, e.Target)
 	case domain.EffectSettleVendorOrder:
-		return uc.settleVendorOrder(ctx, e.Target)
+		return uc.settleVendorOrder(ctx, e)
+	case domain.EffectReportRejectedOutcome:
+		var p domain.RejectedOutcomePayload
+		if err := json.Unmarshal(e.Payload, &p); err != nil {
+			return apperror.Validation("invalid rejected outcome payload")
+		}
+		if uc.Events == nil {
+			return apperror.Internal(errors.New("event bus publishing is off; Payment cannot be told"))
+		}
+		return uc.publish(ctx, e, func() (eventbus.Envelope, error) {
+			return events.OutcomeRejectedEvent(e.ID, events.OutcomeRejection{Kind: p.Kind, PaymentID: p.PaymentID,
+				PaymentRefundID: p.PaymentRefundID, OrderID: e.OrderID, Reason: p.Reason})
+		})
 	}
 	return apperror.Validation("unknown effect kind " + string(e.Kind))
 }
@@ -101,8 +130,8 @@ func (uc *OrderUseCase) executeEffect(ctx context.Context, e *domain.Effect) err
 // snapshot. Its sales become payable when the return window ends. A vendor
 // order without a commission snapshot cannot be settled automatically: the
 // effect parks for an operator (a manual ledger adjustment in Payment).
-func (uc *OrderUseCase) settleVendorOrder(ctx context.Context, vendorOrderID string) error {
-	vo, err := uc.VendorOrders.FindByID(ctx, vendorOrderID)
+func (uc *OrderUseCase) settleVendorOrder(ctx context.Context, e *domain.Effect) error {
+	vo, err := uc.VendorOrders.FindByID(ctx, e.Target)
 	if err != nil {
 		return appError(err)
 	}
@@ -113,6 +142,16 @@ func (uc *OrderUseCase) settleVendorOrder(ctx context.Context, vendorOrderID str
 		return &apperror.Error{Code: apperror.CodeConflict, Status: 409, Message: "vendor order has no commission snapshot; settle it manually"}
 	}
 	completed := vo.CompletedAt.UTC()
+	if uc.Events != nil {
+		return uc.publish(ctx, e, func() (eventbus.Envelope, error) {
+			return events.VendorOrderSettleableEvent(e.ID, events.Settlement{
+				VendorOrderID: vo.ID, OrderID: vo.OrderID, VendorID: vo.VendorID, Currency: vo.Currency,
+				SubtotalAmount: vo.SubtotalAmount, ShippingAmount: vo.ShippingFeeAmount, CommissionAmount: vo.Commission.Amount,
+				CommissionRateBps: vo.Commission.RateBps, CommissionRuleVersion: vo.Commission.RuleVersion,
+				CompletedAt: completed, EligibleAt: completed.Add(time.Duration(uc.ReturnPolicy.WindowDays) * 24 * time.Hour),
+			})
+		})
+	}
 	return uc.Payment.SettleVendorOrder(ctx, adapter.SettlementReport{
 		VendorOrderID: vo.ID, OrderID: vo.OrderID, VendorID: vo.VendorID, Currency: vo.Currency,
 		SubtotalAmount: vo.SubtotalAmount, ShippingAmount: vo.ShippingFeeAmount, CommissionAmount: vo.Commission.Amount,
@@ -160,8 +199,35 @@ func (uc *OrderUseCase) createShipment(ctx context.Context, e *domain.Effect) er
 	} else if in.PackageWeightGrams, err = uc.legacyPackageWeight(ctx, vo.ID); err != nil {
 		return err
 	}
+	if uc.Events != nil {
+		return uc.publish(ctx, e, func() (eventbus.Envelope, error) {
+			f := events.Fulfillment{VendorOrderID: in.VendorOrderID, VendorID: in.VendorID, BuyerID: in.BuyerID,
+				PackageWeightGrams: in.PackageWeightGrams, RecipientName: in.RecipientName, Phone: in.Phone, Province: in.Province,
+				District: in.District, Ward: in.Ward, StreetAddress: in.StreetAddress}
+			if q := in.Quote; q != nil {
+				f.Quote = &events.QuotedFee{FeeAmount: q.FeeAmount, CarrierID: q.CarrierID, ZoneID: q.ZoneID, FeeRuleID: q.FeeRuleID}
+			}
+			return events.FulfillmentReadyEvent(e.ID, order.ID, f)
+		})
+	}
 	_, err = uc.Shipments.CreateShipment(ctx, in)
 	return err
+}
+
+// publish sends an effect as an event (the effect id is the event id, so
+// a retry is the same event); done once the broker stored it.
+func (uc *OrderUseCase) publish(ctx context.Context, e *domain.Effect, build func() (eventbus.Envelope, error)) error {
+	env, err := build()
+	if err != nil {
+		return apperror.Validation(err.Error())
+	}
+	if err := uc.Events.Publish(ctx, env.WithCorrelation(e.ID)); err != nil {
+		if eventbus.IsPermanent(err) {
+			return apperror.Validation(err.Error())
+		}
+		return apperror.Internal(err)
+	}
+	return nil
 }
 
 // legacyPackageWeight recomputes a pre-upgrade vendor order's weight from

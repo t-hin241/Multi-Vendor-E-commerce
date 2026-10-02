@@ -1,0 +1,59 @@
+-- One service database (included by db-roles.psql with :db and :app set).
+-- Runs as the superuser.
+
+ALTER DATABASE :"db" OWNER TO shopee_migrator;
+REVOKE CONNECT, TEMPORARY ON DATABASE :"db" FROM PUBLIC;
+GRANT CONNECT ON DATABASE :"db" TO :"app";
+
+\connect :db
+SET client_min_messages = warning;
+
+-- Everything in "public" belongs to the migrator (objects created by an
+-- earlier superuser migration included). Extension members (pgcrypto) and
+-- sequences owned by a column move with their owner, so they are skipped.
+SELECT format('ALTER %s %s OWNER TO shopee_migrator',
+         CASE c.relkind WHEN 'v' THEN 'VIEW' WHEN 'm' THEN 'MATERIALIZED VIEW' WHEN 'S' THEN 'SEQUENCE' ELSE 'TABLE' END,
+         c.oid::regclass)
+  FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+ WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p', 'v', 'm', 'S', 'f')
+   AND c.relowner <> 'shopee_migrator'::regrole
+   AND NOT EXISTS (SELECT 1 FROM pg_depend d
+                    WHERE d.classid = 'pg_class'::regclass AND d.objid = c.oid AND d.deptype IN ('e', 'a', 'i'))
+\gexec
+
+SELECT format('ALTER ROUTINE %s OWNER TO shopee_migrator', p.oid::regprocedure)
+  FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+ WHERE n.nspname = 'public' AND p.proowner <> 'shopee_migrator'::regrole
+   AND NOT EXISTS (SELECT 1 FROM pg_depend d
+                    WHERE d.classid = 'pg_proc'::regclass AND d.objid = p.oid AND d.deptype = 'e')
+\gexec
+
+SELECT format('ALTER %s %s OWNER TO shopee_migrator', CASE t.typtype WHEN 'd' THEN 'DOMAIN' ELSE 'TYPE' END, t.oid::regtype)
+  FROM pg_type t JOIN pg_namespace n ON n.oid = t.typnamespace
+ WHERE n.nspname = 'public' AND t.typowner <> 'shopee_migrator'::regrole
+   AND (t.typtype IN ('e', 'd', 'r') OR (t.typtype = 'c' AND (SELECT relkind FROM pg_class WHERE oid = t.typrelid) = 'c'))
+   AND NOT EXISTS (SELECT 1 FROM pg_depend d
+                    WHERE d.classid = 'pg_type'::regclass AND d.objid = t.oid AND d.deptype = 'e')
+\gexec
+
+SELECT 'ALTER SCHEMA public OWNER TO pg_database_owner'
+ WHERE (SELECT nspowner FROM pg_namespace WHERE nspname = 'public') NOT IN ('pg_database_owner'::regrole, 'shopee_migrator'::regrole)
+\gexec
+
+-- The migration ledger exists before the first migration (same shape as
+-- golang-migrate creates it), owned by the migrator and out of reach of
+-- the runtime role.
+CREATE TABLE IF NOT EXISTS public.schema_migrations (version bigint NOT NULL PRIMARY KEY, dirty boolean NOT NULL);
+ALTER TABLE public.schema_migrations OWNER TO shopee_migrator;
+
+-- Runtime role: rows only.
+REVOKE CREATE ON SCHEMA public FROM PUBLIC;
+GRANT USAGE ON SCHEMA public TO :"app";
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO :"app";
+GRANT USAGE, SELECT, UPDATE ON ALL SEQUENCES IN SCHEMA public TO :"app";
+REVOKE ALL ON TABLE public.schema_migrations FROM :"app";
+ALTER DEFAULT PRIVILEGES FOR ROLE shopee_migrator IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO :"app";
+ALTER DEFAULT PRIVILEGES FOR ROLE shopee_migrator IN SCHEMA public GRANT USAGE, SELECT, UPDATE ON SEQUENCES TO :"app";
+
+\connect postgres
+SET client_min_messages = warning;

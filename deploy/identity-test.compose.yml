@@ -16,3 +16,24 @@ services:
   redis:
     image: redis:7-alpine
     ports: ["127.0.0.1:56391:6379"]
+  nats:
+    image: nats:2-alpine
+    command: ["-js", "-sd", "/tmp/js"]
+    ports: ["127.0.0.1:54222:4222"]
+  # The production broker configuration (per-service users and permissions)
+  # with an obviously fake password for every user, quoted as in
+  # docker-compose.yml ("5e62..." would otherwise parse as a number).
+  nats-auth:
+    image: nats:2-alpine
+    command: ["-c", "/etc/nats/nats.conf"]
+    environment:
+      VENDOR_EVENTBUS_PASSWORD: '"5e62-test-eventbus-password-not-a-secret"'
+      CATALOG_EVENTBUS_PASSWORD: '"5e62-test-eventbus-password-not-a-secret"'
+      INVENTORY_EVENTBUS_PASSWORD: '"5e62-test-eventbus-password-not-a-secret"'
+      ORDER_EVENTBUS_PASSWORD: '"5e62-test-eventbus-password-not-a-secret"'
+      PAYMENT_EVENTBUS_PASSWORD: '"5e62-test-eventbus-password-not-a-secret"'
+      SHIPMENT_EVENTBUS_PASSWORD: '"5e62-test-eventbus-password-not-a-secret"'
+      NOTIFICATION_EVENTBUS_PASSWORD: '"5e62-test-eventbus-password-not-a-secret"'
+    volumes: ["./nats/nats.conf:/etc/nats/nats.conf:ro"]
+    tmpfs: ["/data"]
+    ports: ["127.0.0.1:54223:4222"]

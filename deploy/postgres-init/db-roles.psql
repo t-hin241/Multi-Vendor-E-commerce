@@ -1,0 +1,96 @@
+-- Database roles (data tooling plan 14, "Migration và quyền dữ liệu").
+-- Run as the cluster superuser, connected to the "postgres" database, with
+-- these psql variables set (passwords: hexadecimal only, they go into URLs):
+--
+--   migrator_password, identity_password, vendor_password, catalog_password,
+--   inventory_password, cart_password, order_password, payment_password,
+--   shipment_password, admin_password, notification_password, review_password
+--
+-- Idempotent: rerun it after a restore, a password change, or a migration
+-- that someone ran as the superuser by mistake (it gives every object back
+-- to the migrator and re-grants the runtime roles).
+--
+--   shopee_migrator  owns every service database and its objects; runs
+--                    migrations (DDL). Not a superuser.
+--   <service>_app    the service at run time: CONNECT to its own database
+--                    only, read/write rows of its own tables, no DDL, no
+--                    access to the migration ledger. Not a superuser.
+--
+-- Used by deploy/postgres-init/002-db-roles.sh (new volume) and
+-- deploy/db-roles.sh (existing cluster).
+\set ON_ERROR_STOP on
+\set QUIET on
+SET client_min_messages = warning;
+
+-- 1. Roles (created when missing, attributes and passwords always reset).
+SELECT format('CREATE ROLE %I', r) FROM unnest(ARRAY[
+  'shopee_migrator', 'identity_app', 'vendor_app', 'catalog_app', 'inventory_app', 'cart_app',
+  'order_app', 'payment_app', 'shipment_app', 'admin_app', 'notification_app', 'review_app'
+]) AS r WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = r) \gexec
+
+ALTER ROLE shopee_migrator WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS PASSWORD :'migrator_password';
+ALTER ROLE identity_app WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS NOINHERIT PASSWORD :'identity_password';
+ALTER ROLE vendor_app WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS NOINHERIT PASSWORD :'vendor_password';
+ALTER ROLE catalog_app WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS NOINHERIT PASSWORD :'catalog_password';
+ALTER ROLE inventory_app WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS NOINHERIT PASSWORD :'inventory_password';
+ALTER ROLE cart_app WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS NOINHERIT PASSWORD :'cart_password';
+ALTER ROLE order_app WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS NOINHERIT PASSWORD :'order_password';
+ALTER ROLE payment_app WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS NOINHERIT PASSWORD :'payment_password';
+ALTER ROLE shipment_app WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS NOINHERIT PASSWORD :'shipment_password';
+ALTER ROLE admin_app WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS NOINHERIT PASSWORD :'admin_password';
+ALTER ROLE notification_app WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS NOINHERIT PASSWORD :'notification_password';
+ALTER ROLE review_app WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS NOINHERIT PASSWORD :'review_password';
+
+-- 2. Databases: created when missing, owned by the migrator; nobody else
+-- may connect (PUBLIC loses its default CONNECT/TEMPORARY), including to
+-- the maintenance databases.
+SELECT format('CREATE DATABASE %I OWNER shopee_migrator', d) FROM unnest(ARRAY[
+  'identity_db', 'vendor_db', 'catalog_db', 'inventory_db', 'cart_db', 'order_db',
+  'payment_db', 'shipment_db', 'admin_db', 'notification_db', 'review_db'
+]) AS d WHERE NOT EXISTS (SELECT 1 FROM pg_database WHERE datname = d) \gexec
+
+-- Every database that accepts connections, including the maintenance ones
+-- and the one the image creates for POSTGRES_USER; the service databases
+-- grant CONNECT back to their own runtime role below.
+SELECT format('REVOKE CONNECT, TEMPORARY ON DATABASE %I FROM PUBLIC', datname)
+  FROM pg_database WHERE datallowconn
+\gexec
+
+-- 3. Per database: ownership to the migrator, then the runtime grants.
+-- :db and :app are set before each include of the block below.
+\set db identity_db
+\set app identity_app
+\ir db-roles-database.psql
+\set db vendor_db
+\set app vendor_app
+\ir db-roles-database.psql
+\set db catalog_db
+\set app catalog_app
+\ir db-roles-database.psql
+\set db inventory_db
+\set app inventory_app
+\ir db-roles-database.psql
+\set db cart_db
+\set app cart_app
+\ir db-roles-database.psql
+\set db order_db
+\set app order_app
+\ir db-roles-database.psql
+\set db payment_db
+\set app payment_app
+\ir db-roles-database.psql
+\set db shipment_db
+\set app shipment_app
+\ir db-roles-database.psql
+\set db admin_db
+\set app admin_app
+\ir db-roles-database.psql
+\set db notification_db
+\set app notification_app
+\ir db-roles-database.psql
+\set db review_db
+\set app review_app
+\ir db-roles-database.psql
+
+\connect postgres
+\echo 'database roles: ok'

@@ -21,7 +21,7 @@ func NewRouter(
 	addressHandler *VendorAddressHandler,
 	adminHandler *AdminHandler,
 	internalHandler *InternalHandler,
-	internalKey string,
+	internal *serviceauth.Verifier,
 	checkers ...health.Checker,
 ) *gin.Engine {
 	if env == "production" {
@@ -77,11 +77,11 @@ func NewRouter(
 	// router already relies on working correctly.
 	r.GET("/api/vendor/public/:vendorId", vendorHandler.GetPublic)
 
-	internalGroup := r.Group("/internal/vendors", serviceauth.Require(internalKey, serviceauth.Header))
+	internalGroup := r.Group("/internal/vendors")
 	{
-		internalGroup.GET("", internalHandler.ListByIDs)
-		internalGroup.GET("/sale-status", internalHandler.SaleStatus)
-		internalGroup.GET("/:vendorId/owned-by/:userID", internalHandler.GetOwnedStatus)
+		internalGroup.GET("", internal.Allow("catalog"), internalHandler.ListByIDs)
+		internalGroup.GET("/sale-status", internal.Allow("catalog", "order"), internalHandler.SaleStatus)
+		internalGroup.GET("/:vendorId/owned-by/:userID", internal.Allow("catalog", "inventory", "order", "review", "shipment", "payment"), internalHandler.GetOwnedStatus)
 	}
 
 	return r

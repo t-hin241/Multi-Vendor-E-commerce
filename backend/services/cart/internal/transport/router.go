@@ -22,7 +22,7 @@ const (
 	maxBodyBytes   = 64 << 10
 )
 
-func NewRouter(env string, log zerolog.Logger, jwtManager *authjwt.Manager, cartHandler *CartHandler, internalHandler *InternalHandler, internalKey string, checkers ...health.Checker) *gin.Engine {
+func NewRouter(env string, log zerolog.Logger, jwtManager *authjwt.Manager, cartHandler *CartHandler, internalHandler *InternalHandler, internal *serviceauth.Verifier, checkers ...health.Checker) *gin.Engine {
 	if env == "production" {
 		gin.SetMode(gin.ReleaseMode)
 	}
@@ -45,7 +45,7 @@ func NewRouter(env string, log zerolog.Logger, jwtManager *authjwt.Manager, cart
 		cartGroup.POST("/price-confirmations", cartHandler.ConfirmPrices)
 	}
 
-	internalGroup := r.Group("/internal/carts", serviceauth.Require(internalKey, serviceauth.Header))
+	internalGroup := r.Group("/internal/carts", internal.Allow("order"))
 	{
 		internalGroup.GET("/:buyerId/lines", internalHandler.Lines)
 		internalGroup.POST("/:buyerId/checkout-snapshots", internalHandler.CreateSnapshot)

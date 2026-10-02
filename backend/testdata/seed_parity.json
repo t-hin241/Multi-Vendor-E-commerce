@@ -1,0 +1,64 @@
+{
+  "_comment": "Shared vectors (data tooling plan 14, DEV-02): the Go domain rules and their Python ports in fetching_data/ (git-ignored seed tooling) must agree. Go: catalog/internal/domain/parity_test.go. Python: fetching_data/tests/test_backend_parity.py. Add a case here when either side changes.",
+  "slug": [
+    {"in": "Áo Thun Nam", "out": "o-thun-nam"},
+    {"in": "  Hello,   World!  ", "out": "hello-world"},
+    {"in": "iPhone 15 Pro Max 256GB", "out": "iphone-15-pro-max-256gb"},
+    {"in": "---a--b---", "out": "a-b"},
+    {"in": "Đồng hồ Nam", "out": "ng-h-nam"},
+    {"in": "İstanbul", "out": "istanbul"},
+    {"in": "KELVIN K", "out": "kelvin-k"},
+    {"in": "ﬁle", "out": "le"},
+    {"in": "Σίσυφος", "out": ""},
+    {"in": "ẞig", "out": "ig"},
+    {"in": "Tab\tand\nnewline", "out": "tab-and-newline"},
+    {"in": "", "out": ""}
+  ],
+  "variant_key": [
+    {"in": [["b-attr", "opt-2"], ["a-attr", "opt-1"]], "out": "a-attr:opt-1|b-attr:opt-2"},
+    {"in": [["a-attr", "opt-1"], ["b-attr", "opt-2"]], "out": "a-attr:opt-1|b-attr:opt-2"},
+    {"in": [["x", "1"]], "out": "x:1"},
+    {"in": [["Màu", "Đỏ"], ["Cỡ", "L"]], "out": "Cỡ:L|Màu:Đỏ"},
+    {"in": [], "out": ""}
+  ],
+  "sku": [
+    {"in": "SKU-001", "valid": true},
+    {"in": "   ", "valid": false},
+    {"in": "", "valid": false},
+    {"in": "a", "valid": true},
+    {"in": "x", "repeat": 100, "valid": true},
+    {"in": "x", "repeat": 101, "valid": false},
+    {"in": "đ", "repeat": 50, "valid": true},
+    {"in": "đ", "repeat": 51, "valid": false}
+  ],
+  "product_input": [
+    {"name": "Áo thun", "description": "", "price": 1, "valid": true},
+    {"name": "Áo thun", "description": "", "price": 0, "valid": false},
+    {"name": "Áo thun", "description": "", "price": -5, "valid": false},
+    {"name": "  ", "description": "", "price": 1000, "valid": false},
+    {"name": "n", "name_repeat": 300, "description": "", "price": 1000, "valid": true},
+    {"name": "n", "name_repeat": 301, "description": "", "price": 1000, "valid": false},
+    {"name": "ă", "name_repeat": 150, "description": "", "price": 1000, "valid": true},
+    {"name": "ă", "name_repeat": 151, "description": "", "price": 1000, "valid": false},
+    {"name": "Áo", "description": "d", "description_repeat": 50000, "price": 1000, "valid": true},
+    {"name": "Áo", "description": "d", "description_repeat": 50001, "price": 1000, "valid": false}
+  ],
+  "attribute_option_value": [
+    {"in": "Đỏ", "valid": true},
+    {"in": "  ", "valid": false},
+    {"in": "", "valid": false}
+  ],
+  "money": [
+    {"in": 4800000, "out": 4800000},
+    {"in": 99000.0, "out": 99000},
+    {"in": "125000", "out": 125000},
+    {"in": 99000.5, "out": null},
+    {"in": "12.5", "out": null},
+    {"in": "1e6", "out": null},
+    {"in": true, "out": null},
+    {"in": 0, "out": 0},
+    {"in": -1, "out": -1},
+    {"in": 9223372036854775807, "out": 9223372036854775807},
+    {"in": 9223372036854775808, "out": null}
+  ]
+}

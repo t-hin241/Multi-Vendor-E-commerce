@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"shopee/backend/pkg/apperror"
+	"shopee/backend/pkg/serviceauth"
 )
 
 // IdentityGateway resolves a review author's name, which Review masks
@@ -35,7 +36,7 @@ func (c *HTTPIdentityClient) DisplayName(ctx context.Context, userID string) (st
 	if err != nil {
 		return "", apperror.Internal(err)
 	}
-	req.Header.Set("X-Identity-Service-Key", c.serviceKey)
+	serviceauth.SetRequestHeaders(req, c.serviceKey)
 	resp, err := c.client.Do(req)
 	if err != nil {
 		return "", apperror.Internal(err)

@@ -65,3 +65,48 @@ func TestLoad_BuildsFullUpstreamTable(t *testing.T) {
 		t.Errorf("expected /api/reviews to route to review service, got %q", cfg.Upstreams["/api/reviews"])
 	}
 }
+
+func TestProductionOriginsMustBePublicHTTPS(t *testing.T) {
+	setAllUpstreams(t)
+	t.Setenv("ENV", "production")
+	t.Setenv("TRUSTED_PROXY_CIDRS", "192.168.250.0/28")
+	for _, bad := range []string{"*", "http://shop.example.com", "https://localhost:3000", "https://*.example.com", "https://shop.example.com/path"} {
+		t.Setenv("ALLOWED_ORIGINS", bad)
+		if _, err := config.Load(); err == nil {
+			t.Errorf("production must refuse origin %q", bad)
+		}
+	}
+	t.Setenv("ALLOWED_ORIGINS", "https://shop.example.com,https://admin.example.com")
+	if _, err := config.Load(); err != nil {
+		t.Fatalf("public https origins are fine: %v", err)
+	}
+}
+
+// Behind the TLS proxy the client IP comes from X-Forwarded-For; production
+// must name the proxy's network, and no setting may trust everyone.
+func TestTrustedProxies(t *testing.T) {
+	setAllUpstreams(t)
+	t.Setenv("ENV", "production")
+	t.Setenv("ALLOWED_ORIGINS", "https://shop.example.com")
+	for _, bad := range []string{"", "0.0.0.0/0", "::/0", "10.0.0.0/8,0.0.0.0/0", "proxy", "10.0.0.0/33"} {
+		t.Setenv("TRUSTED_PROXY_CIDRS", bad)
+		if _, err := config.Load(); err == nil {
+			t.Errorf("production must refuse TRUSTED_PROXY_CIDRS=%q", bad)
+		}
+	}
+	t.Setenv("TRUSTED_PROXY_CIDRS", "192.168.250.0/28, 10.1.2.3")
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatalf("a proxy network is fine: %v", err)
+	}
+	if len(cfg.TrustedProxies) != 2 {
+		t.Fatalf("trusted proxies = %v", cfg.TrustedProxies)
+	}
+
+	t.Setenv("ENV", "development")
+	t.Setenv("ALLOWED_ORIGINS", "http://localhost:3000")
+	t.Setenv("TRUSTED_PROXY_CIDRS", "")
+	if _, err := config.Load(); err != nil {
+		t.Fatalf("development may trust no proxy: %v", err)
+	}
+}

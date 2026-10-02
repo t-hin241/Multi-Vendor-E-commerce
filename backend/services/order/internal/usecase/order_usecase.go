@@ -43,6 +43,10 @@ type Deps struct {
 	Audit         AuditRepositoryPort
 	Tx            TransactionRunner
 	Operations    OperationsReader
+	// Events publishes the effects that are events (notification,
+	// fulfillment, settlement, rejected outcomes) to the event bus; nil
+	// keeps the direct calls (EVENT_PUBLISHING=http, rollback only).
+	Events EventPublisher
 
 	ReturnPolicy domain.ReturnPolicy
 	Log          zerolog.Logger

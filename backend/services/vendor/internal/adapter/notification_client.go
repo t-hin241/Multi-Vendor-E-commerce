@@ -10,19 +10,49 @@ import (
 
 	"github.com/rs/zerolog"
 
+	"shopee/backend/pkg/eventbus"
+	"shopee/backend/pkg/events"
 	"shopee/backend/pkg/serviceauth"
 	"shopee/backend/services/vendorsvc/internal/repository"
 )
 
-// DispatchNotices hands queued shop-decision notices to Notification with
-// the internal key. Notification answers 202 once it has recorded the
-// notice (the row id is its event id, so a resend is a duplicate there). A
-// 4xx answer parks the notice; anything else is retried with backoff.
-func DispatchNotices(ctx context.Context, outbox repository.NotificationOutbox, notificationURL, key string, log zerolog.Logger) {
-	tick := time.NewTicker(2 * time.Second)
-	defer tick.Stop()
+// NoticeSender hands one notice over; it returns "" on success, otherwise
+// a short reason and whether the notice was refused for good.
+type NoticeSender func(ctx context.Context, n repository.Notice) (string, bool)
+
+// BusNoticeSender publishes vendor.notification_requested (the row id is
+// the notification's event id): handed over once the broker stored it.
+func BusNoticeSender(bus *eventbus.Bus) NoticeSender {
+	return func(ctx context.Context, n repository.Notice) (string, bool) {
+		env, err := events.VendorNotification(n.ID, n.VendorID, events.NotificationRequest{UserID: n.UserID, Type: n.Type, ReferenceID: n.VendorID})
+		if err != nil {
+			return "invalid notice", true
+		}
+		if err := bus.Publish(ctx, env.WithCorrelation(n.ID)); err != nil {
+			if eventbus.IsPermanent(err) {
+				return "event refused", true
+			}
+			return "event bus unavailable", false
+		}
+		return "", false
+	}
+}
+
+// HTTPNoticeSender posts to Notification directly (EVENT_PUBLISHING=http,
+// rollback only). A 4xx answer parks the notice; anything else retries.
+func HTTPNoticeSender(notificationURL, key string) NoticeSender {
 	client := &http.Client{Timeout: 5 * time.Second}
 	target := strings.TrimRight(notificationURL, "/") + "/internal/notifications"
+	return func(ctx context.Context, n repository.Notice) (string, bool) {
+		return sendNotice(ctx, client, target, key, n)
+	}
+}
+
+// DispatchNotices hands queued shop-decision notices over, retrying with
+// backoff; a refused notice is parked.
+func DispatchNotices(ctx context.Context, outbox repository.NotificationOutbox, send NoticeSender, log zerolog.Logger) {
+	tick := time.NewTicker(2 * time.Second)
+	defer tick.Stop()
 	for {
 		select {
 		case <-ctx.Done():
@@ -35,7 +65,7 @@ func DispatchNotices(ctx context.Context, outbox repository.NotificationOutbox, 
 			continue
 		}
 		for _, n := range batch {
-			reason, refused := sendNotice(ctx, client, target, key, n)
+			reason, refused := send(ctx, n)
 			if reason == "" {
 				if err := outbox.Delivered(ctx, n.ID); err != nil {
 					log.Error().Str("notice_id", n.ID).Msg("vendor_notice_complete_failed")

@@ -11,14 +11,13 @@ import (
 
 	"shopee/backend/pkg/authjwt"
 	sessionconfig "shopee/backend/pkg/config"
+	"shopee/backend/pkg/eventbus"
+	"shopee/backend/pkg/events"
 	"shopee/backend/pkg/health"
 	"shopee/backend/pkg/identityclient"
 	"shopee/backend/pkg/logger"
-	"shopee/backend/pkg/platform/natsclient"
 	"shopee/backend/pkg/platform/postgres"
-	"shopee/backend/pkg/platform/redisclient"
 	"shopee/backend/pkg/productsales"
-	"shopee/backend/pkg/serviceauth"
 	"shopee/backend/pkg/shutdown"
 	"shopee/backend/pkg/vendorreport"
 	"shopee/backend/pkg/vendorsales"
@@ -53,18 +52,25 @@ func main() {
 		log.Fatal().Err(err).Msg("database connection failed")
 	}
 	defer dbPool.Close()
-
-	redisClient, err := redisclient.NewClient(ctx, cfg.Base.RedisURL)
-	if err != nil {
-		log.Fatal().Err(err).Msg("redis connection failed")
+	// Plan 14: the runtime role reads and writes rows of this database only.
+	if problems, err := postgres.CheckRuntimeRole(ctx, dbPool, cfg.Base.Env == "production"); err != nil {
+		log.Fatal().Err(err).Msg("database role check failed")
+	} else if len(problems) > 0 {
+		log.Warn().Strs("problems", problems).Msg("database_role_too_powerful")
 	}
-	defer redisClient.Close()
 
-	natsConn, err := natsclient.Connect(cfg.Base.NATSURL)
+	busPassword, err := sessionconfig.RequireEventBusPassword()
 	if err != nil {
-		log.Fatal().Err(err).Msg("nats connection failed")
+		log.Fatal().Err(err).Msg("event bus configuration invalid")
 	}
-	defer natsConn.Close()
+	bus, err := eventbus.Start(cfg.Base.NATSURL, eventbus.Credentials{Service: "order", Password: busPassword}, cfg.Base.EventPublishing, dbPool, log)
+	if err != nil {
+		log.Fatal().Err(err).Msg("event bus configuration invalid")
+	}
+	var eventPublisher usecase.EventPublisher
+	if bus.Publish {
+		eventPublisher = bus.Bus
+	}
 
 	jwtManager := authjwt.NewManager(cfg.JWTSecret)
 	verifier, err := sessionconfig.LoadSessionVerifier()
@@ -82,6 +88,7 @@ func main() {
 
 	vendorOrderRepo := repository.NewVendorOrderRepository(dbPool)
 	orderUseCase := usecase.NewOrderUseCase(usecase.Deps{
+		Events:          eventPublisher,
 		Orders:          repository.NewOrderRepository(dbPool),
 		VendorOrders:    vendorOrderRepo,
 		BuyerAddresses:  repository.NewBuyerAddressRepository(dbPool),
@@ -115,35 +122,39 @@ func main() {
 	internalHandler := transport.NewInternalHandler(orderUseCase, log)
 	returnHandler := transport.NewReturnHandler(orderUseCase, log)
 	router := transport.NewRouter(cfg.Base.Env, log, jwtManager, orderHandler, addressHandler, adminHandler, internalHandler, returnHandler,
-		internalServices.Key,
+		internalServices.Verifier,
 		health.Checker{Name: "postgres", Ping: func(ctx context.Context) error { return dbPool.Ping(ctx) }},
-		health.Checker{Name: "redis", Ping: func(ctx context.Context) error { return redisClient.Ping(ctx).Err() }},
-		health.Checker{Name: "nats", Ping: func(ctx context.Context) error {
-			if !natsConn.IsConnected() {
-				return fmt.Errorf("nats: not connected")
-			}
-			return nil
-		}},
 	)
 
 	salesStore := vendorsales.Store{Pool: dbPool}
-	router.POST("/internal/vendor-status", serviceauth.Require(internalServices.Key, serviceauth.Header), salesStore.Handler(log))
-	router.POST("/internal/product-status", serviceauth.Require(internalServices.Key, serviceauth.Header), (productsales.Store{Pool: dbPool}).Handler(log))
+	router.POST("/internal/vendor-status", internalServices.Verifier.Allow("vendor"), salesStore.Handler(log))
+	router.POST("/internal/product-status", internalServices.Verifier.Allow("catalog"), (productsales.Store{Pool: dbPool}).Handler(log))
 	reconcileCtx, stopReconcile := context.WithCancel(ctx)
 	defer stopReconcile()
 	go (vendorsales.Client{URL: cfg.VendorServiceURL, Key: internalServices.Key}).Reconcile(reconcileCtx, salesStore, log)
+	// PLT-03: facts from other services arrive from the event bus; the
+	// internal HTTP routes stay for producers in rollback mode.
+	bus.Run(reconcileCtx,
+		eventbus.Subscription{Durable: "order-vendor-status", Types: []string{events.VendorStatusChanged}, Handle: salesStore.EventHandler()},
+		eventbus.Subscription{Durable: "order-product-status", Types: []string{events.ProductStatusChanged}, Handle: (productsales.Store{Pool: dbPool}).EventHandler()},
+		eventbus.Subscription{Durable: "order-reservation-expiry", Types: []string{events.ReservationExpired}, Handle: transport.ReservationExpiredHandler(orderUseCase)},
+		eventbus.Subscription{Durable: "order-shipment-facts", Types: []string{events.ShipmentChanged}, Handle: transport.ShipmentChangedHandler(orderUseCase)},
+		eventbus.Subscription{Durable: "order-payment-outcomes", Types: []string{events.PaymentOutcome}, Handle: transport.PaymentOutcomeHandler(orderUseCase)},
+		eventbus.Subscription{Durable: "order-refund-outcomes", Types: []string{events.RefundOutcome}, Handle: transport.RefundOutcomeHandler(orderUseCase)},
+	)
 
-	router.GET("/internal/vendor-reports/:vendorId", serviceauth.Require(internalServices.Key, serviceauth.Header), vendorreport.Handler(vendorreport.Service{Repository: vendorOrderRepo}, log))
+	router.GET("/internal/vendor-reports/:vendorId", internalServices.Verifier.Allow("vendor"), vendorreport.Handler(vendorreport.Service{Repository: vendorOrderRepo}, log))
 
-	router.GET("/internal/orders/:id/inventory-status", serviceauth.Require(internalServices.Key, serviceauth.Header), internalHandler.InventoryStatus)
-	router.POST("/internal/inventory-events", serviceauth.Require(internalServices.Key, serviceauth.Header), internalHandler.InventoryEvent)
-	adminaudit.Register(router.Group("/api/orders/admin", middleware.RequireAuth(jwtManager), middleware.RequireRole("admin")), "/audit-events",
-		adminaudit.Source{Name: "order", SQL: repository.AuditSearchSQL, DB: dbPool, Roles: identityclient.Client{URL: internalServices.IdentityURL, Key: internalServices.Key}}, log)
+	adminGroup := router.Group("/api/orders/admin", middleware.RequireAuth(jwtManager), middleware.RequireRole("admin"))
+	bus.RegisterAdmin(adminGroup, identityclient.Client{URL: internalServices.IdentityURL, Key: internalServices.Key})
+	adminaudit.Register(adminGroup, "/audit-events",
+		adminaudit.Source{Name: "order", SQL: repository.AuditSearchSQL + " UNION ALL " + eventbus.InboxAuditSearchSQL, DB: dbPool, Roles: identityclient.Client{URL: internalServices.IdentityURL, Key: internalServices.Key}}, log)
 	srv := &http.Server{
 		Addr:              ":" + cfg.Base.Port,
 		Handler:           router,
 		ReadHeaderTimeout: cfg.Base.HTTPReadTimeout,
 		ReadTimeout:       cfg.Base.HTTPReadTimeout,
+		WriteTimeout:      cfg.Base.HTTPWriteTimeout,
 		IdleTimeout:       cfg.Base.HTTPIdleTimeout,
 	}
 
@@ -154,5 +165,9 @@ func main() {
 		}
 	}()
 
-	shutdown.WaitForSignal(log, srv, cfg.Base.ShutdownTimeout, nil)
+	shutdown.WaitForSignal(log, srv, cfg.Base.ShutdownTimeout, func() {
+		stopReconcile()
+		stopWorker()
+		bus.Close(cfg.Base.ShutdownTimeout)
+	})
 }

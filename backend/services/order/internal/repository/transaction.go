@@ -52,3 +52,16 @@ func (r Transactions) Run(ctx context.Context, fn func(context.Context) error) (
 	}
 	return nil
 }
+
+// WithTx makes tx the transaction of ctx: repository calls and nested
+// Transactions.Run join it (event consumers apply an event in the inbox
+// transaction).
+func WithTx(ctx context.Context, tx pgx.Tx) context.Context {
+	return context.WithValue(ctx, transactionKey{}, tx)
+}
+
+// InTransaction reports whether ctx carries a transaction.
+func InTransaction(ctx context.Context) bool {
+	_, ok := ctx.Value(transactionKey{}).(pgx.Tx)
+	return ok
+}

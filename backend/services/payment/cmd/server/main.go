@@ -12,18 +12,19 @@ import (
 	"shopee/backend/pkg/adminaudit"
 	"shopee/backend/pkg/authjwt"
 	sessionconfig "shopee/backend/pkg/config"
+	"shopee/backend/pkg/eventbus"
+	"shopee/backend/pkg/events"
 	"shopee/backend/pkg/health"
 	"shopee/backend/pkg/identityclient"
 	"shopee/backend/pkg/logger"
 	"shopee/backend/pkg/middleware"
-	"shopee/backend/pkg/platform/natsclient"
 	"shopee/backend/pkg/platform/postgres"
 	"shopee/backend/pkg/platform/redisclient"
-	"shopee/backend/pkg/serviceauth"
 	"shopee/backend/pkg/shutdown"
 	"shopee/backend/pkg/vendorreport"
 	"shopee/backend/services/payment/internal/adapter"
 	"shopee/backend/services/payment/internal/config"
+	"shopee/backend/services/payment/internal/domain"
 	"shopee/backend/services/payment/internal/provider"
 	"shopee/backend/services/payment/internal/provider/mock"
 	"shopee/backend/services/payment/internal/provider/payos"
@@ -49,6 +50,12 @@ func main() {
 		log.Fatal().Err(err).Msg("database connection failed")
 	}
 	defer dbPool.Close()
+	// Plan 14: the runtime role reads and writes rows of this database only.
+	if problems, err := postgres.CheckRuntimeRole(ctx, dbPool, cfg.Base.Env == "production"); err != nil {
+		log.Fatal().Err(err).Msg("database role check failed")
+	} else if len(problems) > 0 {
+		log.Warn().Strs("problems", problems).Msg("database_role_too_powerful")
+	}
 
 	redisClient, err := redisclient.NewClient(ctx, cfg.Base.RedisURL)
 	if err != nil {
@@ -56,11 +63,14 @@ func main() {
 	}
 	defer redisClient.Close()
 
-	natsConn, err := natsclient.Connect(cfg.Base.NATSURL)
+	busPassword, err := sessionconfig.RequireEventBusPassword()
 	if err != nil {
-		log.Fatal().Err(err).Msg("nats connection failed")
+		log.Fatal().Err(err).Msg("event bus configuration invalid")
 	}
-	defer natsConn.Close()
+	bus, err := eventbus.Start(cfg.Base.NATSURL, eventbus.Credentials{Service: "payment", Password: busPassword}, cfg.Base.EventPublishing, dbPool, log)
+	if err != nil {
+		log.Fatal().Err(err).Msg("event bus configuration invalid")
+	}
 
 	jwtManager := authjwt.NewManager(cfg.JWTSecret)
 	sessionVerifier, err := sessionconfig.LoadSessionVerifier()
@@ -93,7 +103,18 @@ func main() {
 	orderSync := repository.OrderSync{Pool: dbPool}
 	refundSync := repository.RefundSync{Pool: dbPool}
 
+	// PLT-03: outcomes go to Order through the event bus (payment.outcome,
+	// payment.refund_outcome); Order's refusal comes back as
+	// order.payment_outcome_rejected and puts the outcome up for review.
 	deliverOutcome := func(ctx context.Context, out repository.OrderOutcome) error {
+		if bus.Publish {
+			env, err := events.PaymentOutcomeEvent(events.PaymentResult{PaymentID: out.PaymentID, OrderID: out.OrderID, Outcome: out.Outcome,
+				Amount: out.Amount, Currency: out.Currency, Reason: out.Reason})
+			if err != nil {
+				return err
+			}
+			return bus.Bus.Publish(ctx, env.WithCorrelation(""))
+		}
 		if out.Outcome == "captured" {
 			return orderClient.MarkPaid(ctx, out.OrderID, adapter.Capture{PaymentID: out.PaymentID, Amount: out.Amount, Currency: out.Currency})
 		}
@@ -136,32 +157,44 @@ func main() {
 		Webhook: transport.NewWebhookHandler(paymentUseCase, limiter, log),
 		Refund:  transport.NewRefundHandler(refundUseCase, log),
 		Admin:   transport.NewAdminHandler(reconUseCase, settlementUseCase, log),
-	}, internalServices.Key,
+	}, internalServices.Verifier,
 		health.Checker{Name: "postgres", Ping: func(ctx context.Context) error { return dbPool.Ping(ctx) }},
 		health.Checker{Name: "redis", Ping: func(ctx context.Context) error { return redisClient.Ping(ctx).Err() }},
-		health.Checker{Name: "nats", Ping: func(ctx context.Context) error {
-			if !natsConn.IsConnected() {
-				return fmt.Errorf("nats: not connected")
-			}
-			return nil
-		}},
 	)
 
-	router.GET("/internal/vendor-reports/:vendorId", serviceauth.Require(internalServices.Key, serviceauth.Header), vendorreport.Handler(vendorreport.Service{Repository: repository.VendorReport{Pool: dbPool}}, log))
+	router.GET("/internal/vendor-reports/:vendorId", internalServices.Verifier.Allow("vendor"), vendorreport.Handler(vendorreport.Service{Repository: repository.VendorReport{Pool: dbPool}}, log))
 
 	syncCtx, stopSync := context.WithCancel(ctx)
 	defer stopSync()
 	go orderSync.Run(syncCtx, deliverOutcome, log, wakeSync)
-	go refundSync.Run(syncCtx, orderClient.ReportRefund, log)
+	deliverRefund := orderClient.ReportRefund
+	if bus.Publish {
+		deliverRefund = func(ctx context.Context, out domain.RefundOutcome) error {
+			env, err := events.RefundOutcomeEvent(events.RefundResult{OrderRefundID: out.OrderRefundID, PaymentRefundID: out.PaymentRefundID,
+				Status: out.Status, Amount: out.Amount, Currency: out.Currency, FailureReason: out.FailureReason})
+			if err != nil {
+				return err
+			}
+			return bus.Bus.Publish(ctx, env.WithCorrelation(""))
+		}
+	}
+	go refundSync.Run(syncCtx, deliverRefund, log)
+	bus.Run(syncCtx,
+		eventbus.Subscription{Durable: "payment-settlements", Types: []string{events.VendorOrderSettleable}, Handle: transport.SettleableHandler(settlementUseCase)},
+		eventbus.Subscription{Durable: "payment-rejected-outcomes", Types: []string{events.PaymentOutcomeRejected}, Handle: transport.OutcomeRejectedHandler(orderSync, refundSync)},
+	)
 	go (usecase.PaymentWorker{Payments: paymentUseCase, Reconciliation: reconUseCase, Log: log}).Run(syncCtx)
-	adminaudit.Register(router.Group("/api/payments/admin", middleware.RequireAuth(jwtManager), middleware.RequireRole("admin")), "/audit-events",
-		adminaudit.Source{Name: "payment", SQL: repository.AuditSearchSQL, DB: dbPool, Roles: roles}, log)
+	adminGroup := router.Group("/api/payments/admin", middleware.RequireAuth(jwtManager), middleware.RequireRole("admin"))
+	bus.RegisterAdmin(adminGroup, roles)
+	adminaudit.Register(adminGroup, "/audit-events",
+		adminaudit.Source{Name: "payment", SQL: repository.AuditSearchSQL + " UNION ALL " + eventbus.InboxAuditSearchSQL, DB: dbPool, Roles: roles}, log)
 
 	srv := &http.Server{
 		Addr:              ":" + cfg.Base.Port,
 		Handler:           router,
 		ReadHeaderTimeout: cfg.Base.HTTPReadTimeout,
 		ReadTimeout:       cfg.Base.HTTPReadTimeout,
+		WriteTimeout:      cfg.Base.HTTPWriteTimeout,
 		IdleTimeout:       cfg.Base.HTTPIdleTimeout,
 	}
 
@@ -172,5 +205,8 @@ func main() {
 		}
 	}()
 
-	shutdown.WaitForSignal(log, srv, cfg.Base.ShutdownTimeout, nil)
+	shutdown.WaitForSignal(log, srv, cfg.Base.ShutdownTimeout, func() {
+		stopSync()
+		bus.Close(cfg.Base.ShutdownTimeout)
+	})
 }

@@ -10,14 +10,13 @@ import (
 	"shopee/backend/pkg/adminaudit"
 	"shopee/backend/pkg/authjwt"
 	sessionconfig "shopee/backend/pkg/config"
+	"shopee/backend/pkg/eventbus"
 	"shopee/backend/pkg/health"
 	"shopee/backend/pkg/identityclient"
 	"shopee/backend/pkg/logger"
 	"shopee/backend/pkg/middleware"
-	"shopee/backend/pkg/platform/natsclient"
 	"shopee/backend/pkg/platform/objectstorage"
 	"shopee/backend/pkg/platform/postgres"
-	"shopee/backend/pkg/platform/redisclient"
 	"shopee/backend/pkg/shutdown"
 	"shopee/backend/services/vendorsvc/internal/adapter"
 	"shopee/backend/services/vendorsvc/internal/config"
@@ -43,18 +42,21 @@ func main() {
 		log.Fatal().Err(err).Msg("database connection failed")
 	}
 	defer dbPool.Close()
-
-	redisClient, err := redisclient.NewClient(ctx, cfg.Base.RedisURL)
-	if err != nil {
-		log.Fatal().Err(err).Msg("redis connection failed")
+	// Plan 14: the runtime role reads and writes rows of this database only.
+	if problems, err := postgres.CheckRuntimeRole(ctx, dbPool, cfg.Base.Env == "production"); err != nil {
+		log.Fatal().Err(err).Msg("database role check failed")
+	} else if len(problems) > 0 {
+		log.Warn().Strs("problems", problems).Msg("database_role_too_powerful")
 	}
-	defer redisClient.Close()
 
-	natsConn, err := natsclient.Connect(cfg.Base.NATSURL)
+	busPassword, err := sessionconfig.RequireEventBusPassword()
 	if err != nil {
-		log.Fatal().Err(err).Msg("nats connection failed")
+		log.Fatal().Err(err).Msg("event bus configuration invalid")
 	}
-	defer natsConn.Close()
+	bus, err := eventbus.Start(cfg.Base.NATSURL, eventbus.Credentials{Service: serviceName, Password: busPassword}, cfg.Base.EventPublishing, dbPool, log)
+	if err != nil {
+		log.Fatal().Err(err).Msg("event bus configuration invalid")
+	}
 
 	jwtManager := authjwt.NewManager(cfg.JWTSecret)
 	verifier, err := sessionconfig.LoadSessionVerifier()
@@ -76,8 +78,13 @@ func main() {
 	ops := usecase.Operations{Tx: repository.Transactions{Pool: dbPool}, Actors: identityclient.Client{URL: cfg.Internal.IdentityURL, Key: cfg.Internal.Key}, Addresses: addressRepo, Events: outbox, Notices: notices}
 	workerCtx, stopWorkers := context.WithCancel(ctx)
 	defer stopWorkers()
-	go adapter.DispatchStatus(workerCtx, outbox, []string{cfg.CatalogURL, cfg.OrderURL}, cfg.Internal.Key, log)
-	go adapter.DispatchNotices(workerCtx, notices, cfg.NotificationServiceURL, cfg.Internal.Key, log)
+	sendStatus, sendNotice := adapter.BusStatusSender(bus.Bus), adapter.BusNoticeSender(bus.Bus)
+	if !bus.Publish {
+		sendStatus = adapter.HTTPStatusSender([]string{cfg.CatalogURL, cfg.OrderURL}, cfg.Internal.Key)
+		sendNotice = adapter.HTTPNoticeSender(cfg.NotificationServiceURL, cfg.Internal.Key)
+	}
+	go adapter.DispatchStatus(workerCtx, outbox, sendStatus, log)
+	go adapter.DispatchNotices(workerCtx, notices, sendNotice, log)
 	vendorUseCase := usecase.NewVendorUseCase(vendorRepo, auditLogRepo, objectStore, log, ops)
 	addressUseCase := usecase.NewVendorAddressUseCase(addressRepo, vendorRepo, ops)
 
@@ -86,16 +93,9 @@ func main() {
 	adminHandler := transport.NewAdminHandler(vendorUseCase, log)
 	internalHandler := transport.NewInternalHandler(vendorUseCase, log)
 
-	router := transport.NewRouter(cfg.Base.Env, log, jwtManager, vendorHandler, addressHandler, adminHandler, internalHandler, cfg.Internal.Key,
+	router := transport.NewRouter(cfg.Base.Env, log, jwtManager, vendorHandler, addressHandler, adminHandler, internalHandler, cfg.Internal.Verifier,
 		health.Checker{Name: "postgres", Ping: func(ctx context.Context) error { return dbPool.Ping(ctx) }},
-		health.Checker{Name: "redis", Ping: func(ctx context.Context) error { return redisClient.Ping(ctx).Err() }},
 		health.Checker{Name: "object_storage", Ping: objectStore.Ping},
-		health.Checker{Name: "nats", Ping: func(ctx context.Context) error {
-			if !natsConn.IsConnected() {
-				return fmt.Errorf("nats: not connected")
-			}
-			return nil
-		}},
 	)
 
 	cipher, err := adapter.NewPayoutCipher(cfg.PayoutKey)
@@ -103,7 +103,7 @@ func main() {
 		log.Fatal().Msg("payout encryption configuration invalid")
 	}
 	payoutUC := &usecase.PayoutUseCase{Accounts: repository.PayoutRepository{Pool: dbPool}, Vendors: vendorRepo, Audit: auditLogRepo, Ops: ops, Cipher: cipher}
-	(transport.PayoutHandler{UseCase: payoutUC, Log: log}).Register(router, middleware.RequireAuth(jwtManager), cfg.PayoutServiceKey, cfg.Internal.Key)
+	(transport.PayoutHandler{UseCase: payoutUC, Log: log}).Register(router, middleware.RequireAuth(jwtManager), cfg.PayoutServiceKey, cfg.Internal.Verifier)
 
 	dashboard := usecase.Dashboard{Vendors: vendorUseCase, Orders: adapter.ReportClient{URL: cfg.OrderURL, Key: cfg.Internal.Key}, Payments: adapter.ReportClient{URL: cfg.PaymentURL, Key: cfg.Internal.Key}}
 	router.GET("/api/vendor/:vendorId/dashboard", middleware.RequireAuth(jwtManager), middleware.RequireRole("vendor"), transport.DashboardHandler(dashboard, log))
@@ -116,6 +116,7 @@ func main() {
 		Handler:           router,
 		ReadHeaderTimeout: cfg.Base.HTTPReadTimeout,
 		ReadTimeout:       cfg.Base.HTTPReadTimeout,
+		WriteTimeout:      cfg.Base.HTTPWriteTimeout,
 		IdleTimeout:       cfg.Base.HTTPIdleTimeout,
 	}
 
@@ -126,5 +127,8 @@ func main() {
 		}
 	}()
 
-	shutdown.WaitForSignal(log, srv, cfg.Base.ShutdownTimeout, nil)
+	shutdown.WaitForSignal(log, srv, cfg.Base.ShutdownTimeout, func() {
+		stopWorkers()
+		bus.Close(cfg.Base.ShutdownTimeout)
+	})
 }

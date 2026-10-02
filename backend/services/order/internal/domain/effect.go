@@ -19,7 +19,18 @@ const (
 	// EffectSettleVendorOrder reports a completed vendor order to Payment's
 	// settlement ledger.
 	EffectSettleVendorOrder EffectKind = "settle_vendor_order"
+	// EffectReportRejectedOutcome tells Payment that Order refused a payment
+	// or refund outcome it received as an event, so Payment reviews it.
+	EffectReportRejectedOutcome EffectKind = "report_rejected_outcome"
 )
+
+// RejectedOutcomePayload is what a report_rejected_outcome effect sends.
+type RejectedOutcomePayload struct {
+	Kind            string `json:"kind"` // payment | refund
+	PaymentID       string `json:"payment_id,omitempty"`
+	PaymentRefundID string `json:"payment_refund_id,omitempty"`
+	Reason          string `json:"reason"`
+}
 
 // Effect is a durable task written in the same transaction as the order
 // change that caused it; a worker retries it until the other service

@@ -42,9 +42,19 @@ for image in "${BASE_IMAGES[@]}"; do
   retry "pull $image" docker pull -q "$image"
 done
 
+# Compose interpolates the whole file even to build, including runtime-only
+# secrets (database role passwords, keys) that no image contains. Read
+# .env.example first and .env over it: real values win (the frontend's
+# NEXT_PUBLIC_API_BASE_URL build argument comes from .env), and a runtime
+# secret .env does not set yet only gets its placeholder for the build.
+ENV_FILES=(--env-file .env.example)
+if [ -f .env ]; then
+  ENV_FILES+=(--env-file .env)
+fi
+
 for service in "${SERVICES[@]}"; do
   echo "--- build $service ---"
-  retry "build $service" docker compose build "$service"
+  retry "build $service" docker compose "${ENV_FILES[@]}" build "$service"
 done
 
 echo "All images built: ${SERVICES[*]}"

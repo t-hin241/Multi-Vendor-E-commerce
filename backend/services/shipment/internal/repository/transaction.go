@@ -73,3 +73,16 @@ func isUniqueViolation(err error, constraint string) bool {
 	var pgErr *pgconn.PgError
 	return errors.As(err, &pgErr) && pgErr.Code == "23505" && (constraint == "" || pgErr.ConstraintName == constraint)
 }
+
+// WithTx makes tx the transaction of ctx: repository calls and nested
+// Transactions.Run join it (event consumers apply an event in the inbox
+// transaction).
+func WithTx(ctx context.Context, tx pgx.Tx) context.Context {
+	return context.WithValue(ctx, txKey{}, tx)
+}
+
+// InTransaction reports whether ctx carries a transaction.
+func InTransaction(ctx context.Context) bool {
+	_, ok := ctx.Value(txKey{}).(pgx.Tx)
+	return ok
+}

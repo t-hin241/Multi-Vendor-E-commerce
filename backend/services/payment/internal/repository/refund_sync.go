@@ -126,3 +126,12 @@ func (s RefundSync) ListProblems(ctx context.Context, limit int) ([]RefundSyncIt
 	}
 	return out, rows.Err()
 }
+
+// MarkRejected puts a refund outcome Order refused up for review, in the
+// caller's transaction.
+func (s RefundSync) MarkRejected(ctx context.Context, paymentRefundID string) error {
+	_, err := connection(ctx, s.Pool).Exec(ctx, `
+		UPDATE payment_refund_sync SET requires_review = true, delivered_at = NULL, last_error = 'order_rejected_outcome'
+		WHERE payment_refund_id = $1`, paymentRefundID)
+	return err
+}

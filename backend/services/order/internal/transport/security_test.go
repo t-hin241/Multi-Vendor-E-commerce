@@ -18,7 +18,7 @@ const someID = "00000000-0000-0000-0000-000000000001"
 func testRouter() (http.Handler, *authjwt.Manager) {
 	jwt := authjwt.NewManager("fake-test-signing-key-not-a-real-secret")
 	return NewRouter("test", zerolog.Nop(), jwt, &OrderHandler{}, &BuyerAddressHandler{}, &AdminHandler{}, &InternalHandler{}, &ReturnHandler{},
-		"fake-test-service-key-not-a-real-secret"), jwt
+		serviceauth.SharedKey("fake-test-service-key-not-a-real-secret")), jwt
 }
 
 func do(r http.Handler, method, path, body string, headers map[string]string) int {

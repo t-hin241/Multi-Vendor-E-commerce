@@ -19,7 +19,7 @@ type PayoutHandler struct {
 	Log     zerolog.Logger
 }
 
-func (h PayoutHandler) Register(r *gin.Engine, auth gin.HandlerFunc, payoutKey, internalKey string) {
+func (h PayoutHandler) Register(r *gin.Engine, auth gin.HandlerFunc, payoutKey string, internal *serviceauth.Verifier) {
 	owner := r.Group("/api/vendor/:vendorId/payout-accounts", auth, middleware.RequireRole("vendor"))
 	owner.Use(payoutNoStore())
 	owner.POST("", h.Submit)
@@ -31,7 +31,7 @@ func (h PayoutHandler) Register(r *gin.Engine, auth gin.HandlerFunc, payoutKey, 
 	admin.POST("/:id/details", func(c *gin.Context) { h.Details(c, false) })
 	r.POST("/internal/payout-destinations/:vendorId/:id", serviceauth.Require(payoutKey, "X-Vendor-Payout-Key"), func(c *gin.Context) { h.Details(c, true) })
 	// Masked reference only; the full account needs the payout scope key.
-	r.GET("/internal/payout-destinations/:vendorId/default", serviceauth.Require(internalKey, serviceauth.Header), h.DefaultDestination)
+	r.GET("/internal/payout-destinations/:vendorId/default", internal.Allow("payment"), h.DefaultDestination)
 }
 func payoutNoStore() gin.HandlerFunc {
 	return func(c *gin.Context) {

@@ -162,3 +162,12 @@ func (s OrderSync) Run(ctx context.Context, deliver func(context.Context, OrderO
 		}
 	}
 }
+
+// MarkRejected puts an outcome Order refused (order.payment_outcome_rejected)
+// up for review, in the caller's transaction.
+func (s OrderSync) MarkRejected(ctx context.Context, intentID string) error {
+	_, err := connection(ctx, s.Pool).Exec(ctx, `
+		UPDATE payment_order_sync SET requires_review = true, delivered_at = NULL, last_error = 'order_rejected_outcome'
+		WHERE payment_intent_id = $1`, intentID)
+	return err
+}

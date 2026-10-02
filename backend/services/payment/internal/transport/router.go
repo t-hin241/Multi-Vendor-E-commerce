@@ -25,7 +25,7 @@ type Handlers struct {
 	Admin   *AdminHandler
 }
 
-func NewRouter(env string, log zerolog.Logger, jwtManager *authjwt.Manager, h Handlers, internalKey string, checkers ...health.Checker) *gin.Engine {
+func NewRouter(env string, log zerolog.Logger, jwtManager *authjwt.Manager, h Handlers, internal *serviceauth.Verifier, checkers ...health.Checker) *gin.Engine {
 	if env == "production" {
 		gin.SetMode(gin.ReleaseMode)
 	}
@@ -67,10 +67,10 @@ func NewRouter(env string, log zerolog.Logger, jwtManager *authjwt.Manager, h Ha
 		adminGroup.POST("/payouts/items/:id/resolve", h.Admin.ResolvePayoutItem)
 	}
 
-	internal := r.Group("/internal", serviceauth.Require(internalKey, serviceauth.Header))
+	internalGroup := r.Group("/internal", internal.Allow("order"))
 	{
-		internal.POST("/payments/refunds", h.Refund.Request)
-		internal.POST("/settlements/vendor-orders", h.Admin.IngestVendorOrder)
+		internalGroup.POST("/payments/refunds", h.Refund.Request)
+		internalGroup.POST("/settlements/vendor-orders", h.Admin.IngestVendorOrder)
 	}
 
 	// The provider calls this directly, with no bearer token; its signature

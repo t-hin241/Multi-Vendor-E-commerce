@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"shopee/backend/pkg/apperror"
+	"shopee/backend/pkg/eventbus"
 
 	"shopee/backend/services/order/internal/adapter"
 	"shopee/backend/services/order/internal/domain"
@@ -194,4 +195,9 @@ type OperationsReader interface {
 // TransactionRunner runs fn in one database transaction.
 type TransactionRunner interface {
 	Run(ctx context.Context, fn func(context.Context) error) error
+}
+
+// EventPublisher publishes a domain event (eventbus.Bus).
+type EventPublisher interface {
+	Publish(ctx context.Context, env eventbus.Envelope) error
 }

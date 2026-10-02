@@ -19,13 +19,28 @@ import (
 
 	"shopee/backend/pkg/authjwt"
 	"shopee/backend/pkg/httpresponse"
+	"shopee/backend/pkg/serviceauth"
 )
 
 type Security struct {
 	TrustedProxies                   []string
 	Origins                          []string
 	ServiceKey, DeliveryKey, RateKey string
-	Redis                            redis.UniversalClient
+	// Services verifies the calling service (PLT-01); without it only the
+	// shared ServiceKey is accepted.
+	Services *serviceauth.Verifier
+	Redis    redis.UniversalClient
+}
+
+// sessionCallers are the services that verify sessions and re-verify
+// admins with Identity (every backend service but the gateway).
+var sessionCallers = []string{"vendor", "catalog", "inventory", "cart", "order", "payment", "shipment", "admin", "notification", "review"}
+
+func (s Security) services() *serviceauth.Verifier {
+	if s.Services != nil {
+		return s.Services
+	}
+	return serviceauth.SharedKey(s.ServiceKey)
 }
 
 func (s Security) BrowserProtection() gin.HandlerFunc {

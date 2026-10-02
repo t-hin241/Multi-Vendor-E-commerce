@@ -11,12 +11,12 @@ import (
 
 	"shopee/backend/pkg/authjwt"
 	sessionconfig "shopee/backend/pkg/config"
+	"shopee/backend/pkg/eventbus"
+	"shopee/backend/pkg/events"
 	"shopee/backend/pkg/health"
 	"shopee/backend/pkg/identityclient"
 	"shopee/backend/pkg/logger"
-	"shopee/backend/pkg/platform/natsclient"
 	"shopee/backend/pkg/platform/postgres"
-	"shopee/backend/pkg/platform/redisclient"
 	"shopee/backend/pkg/shutdown"
 	"shopee/backend/services/shipment/internal/adapter"
 	"shopee/backend/services/shipment/internal/carrier/manual"
@@ -50,18 +50,21 @@ func main() {
 		log.Fatal().Err(err).Msg("database connection failed")
 	}
 	defer dbPool.Close()
-
-	redisClient, err := redisclient.NewClient(ctx, cfg.Base.RedisURL)
-	if err != nil {
-		log.Fatal().Err(err).Msg("redis connection failed")
+	// Plan 14: the runtime role reads and writes rows of this database only.
+	if problems, err := postgres.CheckRuntimeRole(ctx, dbPool, cfg.Base.Env == "production"); err != nil {
+		log.Fatal().Err(err).Msg("database role check failed")
+	} else if len(problems) > 0 {
+		log.Warn().Strs("problems", problems).Msg("database_role_too_powerful")
 	}
-	defer redisClient.Close()
 
-	natsConn, err := natsclient.Connect(cfg.Base.NATSURL)
+	busPassword, err := sessionconfig.RequireEventBusPassword()
 	if err != nil {
-		log.Fatal().Err(err).Msg("nats connection failed")
+		log.Fatal().Err(err).Msg("event bus configuration invalid")
 	}
-	defer natsConn.Close()
+	bus, err := eventbus.Start(cfg.Base.NATSURL, eventbus.Credentials{Service: "shipment", Password: busPassword}, cfg.Base.EventPublishing, dbPool, log)
+	if err != nil {
+		log.Fatal().Err(err).Msg("event bus configuration invalid")
+	}
 
 	jwtManager := authjwt.NewManager(cfg.JWTSecret)
 	verifier, err := sessionconfig.LoadSessionVerifier()
@@ -114,32 +117,43 @@ func main() {
 		transport.NewInternalHandler(shipmentUseCase, log),
 		transport.NewWebhookHandler(shipmentUseCase, log),
 		transport.NewOpsHandler(shipmentUseCase, log),
-		internalServices.Key,
+		internalServices.Verifier,
 		health.Checker{Name: "postgres", Ping: func(ctx context.Context) error { return dbPool.Ping(ctx) }},
-		health.Checker{Name: "redis", Ping: func(ctx context.Context) error { return redisClient.Ping(ctx).Err() }},
-		health.Checker{Name: "nats", Ping: func(ctx context.Context) error {
-			if !natsConn.IsConnected() {
-				return fmt.Errorf("nats: not connected")
-			}
-			return nil
-		}},
 	)
 
 	workerCtx, stopWorkers := context.WithCancel(ctx)
 	defer stopWorkers()
+	// PLT-03: shipment facts go to Order through the event bus (shipment.
+	// status_changed; HTTP only in rollback mode). Order's refusal parks the
+	// event in Order's inbox, where it is replayed or discarded.
 	go outbox.Run(workerCtx, func(ctx context.Context, e repository.OutboxEvent) error {
-		return orderClient.SendShipmentEvent(ctx, adapter.ShipmentEvent{EventID: e.ID, ShipmentID: e.ShipmentID, VendorOrderID: e.VendorOrderID,
+		if !bus.Publish {
+			return orderClient.SendShipmentEvent(ctx, adapter.ShipmentEvent{EventID: e.ID, ShipmentID: e.ShipmentID, VendorOrderID: e.VendorOrderID,
+				Type: string(e.Type), OccurredAt: e.OccurredAt, TrackingNumber: e.TrackingNumber})
+		}
+		env, err := events.ShipmentChangedEvent(events.ShipmentFact{EventID: e.ID, ShipmentID: e.ShipmentID, VendorOrderID: e.VendorOrderID,
 			Type: string(e.Type), OccurredAt: e.OccurredAt, TrackingNumber: e.TrackingNumber})
+		if err != nil {
+			return err
+		}
+		return bus.Bus.Publish(ctx, env.WithCorrelation(e.ID))
 	}, log, wake)
+	bus.Run(workerCtx,
+		eventbus.Subscription{Durable: "shipment-fulfillment-ready", Types: []string{events.FulfillmentReady}, Handle: transport.FulfillmentReadyHandler(shipmentUseCase)},
+		eventbus.Subscription{Durable: "shipment-fulfillment-cancelled", Types: []string{events.FulfillmentCancelled}, Handle: transport.FulfillmentCancelledHandler(shipmentUseCase)},
+	)
 	go (usecase.Worker{Shipments: shipmentUseCase, Retention: cfg.AddressRetention, Log: log}).Run(workerCtx)
 
-	adminaudit.Register(router.Group("/api/shipments/admin", middleware.RequireAuth(jwtManager), middleware.RequireRole("admin")), "/audit-events",
-		adminaudit.Source{Name: "shipment", SQL: repository.AuditSearchSQL, DB: dbPool, Roles: identityclient.Client{URL: internalServices.IdentityURL, Key: internalServices.Key}}, log)
+	adminGroup := router.Group("/api/shipments/admin", middleware.RequireAuth(jwtManager), middleware.RequireRole("admin"))
+	bus.RegisterAdmin(adminGroup, identityclient.Client{URL: internalServices.IdentityURL, Key: internalServices.Key})
+	adminaudit.Register(adminGroup, "/audit-events",
+		adminaudit.Source{Name: "shipment", SQL: repository.AuditSearchSQL + " UNION ALL " + eventbus.InboxAuditSearchSQL, DB: dbPool, Roles: identityclient.Client{URL: internalServices.IdentityURL, Key: internalServices.Key}}, log)
 	srv := &http.Server{
 		Addr:              ":" + cfg.Base.Port,
 		Handler:           router,
 		ReadHeaderTimeout: cfg.Base.HTTPReadTimeout,
 		ReadTimeout:       cfg.Base.HTTPReadTimeout,
+		WriteTimeout:      cfg.Base.HTTPWriteTimeout,
 		IdleTimeout:       cfg.Base.HTTPIdleTimeout,
 	}
 
@@ -150,5 +164,8 @@ func main() {
 		}
 	}()
 
-	shutdown.WaitForSignal(log, srv, cfg.Base.ShutdownTimeout, nil)
+	shutdown.WaitForSignal(log, srv, cfg.Base.ShutdownTimeout, func() {
+		stopWorkers()
+		bus.Close(cfg.Base.ShutdownTimeout)
+	})
 }

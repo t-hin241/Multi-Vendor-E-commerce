@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"shopee/backend/pkg/eventbus"
+	"shopee/backend/pkg/events"
 	"shopee/backend/pkg/serviceauth"
 	"shopee/backend/services/inventory/internal/domain"
 	"time"
@@ -61,4 +63,31 @@ func (c OrderClient) Publish(ctx context.Context, e domain.OutboxEvent) error {
 		return fmt.Errorf("order event returned %d", resp.StatusCode)
 	}
 	return nil
+}
+
+// BusOrderEvents keeps OrderClient's status reads and publishes the
+// reservation outbox to the event bus (inventory.reservation_expired).
+type BusOrderEvents struct {
+	OrderClient
+	Bus *eventbus.Bus
+}
+
+func (c BusOrderEvents) Publish(ctx context.Context, e domain.OutboxEvent) error {
+	env, err := events.ReservationExpiredEvent(events.ReservationExpiry{ID: e.ID, OrderID: e.OrderID, Type: e.Type})
+	if err != nil {
+		return err
+	}
+	return c.Bus.Publish(ctx, env.WithCorrelation(e.ID))
+}
+
+// BusStockInvalidator publishes inventory.stock_changed for a batch of
+// variants (Catalog drops their cached stock).
+func BusStockInvalidator(bus *eventbus.Bus) func(context.Context, []string) error {
+	return func(ctx context.Context, ids []string) error {
+		env, err := events.StockChangedEvent(ids)
+		if err != nil {
+			return err
+		}
+		return bus.Publish(ctx, env.WithCorrelation(""))
+	}
 }

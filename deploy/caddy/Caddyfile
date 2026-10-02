@@ -1,0 +1,58 @@
+# The only public entry point in production (deploy/compose.edge.yml):
+# TLS on 80/443 with automatic certificates, then one site that splits by
+# path. Nothing else on the host is published publicly.
+#
+#   /api/*, /healthz       -> gateway (rate limits, CORS, no /internal)
+#   /media/<bucket>/<key>   -> MinIO, read only, the three public buckets
+#   everything else         -> frontend (Next.js)
+#
+# Caddy replaces any X-Forwarded-For a visitor sends with the address it
+# sees, and the gateway trusts that header only from this proxy
+# (EDGE_PROXY_IP as TRUSTED_PROXY_CIDRS), so rate limits follow the visitor.
+{
+	email {$ACME_EMAIL}
+}
+
+{$SITE_DOMAIN} {
+	encode zstd gzip
+
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		-Server
+	}
+
+	# Internal routes exist only between services; the gateway refuses them
+	# too, this keeps them off every other path as well.
+	@internal path_regexp internal (?i)(^|/)internal(/|$)
+	handle @internal {
+		respond 404
+	}
+
+	handle /api/* {
+		reverse_proxy gateway:8080
+	}
+
+	handle /healthz {
+		reverse_proxy gateway:8080
+	}
+
+	# Storefront images (OBJECT_STORAGE_PUBLIC_BASE_URL=https://<domain>/media).
+	# Only GET/HEAD of an object in a public bucket: no listing, no writes,
+	# no MinIO console, no other bucket.
+	@media {
+		method GET HEAD
+		path /media/product-images/* /media/vendor-branding/* /media/review-images/*
+	}
+	handle @media {
+		uri strip_prefix /media
+		reverse_proxy minio:9000
+	}
+
+	handle /media/* {
+		respond 404
+	}
+
+	handle {
+		reverse_proxy frontend:3000
+	}
+}

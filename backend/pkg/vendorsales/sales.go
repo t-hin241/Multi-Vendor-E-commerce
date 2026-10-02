@@ -15,10 +15,12 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rs/zerolog"
 
 	"shopee/backend/pkg/apperror"
+	"shopee/backend/pkg/eventbus"
 	"shopee/backend/pkg/httpresponse"
 	"shopee/backend/pkg/serviceauth"
 )
@@ -37,12 +39,33 @@ func (s Status) Valid() bool {
 type Store struct{ Pool *pgxpool.Pool }
 
 func (s Store) Apply(ctx context.Context, v Status) error {
+	return applyStatus(ctx, s.Pool, v)
+}
+
+// execer is a pool or a transaction.
+type execer interface {
+	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
+}
+
+// EventHandler applies vendor.status_changed events in the inbox
+// transaction (an older version than the one held is ignored).
+func (s Store) EventHandler() eventbus.Handler {
+	return func(ctx context.Context, tx pgx.Tx, env eventbus.Envelope) error {
+		var v Status
+		if err := env.Decode(&v); err != nil {
+			return err
+		}
+		return applyStatus(ctx, tx, v)
+	}
+}
+
+func applyStatus(ctx context.Context, q execer, v Status) error {
 	if !v.Valid() {
 		return apperror.Validation("Invalid vendor status event")
 	}
 	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
-	_, err := s.Pool.Exec(ctx, `INSERT INTO vendor_sale_status(vendor_id,status,version) VALUES($1,$2,$3)
+	_, err := q.Exec(ctx, `INSERT INTO vendor_sale_status(vendor_id,status,version) VALUES($1,$2,$3)
  ON CONFLICT(vendor_id) DO UPDATE SET status=EXCLUDED.status,version=EXCLUDED.version,confirmed_at=now()
  WHERE vendor_sale_status.version<EXCLUDED.version OR (vendor_sale_status.version=EXCLUDED.version AND vendor_sale_status.status=EXCLUDED.status)`, v.VendorID, v.Status, v.Version)
 	return err

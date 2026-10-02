@@ -23,6 +23,7 @@ import (
 	"shopee/backend/pkg/apperror"
 	"shopee/backend/pkg/authjwt"
 	"shopee/backend/pkg/middleware"
+	"shopee/backend/pkg/serviceauth"
 	"shopee/backend/pkg/vendorsales"
 	"shopee/backend/services/vendorsvc/internal/adapter"
 	"shopee/backend/services/vendorsvc/internal/domain"
@@ -439,13 +440,13 @@ func TestIntegrationAPIAuthAndPayoutScopes(t *testing.T) {
 	manager := authjwt.NewManager(hex.EncodeToString(key))
 	gin.SetMode(gin.ReleaseMode)
 	log := zerolog.Nop()
-	router := transport.NewRouter("test", log, manager, transport.NewVendorHandler(f.uc, log), transport.NewVendorAddressHandler(f.addresses, log), transport.NewAdminHandler(f.uc, log), transport.NewInternalHandler(f.uc, log), "test-internal-service-key")
+	router := transport.NewRouter("test", log, manager, transport.NewVendorHandler(f.uc, log), transport.NewVendorAddressHandler(f.addresses, log), transport.NewAdminHandler(f.uc, log), transport.NewInternalHandler(f.uc, log), serviceauth.SharedKey("test-internal-service-key"))
 	cipher, err := adapter.NewPayoutCipher(key)
 	if err != nil {
 		t.Fatal(err)
 	}
 	uc := &usecase.PayoutUseCase{Accounts: repository.PayoutRepository{Pool: f.db}, Vendors: f.vendors, Audit: f.audit, Ops: f.ops, Cipher: cipher}
-	(transport.PayoutHandler{UseCase: uc, Log: log}).Register(router, middleware.RequireAuth(manager), "test-payment-scope-key", "test-internal-service-key")
+	(transport.PayoutHandler{UseCase: uc, Log: log}).Register(router, middleware.RequireAuth(manager), "test-payment-scope-key", serviceauth.SharedKey("test-internal-service-key"))
 	ownerToken, _, err := manager.IssueAccessToken(f.owner, "vendor", time.Minute)
 	if err != nil {
 		t.Fatal(err)

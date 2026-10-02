@@ -46,6 +46,12 @@ func main() {
 		log.Fatal().Err(err).Msg("database connection failed")
 	}
 	defer db.Close()
+	// Plan 14: the runtime role reads and writes rows of this database only.
+	if problems, err := postgres.CheckRuntimeRole(ctx, db, cfg.Base.Env == "production"); err != nil {
+		log.Fatal().Err(err).Msg("database role check failed")
+	} else if len(problems) > 0 {
+		log.Warn().Strs("problems", problems).Msg("database_role_too_powerful")
+	}
 	redis, err := redisclient.NewClient(ctx, cfg.Base.RedisURL)
 	if err != nil {
 		log.Fatal().Err(err).Msg("redis connection failed")
@@ -82,7 +88,8 @@ func main() {
 	adminaudit.Register(router.Group("/api/reviews/admin", middleware.RequireAuth(jwtManager), middleware.RequireRole("admin")), "/audit-events",
 		adminaudit.Source{Name: "review", SQL: repository.AuditSearchSQL, DB: db, Roles: roles}, log)
 
-	srv := &http.Server{Addr: ":" + cfg.Base.Port, Handler: router, ReadHeaderTimeout: cfg.Base.HTTPReadTimeout, ReadTimeout: cfg.Base.HTTPReadTimeout, IdleTimeout: cfg.Base.HTTPIdleTimeout}
+	srv := &http.Server{Addr: ":" + cfg.Base.Port, Handler: router, ReadHeaderTimeout: cfg.Base.HTTPReadTimeout, ReadTimeout: cfg.Base.HTTPReadTimeout,
+		WriteTimeout: cfg.Base.HTTPWriteTimeout, IdleTimeout: cfg.Base.HTTPIdleTimeout}
 	go func() {
 		log.Info().Str("port", cfg.Base.Port).Msg("review_starting")
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {

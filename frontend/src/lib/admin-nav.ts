@@ -4,6 +4,7 @@ import {
   CreditCard,
   FolderTree,
   History,
+  Inbox,
   LayoutDashboard,
   Mail,
   MessageSquareWarning,
@@ -53,6 +54,7 @@ export const ADMIN_NAV_GROUPS: AdminNavGroup[] = [
       { href: "/admin/payments", label: "Payment reconciliation", icon: CreditCard },
       { href: "/admin/payouts", label: "Vendor payouts", icon: Wallet },
       { href: "/admin/notifications", label: "Notifications", icon: Mail },
+      { href: "/admin/events", label: "Parked events", icon: Inbox },
     ],
   },
   {

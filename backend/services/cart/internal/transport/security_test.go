@@ -21,7 +21,7 @@ const (
 
 func newTestRouter() (http.Handler, *authjwt.Manager) {
 	jwt := authjwt.NewManager(testSigningKey)
-	return NewRouter("test", zerolog.Nop(), jwt, &CartHandler{}, &InternalHandler{}, testServiceKey), jwt
+	return NewRouter("test", zerolog.Nop(), jwt, &CartHandler{}, &InternalHandler{}, serviceauth.SharedKey(testServiceKey)), jwt
 }
 
 func serve(r http.Handler, method, path, body string, headers map[string]string) int {

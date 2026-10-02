@@ -10,6 +10,12 @@ import (
 
 // RemoteVerifier fails closed and deliberately does not cache revocation state.
 func RemoteVerifier(baseURL, key string) func(context.Context, *Claims) error {
+	return RemoteVerifierWith(baseURL, func(req *http.Request) { req.Header.Set("X-Identity-Service-Key", key) })
+}
+
+// RemoteVerifierWith is RemoteVerifier with the caller's own way of
+// identifying itself to Identity (serviceauth.SetRequestHeaders).
+func RemoteVerifierWith(baseURL string, sign func(*http.Request)) func(context.Context, *Claims) error {
 	client := &http.Client{Timeout: 2 * time.Second}
 	return func(ctx context.Context, claims *Claims) error {
 		if claims.SessionID == "" {
@@ -24,7 +30,7 @@ func RemoteVerifier(baseURL, key string) func(context.Context, *Claims) error {
 			return ErrVerificationUnavailable
 		}
 		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("X-Identity-Service-Key", key)
+		sign(req)
 		res, err := client.Do(req)
 		if err != nil {
 			return ErrVerificationUnavailable

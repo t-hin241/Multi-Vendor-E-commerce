@@ -164,7 +164,7 @@ jobs:
         working-directory: backend/services/catalog
 
   inventory-integration:
-    name: Inventory, Cart, Order, Payment, Shipment and Notification PostgreSQL/Redis integration
+    name: Inventory, Cart, Order, Payment, Shipment, Notification and event bus integration (PostgreSQL/Redis/NATS)
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -187,14 +187,105 @@ jobs:
       SHIPMENT_TEST_DATABASE_URL: postgres://inventory_test@localhost:5432/inventory_test?sslmode=disable
       NOTIFICATION_TEST_DATABASE_URL: postgres://inventory_test@localhost:5432/inventory_test?sslmode=disable
       NOTIFICATION_TEST_REDIS_URL: redis://localhost:6379/0
+      EVENTBUS_TEST_DATABASE_URL: postgres://inventory_test@localhost:5432/inventory_test?sslmode=disable
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
           go-version: "1.25"
           cache-dependency-path: backend/services/inventory/go.sum
-      - run: go test -race -count=1 ./services/inventory/... ./services/cart/... ./services/order/... ./services/payment/... ./services/shipment/... ./services/notification/...
+      # GitHub service containers take no command; JetStream is enabled here.
+      - name: Enable JetStream
+        run: |
+          docker run -d --name jetstream -p 4222:4222 nats:2-alpine -js
+          echo "EVENTBUS_TEST_NATS_URL=nats://localhost:4222" >> "$GITHUB_ENV"
+      # The production broker configuration (per-service users and
+      # permissions) with a fake password for every user.
+      - name: Broker with per-service permissions
+        run: |
+          # Quoted as in docker-compose.yml: unquoted, "5e62..." parses as a number.
+          raw=5e62-test-eventbus-password-not-a-secret
+          pw='"'$raw'"'
+          docker run -d --name jetstream-auth -p 4223:4222 \
+            -v "$PWD/deploy/nats/nats.conf:/etc/nats/nats.conf:ro" --tmpfs /data \
+            -e VENDOR_EVENTBUS_PASSWORD=$pw -e CATALOG_EVENTBUS_PASSWORD=$pw -e INVENTORY_EVENTBUS_PASSWORD=$pw \
+            -e ORDER_EVENTBUS_PASSWORD=$pw -e PAYMENT_EVENTBUS_PASSWORD=$pw -e SHIPMENT_EVENTBUS_PASSWORD=$pw \
+            -e NOTIFICATION_EVENTBUS_PASSWORD=$pw nats:2-alpine -c /etc/nats/nats.conf
+          echo "EVENTBUS_AUTH_TEST_NATS_URL=nats://localhost:4223" >> "$GITHUB_ENV"
+          echo "EVENTBUS_AUTH_TEST_PASSWORD=$raw" >> "$GITHUB_ENV"
+      - run: go test -race -count=1 ./pkg/eventbus/... ./pkg/events/... ./services/inventory/... ./services/cart/... ./services/order/... ./services/payment/... ./services/shipment/... ./services/notification/...
         working-directory: backend
+
+  db-roles:
+    name: Database roles (migrator and per-service runtime roles)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: roles_admin
+          POSTGRES_DB: roles_admin
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports: ["5432:5432"]
+        options: --health-cmd "pg_isready -U roles_admin" --health-interval 5s --health-timeout 3s --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache-dependency-path: backend/pkg/go.sum
+      # Own throwaway cluster: the script drops and recreates the service databases.
+      - run: bash deploy/test-db-roles.sh
+        env:
+          DB_ROLES_TEST_DISPOSABLE: "yes"
+          PGHOST: localhost
+          PGPORT: "5432"
+          PGUSER: roles_admin
+      - run: go test -count=1 ./platform/postgres/...
+        working-directory: backend/pkg
+        env:
+          POSTGRES_ROLE_TEST_ADMIN_URL: postgres://roles_admin@localhost:5432/roles_admin?sslmode=disable
+      - run: bash -n deploy/db-roles.sh && bash -n deploy/gen-db-passwords.sh && sh -n deploy/postgres-init/002-db-roles.sh
+
+  edge-config:
+    name: Published ports and edge proxy config
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Nothing but Caddy may be published on a public interface, with the
+      # values from .env.example (the defaults an operator starts from).
+      - name: Only loopback ports in the base stack
+        run: |
+          docker compose --env-file .env.example -f docker-compose.yml config --format json > base.json
+          jq -e '[.services[] | .ports[]? | select(.host_ip != "127.0.0.1")] | length == 0' base.json
+      - name: Only Caddy 80/443 public with the edge override
+        run: |
+          docker compose --env-file .env.example -f docker-compose.yml -f deploy/compose.edge.yml config --format json > edge.json
+          jq -e '[.services | to_entries[] | select(.key != "caddy") | .value.ports[]? | select(.host_ip != "127.0.0.1")] | length == 0' edge.json
+          jq -e '[.services.caddy.ports[] | .published] - ["80", "443"] | length == 0' edge.json
+          jq -e '(.services.gateway.ports // []) == [] and (.services.frontend.ports // []) == []' edge.json
+          jq -e '.services.gateway.environment.TRUSTED_PROXY_CIDRS == .services.caddy.networks.edge.ipv4_address' edge.json
+      - name: Caddyfile is valid and formatted
+        run: |
+          docker run --rm -e SITE_DOMAIN=shop.example.invalid -e ACME_EMAIL=ops@example.invalid \
+            -v "$PWD/deploy/caddy/Caddyfile:/etc/caddy/Caddyfile:ro" caddy:2-alpine \
+            sh -c 'caddy validate --config /etc/caddy/Caddyfile && caddy fmt /etc/caddy/Caddyfile | diff - /etc/caddy/Caddyfile'
+      - run: bash -n deploy/check-exposure.sh && bash -n deploy/rewrite-media-urls.sh && bash -n deploy/data-preflight.sh
+      # Plan 14 DEV-01: seed/demo data stays in the local seed tooling; nothing
+      # that builds an image may carry its accounts or placeholder passwords.
+      - name: No seed accounts or demo credentials in image sources
+        run: |
+          if grep -rnIE "scraped\.local|SeedOnly|CHANGE_ME_BUYER_SEED" backend frontend \
+               --exclude-dir=node_modules --exclude-dir=.next --exclude-dir=testdata --exclude="*_test.go" \
+               --exclude-dir=e2e --exclude="*.test.ts" --exclude="*.test.tsx"; then
+            echo "seed markers found in image sources" >&2
+            exit 1
+          fi
+      - name: Data preflight SQL is read-only
+        run: |
+          if grep -nIiE "^\s*(insert|update|delete|truncate|alter|drop|create|grant|revoke)([^a-z_]|$)" deploy/data-preflight/*.sql; then
+            exit 1
+          fi
 
   frontend:
     name: Frontend (lint + test + build)

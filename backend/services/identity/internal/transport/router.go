@@ -57,12 +57,12 @@ func NewRouter(env string, log zerolog.Logger, jwtManager *authjwt.Manager, auth
 		adminGroup.POST("/users/:id/sessions/:sessionID/revoke", adminHandler.RevokeSession)
 	}
 
-	internalGroup := r.Group("/internal/users", serviceKey(security.ServiceKey, "X-Identity-Service-Key"))
+	internalGroup := r.Group("/internal/users", security.services().Allow(sessionCallers...))
 	{
 		internalGroup.GET("/:id", internalHandler.GetUser)
 	}
 
-	r.POST("/internal/sessions/verify", serviceKey(security.ServiceKey, "X-Identity-Service-Key"), authHandler.VerifySession)
+	r.POST("/internal/sessions/verify", security.services().Allow(sessionCallers...), authHandler.VerifySession)
 	r.GET("/internal/password-reset-deliveries/:id", serviceKey(security.DeliveryKey, "X-Reset-Delivery-Key"), func(c *gin.Context) {
 		message, err := delivery.Message(c.Request.Context(), c.Param("id"))
 		if err != nil {

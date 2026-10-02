@@ -5,6 +5,8 @@ package config
 
 import (
 	"fmt"
+	"net"
+	"net/url"
 	"os"
 	"strings"
 )
@@ -53,11 +55,20 @@ func Load() (Config, error) {
 		upstreams[prefix] = strings.TrimRight(v, "/")
 	}
 
-	origins := strings.Split(getEnv("ALLOWED_ORIGINS", "http://localhost:3000"), ",")
+	origins := splitNonempty(getEnv("ALLOWED_ORIGINS", "http://localhost:3000"))
+	env := getEnv("ENV", "development")
+	if err := checkOrigins(env, origins); err != nil {
+		return Config{}, err
+	}
+
+	trusted := splitNonempty(os.Getenv("TRUSTED_PROXY_CIDRS"))
+	if err := checkTrustedProxies(env, trusted); err != nil {
+		return Config{}, err
+	}
 
 	return Config{
-		TrustedProxies: splitNonempty(os.Getenv("TRUSTED_PROXY_CIDRS")),
-		Env:            getEnv("ENV", "development"),
+		TrustedProxies: trusted,
+		Env:            env,
 		Port:           getEnv("PORT", "8080"),
 		LogLevel:       getEnv("LOG_LEVEL", "info"),
 		AllowedOrigins: origins,
@@ -80,4 +91,52 @@ func getEnv(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+// checkOrigins: CORS lists exact origins; production accepts only HTTPS
+// origins that are not local (PLT-02).
+func checkOrigins(env string, origins []string) error {
+	if len(origins) == 0 {
+		return fmt.Errorf("gateway config: ALLOWED_ORIGINS is empty")
+	}
+	for _, o := range origins {
+		u, err := url.Parse(o)
+		if o == "*" || err != nil || u.Host == "" || u.Path != "" || u.RawQuery != "" || strings.Contains(o, "*") {
+			return fmt.Errorf("gateway config: ALLOWED_ORIGINS must list exact origins (scheme://host[:port])")
+		}
+		if env == "production" {
+			host := u.Hostname()
+			if u.Scheme != "https" || host == "localhost" || host == "127.0.0.1" || strings.HasSuffix(host, ".local") {
+				return fmt.Errorf("gateway config: production ALLOWED_ORIGINS must be public https origins, got %q", o)
+			}
+		}
+	}
+	return nil
+}
+
+// checkTrustedProxies: the gateway takes the client IP (rate limits, logs)
+// from X-Forwarded-For only when the request comes from one of these
+// networks. Production always sits behind the TLS reverse proxy, so an
+// empty list would count every visitor as the proxy's single address, and
+// a catch-all range would let anyone forge their IP.
+func checkTrustedProxies(env string, cidrs []string) error {
+	for _, c := range cidrs {
+		if !strings.Contains(c, "/") {
+			if net.ParseIP(c) == nil {
+				return fmt.Errorf("gateway config: TRUSTED_PROXY_CIDRS entry %q is not an IP or CIDR", c)
+			}
+			continue
+		}
+		_, n, err := net.ParseCIDR(c)
+		if err != nil {
+			return fmt.Errorf("gateway config: TRUSTED_PROXY_CIDRS entry %q is not an IP or CIDR", c)
+		}
+		if ones, _ := n.Mask.Size(); ones == 0 {
+			return fmt.Errorf("gateway config: TRUSTED_PROXY_CIDRS must not trust every address (%q)", c)
+		}
+	}
+	if env == "production" && len(cidrs) == 0 {
+		return fmt.Errorf("gateway config: production requires TRUSTED_PROXY_CIDRS (the reverse proxy's network)")
+	}
+	return nil
 }

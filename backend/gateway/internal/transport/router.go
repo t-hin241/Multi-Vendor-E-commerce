@@ -31,6 +31,10 @@ func NewRouter(cfg config.Config, log zerolog.Logger) (*gin.Engine, error) {
 	r.Use(middleware.RequestID())
 	r.Use(middleware.StructuredLogging(log))
 	r.Use(middleware.Recovery(log))
+	// PLT-01/02: no internal route through the public entry point, bounded
+	// bodies, and per-client-IP rate limits (ClientIP honours only the
+	// trusted proxies configured above).
+	r.Use(denyInternal(), limitBody(), newRateLimiter().middleware())
 	r.Use(cors.New(cors.Config{
 		AllowOrigins:     cfg.AllowedOrigins,
 		AllowMethods:     []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},

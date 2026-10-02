@@ -35,7 +35,7 @@ func testRouter(jwt *authjwt.Manager) http.Handler {
 		Payment: &PaymentHandler{}, Webhook: &WebhookHandler{},
 		Refund: NewRefundHandler(usecase.NewRefundUseCase(nil, nil, zerolog.Nop()), zerolog.Nop()),
 		Admin:  NewAdminHandler(usecase.NewReconciliationUseCase(usecase.ReconciliationDeps{}), usecase.NewSettlementUseCase(usecase.SettlementDeps{}), zerolog.Nop()),
-	}, testServiceKey)
+	}, serviceauth.SharedKey(testServiceKey))
 }
 
 func TestRefundRoutesRequireServiceKeyOrAdmin(t *testing.T) {

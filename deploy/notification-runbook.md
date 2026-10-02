@@ -1,5 +1,7 @@
 # Notification upgrade — rollout, vận hành và rollback
 
+> Từ đợt Platform (PLT-03): Order và Vendor gửi yêu cầu thông báo qua event bus (`order.notification_requested`, `vendor.notification_requested`, consumer `notification-requests`); route `POST /internal/notifications` chỉ còn dùng khi `EVENT_PUBLISHING=http` và chỉ nhận Order, Vendor (khóa riêng từng service). Xem [platform-runbook](platform-runbook.md).
+
 Xem [chi tiết module](../docs/module-details/10-notification.md).
 
 ## Cấu hình

@@ -92,8 +92,11 @@ func (s Service) upstream(name string) (Upstream, bool) {
 // call is one read to run in parallel.
 type call struct {
 	source string
-	path   string
-	query  url.Values
+	// upstream is the service to ask when source names something else
+	// than the service (e.g. "order-events").
+	upstream string
+	path     string
+	query    url.Values
 }
 
 type result struct {
@@ -109,7 +112,11 @@ func (s Service) fetch(ctx context.Context, authorization string, calls []call) 
 	var mu sync.Mutex
 	var wg sync.WaitGroup
 	for _, c := range calls {
-		u, ok := s.upstream(c.source)
+		name := c.upstream
+		if name == "" {
+			name = c.source
+		}
+		u, ok := s.upstream(name)
 		if !ok {
 			continue
 		}

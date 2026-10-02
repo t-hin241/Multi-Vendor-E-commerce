@@ -26,7 +26,7 @@ func NewRouter(
 	adminHandler *AdminHandler,
 	internalHandler *InternalHandler,
 	returnHandler *ReturnHandler,
-	internalKey string,
+	internal *serviceauth.Verifier,
 	checkers ...health.Checker,
 ) *gin.Engine {
 	if env == "production" {
@@ -90,22 +90,23 @@ func NewRouter(
 		adminGroup.POST("/:id/refunds", adminHandler.CreateRefund)
 	}
 
-	// Every internal route requires the service key: they expose buyer
-	// addresses, totals and payment transitions.
-	requireService := serviceauth.Require(internalKey, serviceauth.Header)
-	internalGroup := r.Group("/internal", requireService)
+	// Every internal route requires a service identity and names the
+	// services allowed to call it: they expose buyer addresses, totals and
+	// payment transitions (PLT-01, least privilege).
+	internalGroup := r.Group("/internal")
 	{
-		internalGroup.GET("/orders/:id", internalHandler.Get)
-		internalGroup.POST("/orders/:id/mark-paid", internalHandler.MarkPaid)
-		internalGroup.POST("/orders/:id/mark-payment-failed", internalHandler.MarkPaymentFailed)
-		internalGroup.GET("/orders/:id/inventory-status", internalHandler.InventoryStatus)
-		internalGroup.GET("/orders/products/quantity-sold", internalHandler.QuantitySoldByProductIDs)
-		internalGroup.GET("/orders/review-eligibility", internalHandler.ListReviewEligibility)
-		internalGroup.GET("/vendor-orders/:id", internalHandler.GetVendorOrder)
-		internalGroup.POST("/inventory-events", internalHandler.InventoryEvent)
-		internalGroup.POST("/refund-events", internalHandler.RefundEvent)
-		internalGroup.POST("/settlements/holds", internalHandler.SettlementHolds)
-		internalGroup.POST("/shipment-events", internalHandler.ShipmentEvent)
+		payment := internal.Allow("payment")
+		internalGroup.GET("/orders/:id", payment, internalHandler.Get)
+		internalGroup.POST("/orders/:id/mark-paid", payment, internalHandler.MarkPaid)
+		internalGroup.POST("/orders/:id/mark-payment-failed", payment, internalHandler.MarkPaymentFailed)
+		internalGroup.GET("/orders/:id/inventory-status", internal.Allow("inventory"), internalHandler.InventoryStatus)
+		internalGroup.GET("/orders/products/quantity-sold", internal.Allow("catalog"), internalHandler.QuantitySoldByProductIDs)
+		internalGroup.GET("/orders/review-eligibility", internal.Allow("review"), internalHandler.ListReviewEligibility)
+		internalGroup.GET("/vendor-orders/:id", internal.Allow("shipment"), internalHandler.GetVendorOrder)
+		internalGroup.POST("/inventory-events", internal.Allow("inventory"), internalHandler.InventoryEvent)
+		internalGroup.POST("/refund-events", payment, internalHandler.RefundEvent)
+		internalGroup.POST("/settlements/holds", payment, internalHandler.SettlementHolds)
+		internalGroup.POST("/shipment-events", internal.Allow("shipment"), internalHandler.ShipmentEvent)
 	}
 
 	return r

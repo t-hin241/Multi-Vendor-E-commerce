@@ -23,7 +23,7 @@ func NewRouter(
 	adminHandler *AdminHandler,
 	internalHandler *InternalHandler,
 	attributeHandler *AttributeHandler,
-	internalKey string,
+	internal *serviceauth.Verifier,
 	checkers ...health.Checker,
 ) *gin.Engine {
 	if env == "production" {
@@ -95,8 +95,8 @@ func NewRouter(
 		adminGroup.PATCH("/:id/reject", adminHandler.Reject)
 	}
 
-	r.GET("/internal/products/:id", serviceauth.Require(internalKey, serviceauth.Header), internalHandler.GetByID)
-	r.GET("/internal/products/variants/:variantId", serviceauth.Require(internalKey, serviceauth.Header), internalHandler.GetVariantOwner)
+	r.GET("/internal/products/:id", internal.Allow("cart", "inventory", "order"), internalHandler.GetByID)
+	r.GET("/internal/products/variants/:variantId", internal.Allow("cart", "inventory", "order"), internalHandler.GetVariantOwner)
 
 	return r
 }
