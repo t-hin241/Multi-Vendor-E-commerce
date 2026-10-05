@@ -1069,9 +1069,36 @@ func (f *fakeCartConsumptionRepository) Stats(context.Context) (domain.CartConsu
 }
 
 type fakeCatalogGateway struct {
+	batchCalls int
 	products   map[string]*adapter.ProductInfo
 	variants   map[string]*adapter.VariantInfo
 	getProduct func(string) (*adapter.ProductInfo, error)
+}
+
+func (f *fakeCatalogGateway) GetCheckoutSnapshot(ctx context.Context, productIDs, variantIDs []string) (*adapter.CatalogSnapshot, error) {
+	f.batchCalls++
+	out := &adapter.CatalogSnapshot{Products: map[string]*adapter.ProductInfo{}, Variants: map[string]*adapter.VariantInfo{}}
+	for _, id := range productIDs {
+		if _, exists := out.Products[id]; exists {
+			continue
+		}
+		p, err := f.GetProduct(ctx, id)
+		if err != nil {
+			if app, ok := err.(*apperror.Error); ok && app.Code == apperror.CodeNotFound {
+				continue
+			}
+			return nil, err
+		}
+		cp := *p
+		out.Products[id] = &cp
+	}
+	for _, id := range variantIDs {
+		if v := f.variants[id]; v != nil {
+			cp := *v
+			out.Variants[id] = &cp
+		}
+	}
+	return out, nil
 }
 
 func newFakeCatalogGateway() *fakeCatalogGateway {

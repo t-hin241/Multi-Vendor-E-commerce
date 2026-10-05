@@ -12,6 +12,7 @@ import (
 
 	"shopee/backend/pkg/apperror"
 	"shopee/backend/pkg/serviceauth"
+	"shopee/backend/pkg/telemetry"
 	"shopee/backend/services/order/internal/domain"
 )
 
@@ -46,7 +47,7 @@ type HTTPShipmentClient struct {
 }
 
 func NewHTTPShipmentClient(baseURL, key string) *HTTPShipmentClient {
-	return &HTTPShipmentClient{baseURL: baseURL, key: key, client: &http.Client{Timeout: 5 * time.Second}}
+	return &HTTPShipmentClient{baseURL: baseURL, key: key, client: telemetry.NewHTTPClient(5 * time.Second)}
 }
 
 func (c *HTTPShipmentClient) post(ctx context.Context, path string, payload, out any) error {

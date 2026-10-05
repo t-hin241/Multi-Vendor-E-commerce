@@ -9,8 +9,21 @@ name: shopee
 # PUBLIC_BIND_ADDRESS). On a VPS the public entry point is Caddy with TLS:
 # add -f deploy/compose.edge.yml (see deploy/edge-runbook.md).
 
+# Resource budgets for a 4 vCPU / 8 GB VPS (deploy/observability-runbook.md):
+# every container has a memory limit, Go processes a GOMEMLIMIT at ~85% of
+# it (the GC works harder before the kernel kills), and container logs
+# rotate at 3 x 10 MB so they cannot fill the disk. No CPU limits: throttling
+# would hide where the time goes.
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 x-service-defaults: &service-defaults
   restart: unless-stopped
+  logging: *logging
+  mem_limit: 128m
   networks:
     - shopee
   # Each service waits for what it uses: Redis only for identity, payment,
@@ -37,12 +50,52 @@ x-service-env-defaults: &service-env-defaults
   INTERNAL_AUTH_ACCEPT_SHARED_KEY: ${INTERNAL_AUTH_ACCEPT_SHARED_KEY:-false}
   # PLT-03: producers publish domain events to JetStream; "http" = rollback.
   EVENT_PUBLISHING: ${EVENT_PUBLISHING:-jetstream}
+  GOMEMLIMIT: 108MiB
+  # Telemetry (pkg/telemetry): /metrics on :9464, reachable inside the
+  # Docker network only. Traces are exported only when an OTLP endpoint is
+  # set (deploy/observability: http://tempo:4318).
+  OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+  OTEL_TRACES_SAMPLER_ARG: ${OTEL_TRACES_SAMPLER_ARG:-0.1}
+  PPROF_ENABLED: ${PPROF_ENABLED:-false}
 
 services:
   postgres:
-    image: postgres:16-alpine
+    image: postgres:16.15-alpine3.24@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea
     restart: unless-stopped
     networks: [shopee]
+    logging: *logging
+    # 2 GB of the 8 GB budget. Connections: the services' DB_MAX_CONNS add
+    # up to 84 (sized from load-test pool usage: Catalog serves every
+    # storefront read and every cart/checkout price lookup), plus migrator,
+    # monitor and superuser headroom, under 100. Change them together.
+    # pg_stat_statements needs a restart to load; slow statements (> 500 ms)
+    # are logged without their parameter values (they can hold personal data).
+    mem_limit: 2g
+    shm_size: 256m
+    command:
+      - postgres
+      - -c
+      - max_connections=100
+      - -c
+      - shared_buffers=512MB
+      - -c
+      - effective_cache_size=1536MB
+      - -c
+      - work_mem=8MB
+      - -c
+      - maintenance_work_mem=128MB
+      - -c
+      - max_wal_size=1GB
+      - -c
+      - shared_preload_libraries=pg_stat_statements
+      - -c
+      - pg_stat_statements.track=top
+      - -c
+      - track_io_timing=on
+      - -c
+      - log_min_duration_statement=500
+      - -c
+      - log_parameter_max_length=0
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-shopee}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
@@ -74,13 +127,16 @@ services:
       retries: 10
 
   redis:
-    image: redis:7-alpine
+    image: redis:7.4.11-alpine3.21@sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499
     restart: unless-stopped
     networks: [shopee]
     # Notification's delivery jobs (Asynq) live here: append-only file so a
     # restart keeps them, and never evict keys to free memory (PostgreSQL
-    # can rebuild lost jobs, but eviction would make that routine).
-    command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec", "--maxmemory-policy", "noeviction"]
+    # can rebuild lost jobs, but eviction would make that routine). At
+    # maxmemory, writes fail instead: an alert fires at 80% of it.
+    command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec", "--maxmemory", "192mb", "--maxmemory-policy", "noeviction"]
+    logging: *logging
+    mem_limit: 256m
     ports:
       - "${INTERNAL_BIND_ADDRESS:-127.0.0.1}:${REDIS_PORT:-6379}:6379"
     volumes:
@@ -92,7 +148,7 @@ services:
       retries: 10
 
   nats:
-    image: nats:2-alpine
+    image: nats:2.14.7-alpine3.22@sha256:4063edae0717ba5f7501bfde75f97fd9b57f5b93597b92c70b6a6fbbf6a74e06
     restart: unless-stopped
     networks: [shopee]
     # Per-service users and permissions (deploy/nats/nats.conf): a service
@@ -101,7 +157,10 @@ services:
     # in double quotes: NATS parses a variable's value as configuration, so
     # an unquoted hex key such as "5e62..." would read as a number.
     command: ["-c", "/etc/nats/nats.conf"]
+    logging: *logging
+    mem_limit: 256m
     environment:
+      GOMEMLIMIT: 216MiB
       VENDOR_EVENTBUS_PASSWORD: '"${VENDOR_INTERNAL_KEY:-${IDENTITY_SERVICE_KEY}}"'
       CATALOG_EVENTBUS_PASSWORD: '"${CATALOG_INTERNAL_KEY:-${IDENTITY_SERVICE_KEY}}"'
       INVENTORY_EVENTBUS_PASSWORD: '"${INVENTORY_INTERNAL_KEY:-${IDENTITY_SERVICE_KEY}}"'
@@ -121,12 +180,19 @@ services:
       timeout: 5s
       retries: 10
 
+  # The last community MinIO image, pinned so nothing newer or different is
+  # pulled. Upstream is archived and minio/minio is gone from Docker Hub and
+  # quay.io: this pulls only on a host that already has it, and it gets no
+  # more security fixes. Replacement: docs/module-details/16-object-storage.md.
   minio:
-    image: minio/minio:latest
+    image: minio/minio:RELEASE.2025-09-07T16-13-09Z@sha256:14cea493d9a34af32f524e538b8346cf79f3321eff8e708c1e2960462bd8936e
     restart: unless-stopped
     networks: [shopee]
     command: server /data --console-address ":9001"
+    logging: *logging
+    mem_limit: 256m
     environment:
+      GOMEMLIMIT: 216MiB
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:?set MINIO_ROOT_USER in .env}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD in .env}
     ports:
@@ -153,6 +219,7 @@ services:
     environment:
       <<: *service-env-defaults
       INTERNAL_SERVICE_NAME: identity
+      DB_MAX_CONNS: "8"
       INTERNAL_SERVICE_KEY: ${IDENTITY_INTERNAL_KEY:-}
       IDENTITY_RESET_DELIVERY_KEY: ${IDENTITY_RESET_DELIVERY_KEY:?set IDENTITY_RESET_DELIVERY_KEY in .env}
       IDENTITY_RESET_ENCRYPTION_KEY: ${IDENTITY_RESET_ENCRYPTION_KEY:?set IDENTITY_RESET_ENCRYPTION_KEY in .env}
@@ -182,6 +249,7 @@ services:
     environment:
       <<: *service-env-defaults
       INTERNAL_SERVICE_NAME: vendor
+      DB_MAX_CONNS: "6"
       INTERNAL_SERVICE_KEY: ${VENDOR_INTERNAL_KEY:-}
       EVENTBUS_PASSWORD: ${VENDOR_INTERNAL_KEY:-${IDENTITY_SERVICE_KEY}}
       PORT: "8082"
@@ -203,6 +271,9 @@ services:
 
   catalog:
     <<: *service-defaults
+    # Load test peak 107 MB (it serves every storefront read and price
+    # lookup); the other services peak under 80 MB.
+    mem_limit: 160m
     depends_on:
       postgres:
         condition: service_healthy
@@ -218,6 +289,8 @@ services:
     environment:
       <<: *service-env-defaults
       INTERNAL_SERVICE_NAME: catalog
+      DB_MAX_CONNS: "24"
+      GOMEMLIMIT: 136MiB
       INTERNAL_SERVICE_KEY: ${CATALOG_INTERNAL_KEY:-}
       EVENTBUS_PASSWORD: ${CATALOG_INTERNAL_KEY:-${IDENTITY_SERVICE_KEY}}
       PORT: "8083"
@@ -251,6 +324,7 @@ services:
     environment:
       <<: *service-env-defaults
       INTERNAL_SERVICE_NAME: inventory
+      DB_MAX_CONNS: "8"
       INTERNAL_SERVICE_KEY: ${INVENTORY_INTERNAL_KEY:-}
       EVENTBUS_PASSWORD: ${INVENTORY_INTERNAL_KEY:-${IDENTITY_SERVICE_KEY}}
       PORT: "8084"
@@ -277,6 +351,7 @@ services:
     environment:
       <<: *service-env-defaults
       INTERNAL_SERVICE_NAME: cart
+      DB_MAX_CONNS: "8"
       INTERNAL_SERVICE_KEY: ${CART_INTERNAL_KEY:-}
       PORT: "8085"
       DATABASE_URL: postgres://cart_app:${CART_DB_PASSWORD:?set CART_DB_PASSWORD in .env}@postgres:5432/cart_db?sslmode=disable
@@ -311,6 +386,7 @@ services:
     environment:
       <<: *service-env-defaults
       INTERNAL_SERVICE_NAME: order
+      DB_MAX_CONNS: "10"
       INTERNAL_SERVICE_KEY: ${ORDER_INTERNAL_KEY:-}
       EVENTBUS_PASSWORD: ${ORDER_INTERNAL_KEY:-${IDENTITY_SERVICE_KEY}}
       PORT: "8086"
@@ -345,6 +421,7 @@ services:
     environment:
       <<: *service-env-defaults
       INTERNAL_SERVICE_NAME: payment
+      DB_MAX_CONNS: "6"
       INTERNAL_SERVICE_KEY: ${PAYMENT_INTERNAL_KEY:-}
       EVENTBUS_PASSWORD: ${PAYMENT_INTERNAL_KEY:-${IDENTITY_SERVICE_KEY}}
       PORT: "8087"
@@ -380,6 +457,7 @@ services:
     environment:
       <<: *service-env-defaults
       INTERNAL_SERVICE_NAME: shipment
+      DB_MAX_CONNS: "4"
       INTERNAL_SERVICE_KEY: ${SHIPMENT_INTERNAL_KEY:-}
       EVENTBUS_PASSWORD: ${SHIPMENT_INTERNAL_KEY:-${IDENTITY_SERVICE_KEY}}
       PORT: "8088"
@@ -402,6 +480,7 @@ services:
     environment:
       <<: *service-env-defaults
       INTERNAL_SERVICE_NAME: admin
+      DB_MAX_CONNS: "2"
       INTERNAL_SERVICE_KEY: ${ADMIN_INTERNAL_KEY:-}
       PORT: "8089"
       DATABASE_URL: postgres://admin_app:${ADMIN_DB_PASSWORD:?set ADMIN_DB_PASSWORD in .env}@postgres:5432/admin_db?sslmode=disable
@@ -440,6 +519,7 @@ services:
     environment:
       <<: *service-env-defaults
       INTERNAL_SERVICE_NAME: review
+      DB_MAX_CONNS: "4"
       INTERNAL_SERVICE_KEY: ${REVIEW_INTERNAL_KEY:-}
       PORT: "8091"
       DATABASE_URL: postgres://review_app:${REVIEW_DB_PASSWORD:?set REVIEW_DB_PASSWORD in .env}@postgres:5432/review_db?sslmode=disable
@@ -477,6 +557,7 @@ services:
     environment:
       <<: *service-env-defaults
       INTERNAL_SERVICE_NAME: notification
+      DB_MAX_CONNS: "4"
       INTERNAL_SERVICE_KEY: ${NOTIFICATION_INTERNAL_KEY:-}
       EVENTBUS_PASSWORD: ${NOTIFICATION_INTERNAL_KEY:-${IDENTITY_SERVICE_KEY}}
       IDENTITY_RESET_DELIVERY_KEY: ${IDENTITY_RESET_DELIVERY_KEY:?set IDENTITY_RESET_DELIVERY_KEY in .env}
@@ -503,6 +584,8 @@ services:
   gateway:
     restart: unless-stopped
     networks: [shopee]
+    logging: *logging
+    mem_limit: 128m
     build:
       context: ./backend
       dockerfile: gateway/Dockerfile
@@ -510,6 +593,10 @@ services:
       ENV: ${ENV:-development}
       LOG_LEVEL: info
       PORT: "8080"
+      GOMEMLIMIT: 108MiB
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+      OTEL_TRACES_SAMPLER_ARG: ${OTEL_TRACES_SAMPLER_ARG:-0.1}
+      PPROF_ENABLED: ${PPROF_ENABLED:-false}
       TRUSTED_PROXY_CIDRS: ${GATEWAY_TRUSTED_PROXY_CIDRS:-}
       ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:3000}
       IDENTITY_SERVICE_URL: http://identity:8081
@@ -541,6 +628,8 @@ services:
   frontend:
     restart: unless-stopped
     networks: [shopee]
+    logging: *logging
+    mem_limit: 512m
     build:
       context: ./frontend
       dockerfile: Dockerfile
@@ -548,6 +637,8 @@ services:
         NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-http://localhost:8080}
     environment:
       NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-http://localhost:8080}
+      # V8's heap stays inside the 512 MB container limit.
+      NODE_OPTIONS: --max-old-space-size=384
     depends_on:
       - gateway
     ports:

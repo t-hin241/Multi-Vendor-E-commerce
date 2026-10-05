@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"net/http"
 	"time"
+
+	"shopee/backend/pkg/telemetry"
 )
 
 type ResetNotifier struct{ BaseURL, Key string }
@@ -23,7 +25,7 @@ func (n ResetNotifier) NotifyReset(ctx context.Context, id string) error {
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Reset-Delivery-Key", n.Key)
 	req.Header.Set("X-Request-ID", id)
-	res, err := (&http.Client{Timeout: 25 * time.Second}).Do(req)
+	res, err := telemetry.NewHTTPClient(25 * time.Second).Do(req)
 	if err != nil {
 		return fmt.Errorf("reset notification unavailable")
 	}

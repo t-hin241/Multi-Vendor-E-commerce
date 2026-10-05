@@ -16,6 +16,7 @@ import (
 	"shopee/backend/pkg/health"
 	"shopee/backend/pkg/httpresponse"
 	"shopee/backend/pkg/middleware"
+	"shopee/backend/pkg/telemetry"
 )
 
 // NewRouter builds the gateway's Gin engine.
@@ -29,6 +30,7 @@ func NewRouter(cfg config.Config, log zerolog.Logger) (*gin.Engine, error) {
 		return nil, err
 	}
 	r.Use(middleware.RequestID())
+	r.Use(telemetry.UntrustedEdge(), telemetry.Middleware())
 	r.Use(middleware.StructuredLogging(log))
 	r.Use(middleware.Recovery(log))
 	// PLT-01/02: no internal route through the public entry point, bounded
@@ -73,6 +75,7 @@ func NewRouter(cfg config.Config, log zerolog.Logger) (*gin.Engine, error) {
 		path := c.Request.URL.Path
 		for _, rt := range routes {
 			if path == rt.prefix || strings.HasPrefix(path, rt.prefix+"/") {
+				telemetry.SetRoute(c, rt.prefix+"/*")
 				rt.handler(c)
 				return
 			}

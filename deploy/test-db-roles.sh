@@ -19,7 +19,8 @@ SU="psql -X -q -v ON_ERROR_STOP=1 $H -U ${PGUSER}"
 fail=0; ok(){ echo "  PASS $1"; }; bad(){ echo "  FAIL $1"; fail=1; }
 # clean slate
 for d in identity vendor catalog inventory cart order payment shipment admin notification review; do $SU -d $ADMIN_DB -c "DROP DATABASE IF EXISTS ${d}_db" 2>/dev/null; done
-for r in shopee_migrator identity_app vendor_app catalog_app inventory_app cart_app order_app payment_app shipment_app admin_app notification_app review_app; do $SU -d $ADMIN_DB -c "DROP ROLE IF EXISTS $r" 2>/dev/null; done
+$SU -d $ADMIN_DB -c "DROP OWNED BY shopee_monitor" >/dev/null 2>&1; $SU -d postgres -c "DROP OWNED BY shopee_monitor" >/dev/null 2>&1
+for r in shopee_monitor shopee_migrator identity_app vendor_app catalog_app inventory_app cart_app order_app payment_app shipment_app admin_app notification_app review_app; do $SU -d $ADMIN_DB -c "DROP ROLE IF EXISTS $r" 2>/dev/null; done
 $SU -d $ADMIN_DB -c "REVOKE ALL ON DATABASE postgres FROM PUBLIC" >/dev/null; $SU -d $ADMIN_DB -c "GRANT CONNECT, TEMPORARY ON DATABASE postgres TO PUBLIC" >/dev/null
 # an existing deployment: catalog and order migrated by the superuser
 for d in catalog order; do $SU -d $ADMIN_DB -c "CREATE DATABASE ${d}_db"; for f in $(ls backend/services/$d/migrations/*.up.sql | sort); do $SU -d ${d}_db -f $f >/dev/null || bad "superuser migration $f"; done; done
@@ -51,5 +52,16 @@ echo "### fresh database, full migrations as the migrator"
 fresh=1; for f in $(ls backend/services/review/migrations/*.up.sql | sort); do MIG review_db -f $f >/dev/null || { fresh=0; bad "migrator migration $f: $(MIG review_db -f $f | tail -1)"; }; done; [ $fresh = 1 ] && ok "review migrations (with pgcrypto) run as the migrator"
 r=$(APP review review_db "select count(*) from reviews"); [ "$r" = 0 ] && ok "review_app reads tables created by the migrator" || bad "review_app: $r"
 r=$(MIG review_db -c "select count(*) from schema_migrations"); [ "$r" = 0 ] && ok "migrator uses the pre-created ledger" || bad "ledger for migrator: $r"
+echo "### monitoring role (deploy/postgres-init/monitor-role.psql)"
+run_monitor(){ $SU -v monitor_password=pwmonitor0123456789abcdef -d postgres -f deploy/postgres-init/monitor-role.psql; }
+run_monitor >/dev/null && run_monitor >/dev/null && ok "monitor role script ran twice" || bad "monitor role script"
+MON(){ PGPASSWORD=pwmonitor0123456789abcdef psql -X -q -tA $H -U shopee_monitor -d $1 -c "$2" 2>&1; }
+r=$(MON postgres "select count(*) > 0 from pg_stat_database"); [ "$r" = t ] && ok "monitor reads server statistics" || bad "monitor stats: $r"
+r=$(MON postgres "select count(*) from pg_extension where extname = 'pg_stat_statements'"); [ "$r" = 1 ] && ok "pg_stat_statements extension present" || bad "extension: $r"
+r=$(MON catalog_db "select 1"); echo "$r" | grep -qi "permission denied for database\|not have CONNECT" && ok "monitor cannot connect to a service database" || bad "monitor cross-db: $r"
+r=$(MON postgres "select rolsuper::text||rolcreatedb::text||rolcreaterole::text from pg_roles where rolname=current_user"); [ "$r" = falsefalsefalse ] && ok "monitor has no special attributes" || bad "monitor attrs: $r"
+run_roles >/dev/null || bad "roles rerun after monitor"
+r=$(MON postgres "select 1"); [ "$r" = 1 ] && ok "rerunning db-roles.psql keeps the monitor's access" || bad "monitor after roles rerun: $r"
+r=$(APP catalog catalog_db "select 1"); [ "$r" = 1 ] && ok "and the apps' access" || bad "apps after monitor: $r"
 echo "### result: $([ $fail = 0 ] && echo ALL PASS || echo FAILURES)"
 exit $fail

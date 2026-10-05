@@ -15,6 +15,7 @@ import (
 
 	"shopee/backend/pkg/apperror"
 	"shopee/backend/pkg/serviceauth"
+	"shopee/backend/pkg/telemetry"
 )
 
 // CartLine is one snapshotted cart line. LineID identifies the exact line
@@ -53,7 +54,7 @@ type HTTPCartClient struct {
 }
 
 func NewHTTPCartClient(baseURL, key string) *HTTPCartClient {
-	return &HTTPCartClient{baseURL: baseURL, key: key, client: &http.Client{Timeout: 5 * time.Second}}
+	return &HTTPCartClient{baseURL: baseURL, key: key, client: telemetry.NewHTTPClient(5 * time.Second)}
 }
 
 type snapshotEnvelope struct {

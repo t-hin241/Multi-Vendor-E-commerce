@@ -366,7 +366,7 @@ func (uc *ProductUseCase) GetPublicBySlug(ctx context.Context, slug, viewerUserI
 	if err != nil {
 		return nil, nil, nil, nil, nil, nil, false, "", apperror.Internal(err)
 	}
-	optionDetailsByVariant, err := uc.resolveVariantOptionsForProduct(ctx, p.CategoryID, optionsByVariant)
+	optionDetailsByVariant, err := uc.resolveVariantOptionsForProduct(ctx, optionsByVariant)
 	if err != nil {
 		return nil, nil, nil, nil, nil, nil, false, "", err
 	}
@@ -877,7 +877,7 @@ func (uc *ProductUseCase) GetForModeration(ctx context.Context, productID string
 	if err != nil {
 		return nil, nil, nil, nil, nil, nil, apperror.Internal(err)
 	}
-	optionDetailsByVariant, err := uc.resolveVariantOptionsForProduct(ctx, p.CategoryID, optionsByVariant)
+	optionDetailsByVariant, err := uc.resolveVariantOptionsForProduct(ctx, optionsByVariant)
 	if err != nil {
 		return nil, nil, nil, nil, nil, nil, err
 	}
@@ -1092,7 +1092,7 @@ func (uc *ProductUseCase) ListVariantsForOwner(ctx context.Context, userID, prod
 		return nil, nil, apperror.Internal(err)
 	}
 
-	details, err := uc.resolveVariantOptionsForProduct(ctx, p.CategoryID, rawOptions)
+	details, err := uc.resolveVariantOptionsForProduct(ctx, rawOptions)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -1108,24 +1108,20 @@ func indexResolvedByAttribute(resolved []domain.ResolvedAttribute) map[string]do
 }
 
 // resolveVariantOptionsForProduct resolves every variant's option selections
-// to display labels for categoryID: primarily via the category's current
-// attribute-rule template, falling back to a direct by-id lookup
-// (AttributeTemplateResolver.LookupAttributeLabels) for any attribute/option
-// the template doesn't cover — e.g. a category_attribute_rules gap — so a
-// persisted, already-valid selection never displays a raw id. Only a truly
-// deleted attribute/option row falls through to the id itself.
-func (uc *ProductUseCase) resolveVariantOptionsForProduct(ctx context.Context, categoryID string, optionsByVariant map[string][]domain.VariantOptionSelection) (map[string][]domain.VariantOptionDetail, error) {
-	resolved, err := uc.attributeTemplate.ResolveTemplate(ctx, categoryID)
-	if err != nil {
-		return nil, err
-	}
-	resolvedByAttribute := indexResolvedByAttribute(resolved)
-
-	missingAttrIDs, missingOptIDs := missingIDsForFallback(resolvedByAttribute, optionsByVariant)
-	var fallbackAttrs map[string]*domain.Attribute
-	var fallbackOpts map[string]*domain.AttributeOption
-	if len(missingAttrIDs) > 0 || len(missingOptIDs) > 0 {
-		fallbackAttrs, fallbackOpts, err = uc.attributeTemplate.LookupAttributeLabels(ctx, missingAttrIDs, missingOptIDs)
+// to display labels (attribute name, option value) by a direct by-id lookup
+// of exactly the attributes and options the selections use. Labels are the
+// same rows the category template would give; resolving the whole template
+// instead read every option of every attribute of the category (thousands
+// of rows) on each product page. A deleted attribute/option row falls
+// through to the id itself.
+func (uc *ProductUseCase) resolveVariantOptionsForProduct(ctx context.Context, optionsByVariant map[string][]domain.VariantOptionSelection) (map[string][]domain.VariantOptionDetail, error) {
+	none := map[string]domain.ResolvedAttribute{}
+	attrIDs, optIDs := missingIDsForFallback(none, optionsByVariant)
+	var attrs map[string]*domain.Attribute
+	var opts map[string]*domain.AttributeOption
+	if len(attrIDs) > 0 || len(optIDs) > 0 {
+		var err error
+		attrs, opts, err = uc.attributeTemplate.LookupAttributeLabels(ctx, attrIDs, optIDs)
 		if err != nil {
 			return nil, err
 		}
@@ -1133,7 +1129,7 @@ func (uc *ProductUseCase) resolveVariantOptionsForProduct(ctx context.Context, c
 
 	out := make(map[string][]domain.VariantOptionDetail, len(optionsByVariant))
 	for variantID, selections := range optionsByVariant {
-		out[variantID] = resolveVariantOptionDetails(resolvedByAttribute, fallbackAttrs, fallbackOpts, selections)
+		out[variantID] = resolveVariantOptionDetails(none, attrs, opts, selections)
 	}
 	return out, nil
 }
@@ -1231,7 +1227,7 @@ func (uc *ProductUseCase) GetVariantOwner(ctx context.Context, variantID string)
 	if err != nil {
 		return "", "", "", nil, apperror.Internal(err)
 	}
-	details, err := uc.resolveVariantOptionsForProduct(ctx, p.CategoryID, rawOptions)
+	details, err := uc.resolveVariantOptionsForProduct(ctx, rawOptions)
 	if err != nil {
 		return "", "", "", nil, err
 	}

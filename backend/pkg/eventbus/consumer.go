@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/nats-io/nats.go/jetstream"
+	"go.opentelemetry.io/otel/codes"
 
 	"shopee/backend/pkg/middleware"
 )
@@ -129,6 +130,9 @@ func sleep(ctx context.Context, d time.Duration) {
 // handle applies one message; the work itself is not cut short by
 // shutdown (bounded by the inbox transaction timeout).
 func (b *Bus) handle(ctx context.Context, inbox Inbox, s Subscription, msg jetstream.Msg) {
+	start := time.Now()
+	result := "ack"
+	defer func() { handleDuration.WithLabelValues(s.Durable, result).Observe(time.Since(start).Seconds()) }()
 	work := context.WithoutCancel(ctx)
 	attempt := 1
 	seq := "0"
@@ -144,15 +148,22 @@ func (b *Bus) handle(ctx context.Context, inbox Inbox, s Subscription, msg jetst
 			Payload: json.RawMessage(`{}`)}
 		if parkErr := inbox.Park(work, s.Durable, bad, attempt, "malformed envelope"); parkErr != nil {
 			log.Error().Err(parkErr).Msg("event_park_failed")
+			result = "retry"
 			_ = msg.NakWithDelay(retryDelay(attempt))
 			return
 		}
 		log.Error().Str("event_id", bad.EventID).Msg("event_parked_malformed")
+		result = "parked"
 		_ = msg.Ack()
 		return
 	}
 	log = log.With().Str("event_id", env.EventID).Str("type", env.Type).Logger()
+	if attempt == 1 {
+		observeLag(s.Durable, env.OccurredAt)
+	}
 	hctx := middleware.ContextWithRequestID(work, firstNonEmpty(env.CorrelationID, env.EventID))
+	hctx, span := startProcessSpan(hctx, s.Durable, msg.Headers(), env)
+	defer span.End()
 	err := inbox.Process(hctx, s.Durable, env, s.Handle)
 	if err == nil {
 		if ackErr := msg.Ack(); ackErr != nil {
@@ -161,17 +172,21 @@ func (b *Bus) handle(ctx context.Context, inbox Inbox, s Subscription, msg jetst
 		}
 		return
 	}
+	span.SetStatus(codes.Error, "not applied")
 	if IsPermanent(err) || attempt >= MaxAttempts {
 		if parkErr := inbox.Park(hctx, s.Durable, env, attempt, err.Error()); parkErr != nil {
 			log.Error().Err(parkErr).Msg("event_park_failed")
+			result = "retry"
 			_ = msg.NakWithDelay(retryDelay(attempt))
 			return
 		}
 		log.Error().Err(err).Bool("permanent", IsPermanent(err)).Msg("event_parked")
+		result = "parked"
 		_ = msg.Ack()
 		return
 	}
 	log.Warn().Err(err).Msg("event_retry")
+	result = "retry"
 	_ = msg.NakWithDelay(retryDelay(attempt))
 }
 

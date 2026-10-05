@@ -7,10 +7,11 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
-	"shopee/backend/pkg/serviceauth"
 	"time"
 
 	"shopee/backend/pkg/apperror"
+	"shopee/backend/pkg/serviceauth"
+	"shopee/backend/pkg/telemetry"
 )
 
 type HTTPCatalogClient struct {
@@ -20,7 +21,7 @@ type HTTPCatalogClient struct {
 }
 
 func NewHTTPCatalogClient(baseURL, key string) *HTTPCatalogClient {
-	return &HTTPCatalogClient{key: key, baseURL: baseURL, client: &http.Client{Timeout: 5 * time.Second}}
+	return &HTTPCatalogClient{key: key, baseURL: baseURL, client: telemetry.NewHTTPClient(5 * time.Second)}
 }
 
 type internalProductResponse struct {

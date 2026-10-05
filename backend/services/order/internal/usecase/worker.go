@@ -33,9 +33,11 @@ func (w OrderWorker) Run(ctx context.Context) {
 		if _, err := uc.ProcessCartConsumptions(ctx, batch); err != nil && ctx.Err() == nil {
 			uc.Log.Error().Err(err).Msg("order_cart_consume_worker_failed")
 		}
-		if _, err := uc.ProcessEffects(ctx, "", batch); err != nil && ctx.Err() == nil {
+		// Effects are claimed with a lease (a failed one is rescheduled), so
+		// draining never spins on the same rows.
+		drain(ctx, interval, batch, func() (int, error) { return uc.ProcessEffects(ctx, "", batch) }, func(err error) {
 			uc.Log.Error().Err(err).Msg("order_effect_worker_failed")
-		}
+		})
 		if _, err := uc.RecoverCheckouts(ctx, batch); err != nil && ctx.Err() == nil {
 			uc.Log.Error().Err(err).Msg("order_checkout_recovery_worker_failed")
 		}
@@ -50,6 +52,26 @@ func (w OrderWorker) Run(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+		}
+	}
+}
+
+// drain runs batches while they come back full, for at most budget, so a
+// backlog empties at the speed the work runs instead of one batch per tick
+// (20 effects per 5s was the ceiling of the paid-order pipeline under load:
+// docs/module-details/17-observability-capacity.md).
+func drain(ctx context.Context, budget time.Duration, batch int, run func() (int, error), failed func(error)) {
+	deadline := time.Now().Add(budget)
+	for ctx.Err() == nil {
+		n, err := run()
+		if err != nil {
+			if ctx.Err() == nil {
+				failed(err)
+			}
+			return
+		}
+		if n < batch || time.Now().After(deadline) {
+			return
 		}
 	}
 }

@@ -10,6 +10,7 @@ import (
 
 	"shopee/backend/pkg/apperror"
 	"shopee/backend/pkg/serviceauth"
+	"shopee/backend/pkg/telemetry"
 )
 
 type HTTPVendorClient struct {
@@ -19,7 +20,7 @@ type HTTPVendorClient struct {
 }
 
 func NewHTTPVendorClient(baseURL, key string) *HTTPVendorClient {
-	return &HTTPVendorClient{baseURL: baseURL, key: key, client: &http.Client{Timeout: 5 * time.Second}}
+	return &HTTPVendorClient{baseURL: baseURL, key: key, client: telemetry.NewHTTPClient(5 * time.Second)}
 }
 
 type vendorStatusResponse struct {

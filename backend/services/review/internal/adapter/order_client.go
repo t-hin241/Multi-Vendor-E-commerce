@@ -11,6 +11,7 @@ import (
 
 	"shopee/backend/pkg/apperror"
 	"shopee/backend/pkg/serviceauth"
+	"shopee/backend/pkg/telemetry"
 )
 
 // EligibleOrderItem is Order's proof that the buyer received this item in
@@ -36,7 +37,7 @@ type HTTPOrderClient struct {
 }
 
 func NewHTTPOrderClient(baseURL, key string) *HTTPOrderClient {
-	return &HTTPOrderClient{baseURL: baseURL, key: key, client: &http.Client{Timeout: 5 * time.Second}}
+	return &HTTPOrderClient{baseURL: baseURL, key: key, client: telemetry.NewHTTPClient(5 * time.Second)}
 }
 
 // ErrOrderUnavailable: Order did not answer, so eligibility is unknown and

@@ -14,6 +14,7 @@ import (
 	"shopee/backend/pkg/eventbus"
 	"shopee/backend/pkg/events"
 	"shopee/backend/pkg/serviceauth"
+	"shopee/backend/pkg/telemetry"
 	"shopee/backend/services/vendorsvc/internal/repository"
 )
 
@@ -36,7 +37,7 @@ func BusStatusSender(bus *eventbus.Bus) StatusSender {
 // HTTPStatusSender posts to each consumer directly (EVENT_PUBLISHING=http,
 // rollback only).
 func HTTPStatusSender(targets []string, key string) StatusSender {
-	client := &http.Client{Timeout: 3 * time.Second}
+	client := telemetry.NewHTTPClient(3 * time.Second)
 	return func(ctx context.Context, d repository.Delivery) error {
 		payload, err := json.Marshal(d.Status)
 		if err != nil {

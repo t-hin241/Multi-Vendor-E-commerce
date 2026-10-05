@@ -23,6 +23,7 @@ import (
 	"shopee/backend/pkg/eventbus"
 	"shopee/backend/pkg/httpresponse"
 	"shopee/backend/pkg/serviceauth"
+	"shopee/backend/pkg/telemetry"
 )
 
 type Status struct {
@@ -57,6 +58,48 @@ func (s Store) EventHandler() eventbus.Handler {
 		}
 		return applyStatus(ctx, tx, v)
 	}
+}
+
+// ApplyAll applies a page of statuses in one statement, with the same
+// version rule as Apply for each row. Reconciliation refreshes every shop's
+// storefront freshness bound (confirmed_at) every cycle: one statement per
+// shop made a cycle slower than the bound under load, and shops dropped off
+// the storefront.
+func (s Store) ApplyAll(ctx context.Context, vs []Status) error {
+	latest := make(map[string]Status, len(vs))
+	for _, v := range vs {
+		if !v.Valid() {
+			return apperror.Validation("Invalid vendor status event")
+		}
+		// One row per shop: a statement may not update the same row twice.
+		if held, ok := latest[v.VendorID]; !ok || v.Version > held.Version {
+			latest[v.VendorID] = v
+		}
+	}
+	if len(latest) == 0 {
+		return nil
+	}
+	// Rows in one fixed order, so concurrent writers of the same shops lock
+	// them in the same order and cannot deadlock.
+	ids := make([]string, 0, len(latest))
+	for id := range latest {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	statuses := make([]string, 0, len(latest))
+	versions := make([]int64, 0, len(latest))
+	for _, id := range ids {
+		v := latest[id]
+		statuses = append(statuses, v.Status)
+		versions = append(versions, v.Version)
+	}
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	_, err := s.Pool.Exec(ctx, `INSERT INTO vendor_sale_status(vendor_id,status,version)
+ SELECT * FROM unnest($1::uuid[], $2::text[], $3::bigint[]) ORDER BY 1
+ ON CONFLICT(vendor_id) DO UPDATE SET status=EXCLUDED.status,version=EXCLUDED.version,confirmed_at=now()
+ WHERE vendor_sale_status.version<EXCLUDED.version OR (vendor_sale_status.version=EXCLUDED.version AND vendor_sale_status.status=EXCLUDED.status)`, ids, statuses, versions)
+	return err
 }
 
 func applyStatus(ctx context.Context, q execer, v Status) error {
@@ -117,7 +160,7 @@ func (c Client) get(ctx context.Context, path string, out any) error {
 		return err
 	}
 	serviceauth.SetRequestHeaders(req, c.Key)
-	resp, err := (&http.Client{Timeout: 3 * time.Second}).Do(req)
+	resp, err := telemetry.NewHTTPClient(3 * time.Second).Do(req)
 	if err != nil {
 		return fmt.Errorf("vendor status unavailable")
 	}
@@ -163,16 +206,14 @@ func (c Client) Reconcile(ctx context.Context, store Store, log zerolog.Logger) 
 				log.Warn().Msg("vendor_status_reconciliation_failed")
 				break
 			}
-			failed := false
-			for _, v := range body.Data {
-				if err = store.Apply(ctx, v); err != nil {
-					log.Error().Msg("vendor_status_reconciliation_apply_failed")
-					failed = true
-					break
-				}
-				after = v.VendorID
+			if err = store.ApplyAll(ctx, body.Data); err != nil {
+				log.Error().Msg("vendor_status_reconciliation_apply_failed")
+				break
 			}
-			if failed || len(body.Data) < 100 {
+			if len(body.Data) > 0 {
+				after = body.Data[len(body.Data)-1].VendorID
+			}
+			if len(body.Data) < 100 {
 				break
 			}
 		}

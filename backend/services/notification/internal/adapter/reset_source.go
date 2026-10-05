@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"time"
 
+	"shopee/backend/pkg/telemetry"
 	"shopee/backend/services/notification/internal/domain"
 )
 
@@ -21,7 +22,7 @@ func (s ResetSource) GetResetMessage(ctx context.Context, id string) (*domain.Re
 	}
 	req.Header.Set("X-Reset-Delivery-Key", s.Key)
 	req.Header.Set("X-Request-ID", id)
-	res, err := (&http.Client{Timeout: 3 * time.Second}).Do(req)
+	res, err := telemetry.NewHTTPClient(3 * time.Second).Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("reset source unavailable")
 	}

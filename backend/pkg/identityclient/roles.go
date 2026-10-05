@@ -11,6 +11,7 @@ import (
 
 	"shopee/backend/pkg/apperror"
 	"shopee/backend/pkg/serviceauth"
+	"shopee/backend/pkg/telemetry"
 )
 
 type Client struct{ URL, Key string }
@@ -24,7 +25,7 @@ func (c Client) RequireRole(ctx context.Context, userID, role string) error {
 		return apperror.Internal(fmt.Errorf("identity role request invalid"))
 	}
 	serviceauth.SetRequestHeaders(req, c.Key)
-	resp, err := (&http.Client{Timeout: 2 * time.Second}).Do(req)
+	resp, err := telemetry.NewHTTPClient(2 * time.Second).Do(req)
 	if err != nil {
 		return apperror.Internal(fmt.Errorf("identity role verification unavailable"))
 	}

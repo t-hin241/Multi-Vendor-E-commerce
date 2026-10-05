@@ -9,6 +9,7 @@ import (
 
 	"shopee/backend/pkg/apperror"
 	"shopee/backend/pkg/serviceauth"
+	"shopee/backend/pkg/telemetry"
 )
 
 type VendorGateway interface {
@@ -21,7 +22,7 @@ type HTTPVendorClient struct {
 }
 
 func NewHTTPVendorClient(baseURL, key string) *HTTPVendorClient {
-	return &HTTPVendorClient{baseURL: baseURL, key: key, client: &http.Client{Timeout: 5 * time.Second}}
+	return &HTTPVendorClient{baseURL: baseURL, key: key, client: telemetry.NewHTTPClient(5 * time.Second)}
 }
 func (c *HTTPVendorClient) EnsureOwnedApproved(ctx context.Context, userID, vendorID string) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("%s/internal/vendors/%s/owned-by/%s", c.baseURL, url.PathEscape(vendorID), url.PathEscape(userID)), nil)

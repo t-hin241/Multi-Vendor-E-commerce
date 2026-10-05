@@ -14,6 +14,7 @@ type CategoryRepositoryPort interface {
 }
 
 type ProductRepositoryPort interface {
+	ReadCheckout(ctx context.Context, productIDs, variantIDs []string) (*domain.CheckoutSnapshot, error)
 	UpdateContent(context.Context, *domain.Product) error
 	Create(ctx context.Context, p *domain.Product) error
 	SlugExists(ctx context.Context, slug string) (bool, error)

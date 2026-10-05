@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"time"
+
+	"shopee/backend/pkg/telemetry"
 )
 
 // RemoteVerifier fails closed and deliberately does not cache revocation state.
@@ -16,7 +18,7 @@ func RemoteVerifier(baseURL, key string) func(context.Context, *Claims) error {
 // RemoteVerifierWith is RemoteVerifier with the caller's own way of
 // identifying itself to Identity (serviceauth.SetRequestHeaders).
 func RemoteVerifierWith(baseURL string, sign func(*http.Request)) func(context.Context, *Claims) error {
-	client := &http.Client{Timeout: 2 * time.Second}
+	client := telemetry.NewHTTPClient(2 * time.Second)
 	return func(ctx context.Context, claims *Claims) error {
 		if claims.SessionID == "" {
 			return ErrInvalidToken

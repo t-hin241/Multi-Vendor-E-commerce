@@ -11,6 +11,7 @@ import (
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
 	"github.com/rs/zerolog"
+	"go.opentelemetry.io/otel/codes"
 )
 
 // streamConfig is the one stream every service agrees on. Events are kept
@@ -26,9 +27,14 @@ func streamConfig() jetstream.StreamConfig {
 		Retention:   jetstream.LimitsPolicy,
 		Discard:     jetstream.DiscardOld,
 		MaxAge:      14 * 24 * time.Hour,
-		MaxMsgSize:  MaxPayloadBytes + 4<<10,
-		Duplicates:  10 * time.Minute,
-		Replicas:    1,
+		// Disk budget: whichever of 14 days or 1 GB comes first, oldest
+		// events go. 1 GB is far above 14 days of expected volume; dropping
+		// by size would lose events a stopped consumer has not read yet, so
+		// an alert fires at 80% (deploy/observability/alerts.yml).
+		MaxBytes:   1 << 30,
+		MaxMsgSize: MaxPayloadBytes + 4<<10,
+		Duplicates: 10 * time.Minute,
+		Replicas:   1,
 	}
 }
 
@@ -139,10 +145,17 @@ func (b *Bus) Publish(ctx context.Context, env Envelope) error {
 	if err != nil {
 		return Permanent(err)
 	}
+	start := time.Now()
+	msg := &nats.Msg{Subject: Subject(env.Type), Data: data, Header: nats.Header{}}
+	ctx, span := startPublishSpan(ctx, env, msg.Header)
+	defer span.End()
 	pctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	if _, err := b.js.Publish(pctx, Subject(env.Type), data, jetstream.WithMsgID(env.EventID)); err != nil {
+	if _, err := b.js.PublishMsg(pctx, msg, jetstream.WithMsgID(env.EventID)); err != nil {
+		span.SetStatus(codes.Error, "not acknowledged")
+		publishDuration.WithLabelValues(env.Type, "error").Observe(time.Since(start).Seconds())
 		return fmt.Errorf("%w: %v", ErrBrokerUnavailable, err)
 	}
+	publishDuration.WithLabelValues(env.Type, "ok").Observe(time.Since(start).Seconds())
 	return nil
 }

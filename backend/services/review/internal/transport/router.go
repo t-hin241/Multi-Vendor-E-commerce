@@ -9,6 +9,7 @@ import (
 	"shopee/backend/pkg/health"
 	"shopee/backend/pkg/httpresponse"
 	"shopee/backend/pkg/middleware"
+	"shopee/backend/pkg/telemetry"
 
 	"github.com/gin-gonic/gin"
 	"github.com/rs/zerolog"
@@ -46,7 +47,7 @@ func NewRouter(env string, log zerolog.Logger, jwt *authjwt.Manager, h *Handler,
 		gin.SetMode(gin.ReleaseMode)
 	}
 	r := gin.New()
-	r.Use(middleware.RequestID(), middleware.StructuredLogging(log), middleware.Recovery(log))
+	r.Use(middleware.RequestID(), telemetry.Middleware(), middleware.StructuredLogging(log), middleware.Recovery(log))
 	health.RegisterRoutes(r, checkers...)
 	r.GET("/api/reviews/products/:productID", h.ListPublic)
 	r.GET("/api/reviews/products/:productID/summary", h.Summary)

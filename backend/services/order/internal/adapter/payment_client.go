@@ -11,6 +11,7 @@ import (
 
 	"shopee/backend/pkg/apperror"
 	"shopee/backend/pkg/serviceauth"
+	"shopee/backend/pkg/telemetry"
 )
 
 // RefundRequest asks Payment to return money for an order refund. RefundID
@@ -56,7 +57,7 @@ type HTTPPaymentClient struct {
 }
 
 func NewHTTPPaymentClient(baseURL, key string) *HTTPPaymentClient {
-	return &HTTPPaymentClient{baseURL: baseURL, key: key, client: &http.Client{Timeout: 5 * time.Second}}
+	return &HTTPPaymentClient{baseURL: baseURL, key: key, client: telemetry.NewHTTPClient(5 * time.Second)}
 }
 
 // RequestRefund submits a refund to Payment. A 4xx answer is Payment

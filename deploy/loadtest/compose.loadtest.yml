@@ -1,0 +1,71 @@
+# Load-test environment: the stack with its production budgets on 4 of the
+# host's CPUs (a 4 vCPU VPS), k6 on the other 4 so it does not steal from
+# what it measures. Always its own Compose project, so a development stack
+# and its data are never touched:
+#
+#   bash deploy/loadtest/run.sh up        # see deploy/loadtest/README.md
+#
+# Load goes through the gateway like real traffic. k6 has a fixed address
+# that the gateway trusts for X-Forwarded-For, and every virtual user sends
+# its own client address, so per-IP rate limits apply per simulated buyer,
+# as in production; no limit is changed.
+
+x-stack-cpus: &stack-cpus
+  cpuset: "0-3"
+
+services:
+  postgres: {<<: *stack-cpus, ports: !reset []}
+  redis: {<<: *stack-cpus, ports: !reset []}
+  nats: {<<: *stack-cpus, ports: !reset []}
+  minio: {<<: *stack-cpus, ports: !reset []}
+  identity: {<<: *stack-cpus}
+  vendor: {<<: *stack-cpus}
+  catalog: {<<: *stack-cpus}
+  inventory: {<<: *stack-cpus}
+  cart: {<<: *stack-cpus}
+  order: {<<: *stack-cpus}
+  payment: {<<: *stack-cpus}
+  shipment: {<<: *stack-cpus}
+  admin: {<<: *stack-cpus}
+  review: {<<: *stack-cpus}
+  notification: {<<: *stack-cpus}
+  gateway:
+    <<: *stack-cpus
+    ports: !reset []
+    environment:
+      TRUSTED_PROXY_CIDRS: 172.29.0.250
+  prometheus:
+    <<: *stack-cpus
+    ports: !override ["127.0.0.1:${LOADTEST_PROMETHEUS_PORT:-19090}:9090"]
+  grafana:
+    <<: *stack-cpus
+    ports: !override ["127.0.0.1:${LOADTEST_GRAFANA_PORT:-13001}:3000"]
+  tempo: {<<: *stack-cpus}
+  cadvisor: {<<: *stack-cpus}
+  node-exporter: {<<: *stack-cpus}
+  postgres-exporter: {<<: *stack-cpus}
+  redis-exporter: {<<: *stack-cpus}
+  nats-exporter: {<<: *stack-cpus}
+
+  k6:
+    image: grafana/k6:2.3.0@sha256:9c2dee7f8ed74d317e4027c06a10f169b625638189de8d4555d0b3486a5aeb34
+    profiles: [k6]
+    cpuset: "4-7"
+    networks:
+      shopee:
+        ipv4_address: 172.29.0.250
+    working_dir: /scripts
+    environment:
+      BASE_URL: http://gateway:8080
+      ORIGIN: http://localhost:3000
+      K6_PROMETHEUS_RW_SERVER_URL: http://prometheus:9090/api/v1/write
+      K6_PROMETHEUS_RW_TREND_STATS: p(50),p(95),p(99),max
+    volumes:
+      - ./deploy/loadtest/k6:/scripts:ro
+      - ${LOADTEST_RESULTS_DIR:-./deploy/loadtest/results}:/results
+
+networks:
+  shopee:
+    ipam:
+      config:
+        - subnet: 172.29.0.0/24

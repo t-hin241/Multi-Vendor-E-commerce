@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"shopee/backend/pkg/serviceauth"
+	"shopee/backend/pkg/telemetry"
 )
 
 // HTTPInventoryClient reads current stock so the cart can warn about
@@ -22,7 +23,7 @@ type HTTPInventoryClient struct {
 }
 
 func NewHTTPInventoryClient(baseURL, key string) *HTTPInventoryClient {
-	return &HTTPInventoryClient{key: key, baseURL: baseURL, client: &http.Client{Timeout: 3 * time.Second}}
+	return &HTTPInventoryClient{key: key, baseURL: baseURL, client: telemetry.NewHTTPClient(3 * time.Second)}
 }
 
 // maxVariantStockBatch mirrors Inventory's own per-request id limit.

@@ -12,6 +12,7 @@ import (
 	"shopee/backend/pkg/authjwt"
 	"shopee/backend/pkg/health"
 	"shopee/backend/pkg/middleware"
+	"shopee/backend/pkg/telemetry"
 	"shopee/backend/services/identity/internal/usecase"
 )
 
@@ -26,6 +27,7 @@ func NewRouter(env string, log zerolog.Logger, jwtManager *authjwt.Manager, auth
 		panic("invalid trusted proxy configuration")
 	}
 	r.Use(middleware.RequestID())
+	r.Use(telemetry.Middleware())
 	r.Use(middleware.StructuredLogging(log))
 	r.Use(middleware.Recovery(log))
 	r.Use(func(c *gin.Context) {

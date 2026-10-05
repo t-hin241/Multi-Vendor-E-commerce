@@ -1,0 +1,68 @@
+# Updates arrive as pull requests, so every bump runs the full CI: unit and
+# integration tests on the images pinned in docker-compose.yml, every Docker
+# image built from its pinned base, and govulncheck.
+#
+# A golang base image bump also needs the toolchain line in every go.mod and
+# go.work moved to the same version (deploy/check-pins.sh fails until it is):
+#   cd backend && for m in $(find . -name go.mod -printf '%h\n'); do (cd $m && go mod edit -toolchain=goX.Y.Z); done && go work edit -toolchain=goX.Y.Z
+# Major versions of stateful services (PostgreSQL, Redis, NATS) and new Go or
+# Node release lines are upgrades with a plan, not routine bumps: ignored here.
+version: 2
+
+updates:
+  - package-ecosystem: docker
+    directories:
+      - /backend/gateway
+      - /backend/services/*
+      - /frontend
+    schedule:
+      interval: weekly
+    groups:
+      base-images:
+        patterns: ["*"]
+    ignore:
+      - dependency-name: golang
+        update-types: [version-update:semver-major, version-update:semver-minor]
+      - dependency-name: node
+        update-types: [version-update:semver-major]
+
+  - package-ecosystem: docker-compose
+    directories:
+      - /
+      - /deploy
+      - /deploy/observability
+      - /deploy/loadtest
+    schedule:
+      interval: weekly
+    groups:
+      compose-images:
+        patterns: ["*"]
+    ignore:
+      # Data directory format changes between majors: pg_upgrade or dump/restore.
+      - dependency-name: postgres
+        update-types: [version-update:semver-major]
+      - dependency-name: redis
+        update-types: [version-update:semver-major]
+      - dependency-name: nats
+        update-types: [version-update:semver-major]
+      # No community releases any more; see docs/module-details/16-object-storage.md.
+      - dependency-name: minio/minio
+
+  - package-ecosystem: gomod
+    directories:
+      - /backend/pkg
+      - /backend/gateway
+      - /backend/services/*
+    schedule:
+      interval: weekly
+    groups:
+      go-modules:
+        update-types: [minor, patch]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]

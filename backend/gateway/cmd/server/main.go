@@ -11,8 +11,10 @@ import (
 
 	"shopee/backend/gateway/internal/config"
 	"shopee/backend/gateway/internal/transport"
+	platformconfig "shopee/backend/pkg/config"
 	"shopee/backend/pkg/logger"
 	"shopee/backend/pkg/shutdown"
+	"shopee/backend/pkg/telemetry"
 )
 
 func main() {
@@ -23,6 +25,16 @@ func main() {
 	}
 
 	log := logger.New("gateway", cfg.Env, cfg.LogLevel)
+
+	telemetryCfg, err := platformconfig.LoadTelemetry()
+	if err != nil {
+		log.Fatal().Err(err).Msg("telemetry configuration invalid")
+	}
+	tel, err := telemetry.Setup("gateway", telemetry.Options(telemetryCfg), log)
+	if err != nil {
+		log.Fatal().Err(err).Msg("telemetry start failed")
+	}
+	defer tel.Close()
 
 	router, err := transport.NewRouter(cfg, log)
 	if err != nil {

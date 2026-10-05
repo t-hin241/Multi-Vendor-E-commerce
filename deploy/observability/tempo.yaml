@@ -1,0 +1,57 @@
+# Tempo 3 single binary (-target=all), local disk, based on the upstream
+# example/docker-compose/single-binary of v3.1.0. Services export spans over
+# OTLP/HTTP to tempo:4318; nothing is published outside the Docker network.
+stream_over_http_enabled: true
+
+server:
+  http_listen_port: 3200
+  log_level: warn
+
+distributor:
+  receivers:
+    otlp:
+      protocols:
+        http:
+          endpoint: "0.0.0.0:4318"
+
+# Span metrics and the service graph (calls, errors and latency between
+# services) go to Prometheus: the cross-service view of where time goes.
+metrics_generator:
+  registry:
+    external_labels:
+      source: tempo
+  storage:
+    path: /var/tempo/generator/wal
+    remote_write:
+      - url: http://prometheus:9090/api/v1/write
+        send_exemplars: true
+
+storage:
+  trace:
+    backend: local
+    wal:
+      path: /var/tempo/wal
+    local:
+      path: /var/tempo/blocks
+
+# Disk budget: traces are kept 72 hours. Set where the scheduler plans
+# retention, where the worker runs it, and as the per-tenant default.
+backend_scheduler:
+  provider:
+    compaction:
+      compaction:
+        block_retention: 72h
+
+backend_worker:
+  compaction:
+    block_retention: 72h
+
+overrides:
+  defaults:
+    compaction:
+      block_retention: 72h
+    metrics_generator:
+      processors: ["span-metrics", "service-graphs"]
+
+usage_report:
+  reporting_enabled: false

@@ -13,6 +13,7 @@ import (
 	"shopee/backend/pkg/eventbus"
 	"shopee/backend/pkg/events"
 	"shopee/backend/pkg/serviceauth"
+	"shopee/backend/pkg/telemetry"
 	"shopee/backend/services/vendorsvc/internal/repository"
 )
 
@@ -41,7 +42,7 @@ func BusNoticeSender(bus *eventbus.Bus) NoticeSender {
 // HTTPNoticeSender posts to Notification directly (EVENT_PUBLISHING=http,
 // rollback only). A 4xx answer parks the notice; anything else retries.
 func HTTPNoticeSender(notificationURL, key string) NoticeSender {
-	client := &http.Client{Timeout: 5 * time.Second}
+	client := telemetry.NewHTTPClient(5 * time.Second)
 	target := strings.TrimRight(notificationURL, "/") + "/internal/notifications"
 	return func(ctx context.Context, n repository.Notice) (string, bool) {
 		return sendNotice(ctx, client, target, key, n)

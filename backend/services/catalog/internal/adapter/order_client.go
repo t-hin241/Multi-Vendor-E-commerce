@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"shopee/backend/pkg/serviceauth"
+	"shopee/backend/pkg/telemetry"
 )
 
 // OrderGateway lets the storefront listing resolve units-sold for a batch
@@ -25,7 +26,7 @@ type HTTPOrderClient struct {
 }
 
 func NewHTTPOrderClient(baseURL, key string) *HTTPOrderClient {
-	return &HTTPOrderClient{baseURL: baseURL, key: key, client: &http.Client{Timeout: 5 * time.Second}}
+	return &HTTPOrderClient{baseURL: baseURL, key: key, client: telemetry.NewHTTPClient(5 * time.Second)}
 }
 
 type quantitySoldResponse struct {

@@ -12,6 +12,7 @@ import (
 
 	"shopee/backend/pkg/apperror"
 	"shopee/backend/pkg/serviceauth"
+	"shopee/backend/pkg/telemetry"
 )
 
 // IdentityGateway resolves a review author's name, which Review masks
@@ -28,7 +29,7 @@ type HTTPIdentityClient struct {
 }
 
 func NewHTTPIdentityClient(baseURL, serviceKey string) *HTTPIdentityClient {
-	return &HTTPIdentityClient{serviceKey: serviceKey, baseURL: strings.TrimRight(baseURL, "/"), client: &http.Client{Timeout: 5 * time.Second}}
+	return &HTTPIdentityClient{serviceKey: serviceKey, baseURL: strings.TrimRight(baseURL, "/"), client: telemetry.NewHTTPClient(5 * time.Second)}
 }
 
 func (c *HTTPIdentityClient) DisplayName(ctx context.Context, userID string) (string, error) {

@@ -5,6 +5,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/rs/zerolog"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // StructuredLogging logs one structured line per request: method, path,
@@ -18,7 +19,13 @@ func StructuredLogging(log zerolog.Logger) gin.HandlerFunc {
 
 		c.Next()
 
-		log.Info().
+		event := log.Info()
+		// Set by telemetry.Middleware when the request is traced: the key
+		// from this log line to the request's trace.
+		if sc := trace.SpanContextFromContext(c.Request.Context()); sc.IsSampled() {
+			event = event.Str("trace_id", sc.TraceID().String())
+		}
+		event.
 			Str("request_id", GetRequestID(c)).
 			Str("method", c.Request.Method).
 			Str("path", path).

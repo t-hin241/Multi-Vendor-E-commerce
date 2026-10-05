@@ -16,6 +16,7 @@ import (
 	"shopee/backend/pkg/logger"
 	"shopee/backend/pkg/platform/postgres"
 	"shopee/backend/pkg/shutdown"
+	"shopee/backend/pkg/telemetry"
 
 	"shopee/backend/services/admin/internal/adapter"
 	"shopee/backend/services/admin/internal/config"
@@ -38,6 +39,16 @@ func main() {
 	}
 
 	log := logger.New(serviceName, cfg.Base.Env, cfg.Base.LogLevel)
+
+	telemetryCfg, err := sessionconfig.LoadTelemetry()
+	if err != nil {
+		log.Fatal().Err(err).Msg("telemetry configuration invalid")
+	}
+	tel, err := telemetry.Setup(serviceName, telemetry.Options(telemetryCfg), log)
+	if err != nil {
+		log.Fatal().Err(err).Msg("telemetry start failed")
+	}
+	defer tel.Close()
 	ctx := context.Background()
 
 	dbPool, err := postgres.NewPool(ctx, cfg.Base.DatabaseURL)
@@ -45,6 +56,9 @@ func main() {
 		log.Fatal().Err(err).Msg("database connection failed")
 	}
 	defer dbPool.Close()
+	if err := telemetry.RegisterDBPool(dbPool); err != nil {
+		log.Fatal().Err(err).Msg("database pool metrics failed")
+	}
 	// Plan 14: the runtime role reads and writes rows of this database only.
 	if problems, err := postgres.CheckRuntimeRole(ctx, dbPool, cfg.Base.Env == "production"); err != nil {
 		log.Fatal().Err(err).Msg("database role check failed")
@@ -65,7 +79,7 @@ func main() {
 	}
 	svc := usecase.Service{
 		Upstreams: upstreams,
-		Reader:    adapter.Client{HTTP: &http.Client{Timeout: cfg.UpstreamTimeout + time.Second}},
+		Reader:    adapter.Client{HTTP: telemetry.NewHTTPClient(cfg.UpstreamTimeout + time.Second)},
 		Roles:     identityclient.Client{URL: internalServices.IdentityURL, Key: internalServices.Key},
 		Timeout:   cfg.UpstreamTimeout,
 		Log:       log,

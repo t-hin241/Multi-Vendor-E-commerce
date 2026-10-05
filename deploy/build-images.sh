@@ -14,7 +14,10 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-BASE_IMAGES=(golang:1.25-alpine alpine:3.20 node:24-alpine)
+# Base images come from the Dockerfiles' FROM lines (pinned by digest there),
+# so this list cannot drift from what the builds use.
+mapfile -t BASE_IMAGES < <(awk 'toupper($1) == "FROM" { sub(/\r$/, "", $2); print $2 }' \
+  backend/gateway/Dockerfile backend/services/*/Dockerfile frontend/Dockerfile | sort -u)
 SERVICES=(gateway identity vendor catalog inventory cart order payment shipment admin notification review frontend)
 RETRIES="${BUILD_RETRIES:-3}"
 

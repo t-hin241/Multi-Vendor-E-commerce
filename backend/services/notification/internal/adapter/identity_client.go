@@ -11,6 +11,7 @@ import (
 
 	"shopee/backend/pkg/apperror"
 	"shopee/backend/pkg/serviceauth"
+	"shopee/backend/pkg/telemetry"
 )
 
 type UserSnapshot struct {
@@ -27,7 +28,7 @@ type HTTPIdentityClient struct {
 }
 
 func NewHTTPIdentityClient(baseURL, serviceKey string) *HTTPIdentityClient {
-	return &HTTPIdentityClient{serviceKey: serviceKey, baseURL: baseURL, client: &http.Client{Timeout: 5 * time.Second}}
+	return &HTTPIdentityClient{serviceKey: serviceKey, baseURL: baseURL, client: telemetry.NewHTTPClient(5 * time.Second)}
 }
 
 type internalUserResponseBody struct {

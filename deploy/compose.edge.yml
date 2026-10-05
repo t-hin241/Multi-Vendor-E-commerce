@@ -12,14 +12,22 @@
 
 services:
   caddy:
-    image: caddy:2-alpine
+    image: caddy:2.11.6-alpine@sha256:d44355d3c2149dc580ce2cac735955d1c08d3d00882c30489c241aa51a5c10d9
     restart: unless-stopped
     # Only the edge network: the proxy reaches the gateway, the frontend and
     # the media buckets, never a database, Redis, NATS or a service directly.
     networks:
       edge:
         ipv4_address: ${EDGE_PROXY_IP:-192.168.250.10}
+    # Same budgets as the main file: rotating logs, memory limit.
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    mem_limit: 128m
     environment:
+      GOMEMLIMIT: 108MiB
       SITE_DOMAIN: ${SITE_DOMAIN:?set SITE_DOMAIN in .env}
       ACME_EMAIL: ${ACME_EMAIL:?set ACME_EMAIL in .env}
     ports:

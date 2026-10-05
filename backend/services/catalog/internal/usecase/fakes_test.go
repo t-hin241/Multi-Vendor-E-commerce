@@ -77,9 +77,19 @@ func (f *fakeCategoryRepository) seedChild(id, name, slug, parentID string, leve
 }
 
 type fakeProductRepository struct {
-	mu     sync.Mutex
-	byID   map[string]*domain.Product
-	nextID int
+	checkout *domain.CheckoutSnapshot
+	mu       sync.Mutex
+	byID     map[string]*domain.Product
+	nextID   int
+}
+
+func (f *fakeProductRepository) ReadCheckout(_ context.Context, _, _ []string) (*domain.CheckoutSnapshot, error) {
+	if f.checkout == nil {
+		return &domain.CheckoutSnapshot{}, nil
+	}
+	copySnapshot := *f.checkout
+	copySnapshot.Products = append([]domain.CheckoutProduct(nil), f.checkout.Products...)
+	return &copySnapshot, nil
 }
 
 func newFakeProductRepository() *fakeProductRepository {
@@ -612,15 +622,32 @@ func (f *fakeAttributeTemplateResolver) LookupAttributeLabels(_ context.Context,
 	if f.err != nil {
 		return nil, nil, f.err
 	}
+	// The real lookup reads the attributes/attribute_options tables, so
+	// everything a category template holds is found by id too.
+	knownAttrs, knownOpts := map[string]*domain.Attribute{}, map[string]*domain.AttributeOption{}
+	for _, template := range f.templates {
+		for _, r := range template {
+			knownAttrs[r.Attribute.ID] = &r.Attribute
+			for i := range r.Options {
+				knownOpts[r.Options[i].ID] = &r.Options[i]
+			}
+		}
+	}
+	for id, a := range f.attrsByID {
+		knownAttrs[id] = a
+	}
+	for id, o := range f.optsByID {
+		knownOpts[id] = o
+	}
 	attrs := make(map[string]*domain.Attribute, len(attributeIDs))
 	for _, id := range attributeIDs {
-		if a, ok := f.attrsByID[id]; ok {
+		if a, ok := knownAttrs[id]; ok {
 			attrs[id] = a
 		}
 	}
 	opts := make(map[string]*domain.AttributeOption, len(optionIDs))
 	for _, id := range optionIDs {
-		if o, ok := f.optsByID[id]; ok {
+		if o, ok := knownOpts[id]; ok {
 			opts[id] = o
 		}
 	}

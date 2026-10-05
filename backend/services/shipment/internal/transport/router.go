@@ -16,6 +16,7 @@ import (
 	"shopee/backend/pkg/health"
 	"shopee/backend/pkg/middleware"
 	"shopee/backend/pkg/serviceauth"
+	"shopee/backend/pkg/telemetry"
 )
 
 func NewRouter(
@@ -37,6 +38,7 @@ func NewRouter(
 
 	r := gin.New()
 	r.Use(middleware.RequestID())
+	r.Use(telemetry.Middleware())
 	r.Use(middleware.StructuredLogging(log))
 	r.Use(middleware.Recovery(log))
 	r.Use(boundRequest())

@@ -20,6 +20,7 @@ import (
 	"shopee/backend/pkg/platform/postgres"
 	"shopee/backend/pkg/platform/redisclient"
 	"shopee/backend/pkg/shutdown"
+	"shopee/backend/pkg/telemetry"
 	"shopee/backend/services/review/internal/adapter"
 	"shopee/backend/services/review/internal/config"
 	"shopee/backend/services/review/internal/repository"
@@ -40,12 +41,25 @@ func main() {
 	}
 
 	log := logger.New("review", cfg.Base.Env, cfg.Base.LogLevel)
+
+	telemetryCfg, err := sessionconfig.LoadTelemetry()
+	if err != nil {
+		log.Fatal().Err(err).Msg("telemetry configuration invalid")
+	}
+	tel, err := telemetry.Setup("review", telemetry.Options(telemetryCfg), log)
+	if err != nil {
+		log.Fatal().Err(err).Msg("telemetry start failed")
+	}
+	defer tel.Close()
 	ctx := context.Background()
 	db, err := postgres.NewPool(ctx, cfg.Base.DatabaseURL)
 	if err != nil {
 		log.Fatal().Err(err).Msg("database connection failed")
 	}
 	defer db.Close()
+	if err := telemetry.RegisterDBPool(db); err != nil {
+		log.Fatal().Err(err).Msg("database pool metrics failed")
+	}
 	// Plan 14: the runtime role reads and writes rows of this database only.
 	if problems, err := postgres.CheckRuntimeRole(ctx, db, cfg.Base.Env == "production"); err != nil {
 		log.Fatal().Err(err).Msg("database role check failed")
@@ -55,6 +69,9 @@ func main() {
 	redis, err := redisclient.NewClient(ctx, cfg.Base.RedisURL)
 	if err != nil {
 		log.Fatal().Err(err).Msg("redis connection failed")
+	}
+	if err := telemetry.RegisterRedisPool(redis); err != nil {
+		log.Fatal().Err(err).Msg("redis pool metrics failed")
 	}
 	defer redis.Close()
 	store, err := objectstorage.NewClient(ctx, cfg.ObjectStorage)

@@ -41,3 +41,6 @@ DATABASE_SCHEMA.md
 Makefile.txt
 docs/
 fetching_data/
+
+# Load test output (deploy/loadtest)
+deploy/loadtest/results/

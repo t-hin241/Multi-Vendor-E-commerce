@@ -18,6 +18,7 @@ import (
 
 	"shopee/backend/pkg/middleware"
 	"shopee/backend/pkg/serviceauth"
+	"shopee/backend/pkg/telemetry"
 )
 
 // NewReverseProxyHandler returns a Gin handler that forwards the request to
@@ -30,7 +31,7 @@ func NewReverseProxyHandler(upstreamBaseURL string, log zerolog.Logger) (gin.Han
 		return nil, err
 	}
 
-	rp := &httputil.ReverseProxy{Transport: upstreamTransport, Rewrite: func(req *httputil.ProxyRequest) {
+	rp := &httputil.ReverseProxy{Transport: telemetry.Transport(upstreamTransport), Rewrite: func(req *httputil.ProxyRequest) {
 		req.SetURL(target)
 		req.Out.Host = target.Host
 		// The Gin handler resolves only explicitly trusted proxy chains. Never

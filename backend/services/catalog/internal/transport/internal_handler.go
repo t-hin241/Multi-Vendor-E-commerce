@@ -6,7 +6,9 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/rs/zerolog"
 
+	"shopee/backend/pkg/apperror"
 	"shopee/backend/pkg/httpresponse"
+	"shopee/backend/services/catalog/internal/domain"
 	"shopee/backend/services/catalog/internal/usecase"
 )
 
@@ -18,6 +20,38 @@ type InternalHandler struct {
 
 func NewInternalHandler(products *usecase.ProductUseCase, log zerolog.Logger) *InternalHandler {
 	return &InternalHandler{products: products, log: log}
+}
+
+// CheckoutSnapshot is read-only despite POST: the bounded request carries
+// two ID sets without URL-length limits. Only Order may call this endpoint.
+func (h *InternalHandler) CheckoutSnapshot(c *gin.Context) {
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 16<<10)
+	var in struct {
+		ProductIDs []string `json:"product_ids"`
+		VariantIDs []string `json:"variant_ids"`
+	}
+	if err := c.ShouldBindJSON(&in); err != nil {
+		httpresponse.HandleError(c, h.log, apperror.Validation("Invalid checkout snapshot request"))
+		return
+	}
+	snapshot, err := h.products.ReadCheckout(c.Request.Context(), in.ProductIDs, in.VariantIDs)
+	if err != nil {
+		httpresponse.HandleError(c, h.log, err)
+		return
+	}
+	products := make([]internalProductResponse, 0, len(snapshot.Products))
+	for _, p := range snapshot.Products {
+		products = append(products, internalProductResponse{
+			ID: p.ID, VendorID: p.VendorID, Name: p.Name, Version: p.Version,
+			PriceAmount: p.PriceAmount, Currency: p.Currency, Status: string(p.Status),
+			IsVisible:   p.Status == domain.StatusApproved && p.IsActive && p.EnforcedVersion == p.Version,
+			HasVariants: p.HasVariants, PackageWeightGrams: p.PackageWeightGrams,
+		})
+	}
+	httpresponse.OK(c, http.StatusOK, struct {
+		Products []internalProductResponse `json:"products"`
+		Variants []domain.CheckoutVariant  `json:"variants"`
+	}{products, snapshot.Variants})
 }
 
 type internalProductResponse struct {

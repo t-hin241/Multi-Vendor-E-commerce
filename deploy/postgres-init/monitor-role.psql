@@ -1,0 +1,24 @@
+-- Monitoring role for postgres-exporter (deploy/observability). Run as the
+-- cluster superuser with psql variable monitor_password set; idempotent.
+-- Not run by the image's init (.psql is skipped there): the base stack
+-- needs no monitoring role. deploy/observability/monitor-role.sh runs it.
+--
+--   shopee_monitor  server statistics only (pg_monitor: pg_stat_*,
+--                   pg_stat_statements with normalized query text), connects
+--                   to the "postgres" database only, reads no table data.
+\set ON_ERROR_STOP on
+\set QUIET on
+SET client_min_messages = warning;
+
+SELECT 'CREATE ROLE shopee_monitor' WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'shopee_monitor') \gexec
+ALTER ROLE shopee_monitor WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS
+  CONNECTION LIMIT 3 PASSWORD :'monitor_password';
+GRANT pg_monitor TO shopee_monitor;
+GRANT CONNECT ON DATABASE postgres TO shopee_monitor;
+
+-- Statement statistics need shared_preload_libraries=pg_stat_statements
+-- (docker-compose.yml); the view lives in "postgres" and covers every database.
+\connect postgres
+SET client_min_messages = warning;
+CREATE EXTENSION IF NOT EXISTS pg_stat_statements;
+\echo 'monitor role: ok'

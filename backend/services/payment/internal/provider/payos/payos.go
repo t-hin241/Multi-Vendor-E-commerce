@@ -32,6 +32,7 @@ import (
 	"strings"
 	"time"
 
+	"shopee/backend/pkg/telemetry"
 	"shopee/backend/services/payment/internal/provider"
 )
 
@@ -41,7 +42,7 @@ type Provider struct {
 }
 
 func New(clientID, apiKey, checksumKey, baseURL string) *Provider {
-	return &Provider{clientID: clientID, apiKey: apiKey, checksumKey: checksumKey, baseURL: strings.TrimRight(baseURL, "/"), client: &http.Client{Timeout: 15 * time.Second}}
+	return &Provider{clientID: clientID, apiKey: apiKey, checksumKey: checksumKey, baseURL: strings.TrimRight(baseURL, "/"), client: telemetry.NewHTTPClient(15 * time.Second)}
 }
 
 // maxOrderCode is JavaScript's largest safe integer, payOS's orderCode bound.

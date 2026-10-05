@@ -136,6 +136,7 @@ type CartGateway interface {
 
 // CatalogGateway is the checkout pricing snapshot's source of truth.
 type CatalogGateway interface {
+	GetCheckoutSnapshot(ctx context.Context, productIDs, variantIDs []string) (*adapter.CatalogSnapshot, error)
 	GetProduct(ctx context.Context, productID string) (*adapter.ProductInfo, error)
 	GetVariant(ctx context.Context, variantID string) (*adapter.VariantInfo, error)
 }

@@ -7,9 +7,11 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"time"
+
 	"shopee/backend/pkg/apperror"
 	"shopee/backend/pkg/serviceauth"
-	"time"
+	"shopee/backend/pkg/telemetry"
 )
 
 type ReserveLine struct {
@@ -30,7 +32,7 @@ type HTTPInventoryClient struct {
 }
 
 func NewHTTPInventoryClient(baseURL, key string) *HTTPInventoryClient {
-	return &HTTPInventoryClient{baseURL: baseURL, key: key, client: &http.Client{Timeout: 5 * time.Second}}
+	return &HTTPInventoryClient{baseURL: baseURL, key: key, client: telemetry.NewHTTPClient(5 * time.Second)}
 }
 
 type errorEnvelope struct {

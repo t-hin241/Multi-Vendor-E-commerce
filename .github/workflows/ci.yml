@@ -5,7 +5,31 @@ on:
     branches: [main]
   pull_request:
 
+# Versions have one source each: the Go toolchain is the toolchain line of
+# every go.mod (setup-go reads it), images are pinned by digest in the
+# Dockerfiles and compose files. Jobs below read them from there, so a bump
+# (by hand or by Dependabot) is exactly what CI tests.
 jobs:
+  pins:
+    name: Toolchain and image pins
+    runs-on: ubuntu-latest
+    outputs:
+      postgres: ${{ steps.images.outputs.postgres }}
+      redis: ${{ steps.images.outputs.redis }}
+      nats: ${{ steps.images.outputs.nats }}
+    steps:
+      - uses: actions/checkout@v5
+      - name: Every image pinned by digest, one Go toolchain everywhere
+        run: bash deploy/check-pins.sh
+      # The integration jobs run these images: the ones production runs.
+      - name: Infrastructure images from docker-compose.yml
+        id: images
+        run: |
+          docker compose --env-file .env.example -f docker-compose.yml config --format json > stack.json
+          for svc in postgres redis nats; do
+            echo "$svc=$(jq -er ".services.$svc.image" stack.json)" >> "$GITHUB_OUTPUT"
+          done
+
   backend:
     name: Backend (lint + test)
     runs-on: ubuntu-latest
@@ -31,11 +55,11 @@ jobs:
           - services/notification
           - services/review
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
-          go-version: "1.25"
+          go-version-file: backend/${{ matrix.module }}/go.mod
           cache-dependency-path: backend/${{ matrix.module }}/go.sum
 
       - name: gofmt check
@@ -51,9 +75,9 @@ jobs:
         run: go vet ./...
         working-directory: backend/${{ matrix.module }}
 
-      # Action v8+ is required for golangci-lint v2. Pin the linter version so a new
-      # release cannot break CI unexpectedly; bump it deliberately.
-      - uses: golangci/golangci-lint-action@v8
+      # Action v8+ supports golangci-lint v2; v9 runs on Node 24. Pin the linter version
+      # so a new release cannot break CI unexpectedly; bump it deliberately.
+      - uses: golangci/golangci-lint-action@v9
         with:
           version: v2.14.0
           working-directory: backend/${{ matrix.module }}
@@ -70,9 +94,10 @@ jobs:
   identity-integration:
     name: Identity PostgreSQL and Redis integration
     runs-on: ubuntu-latest
+    needs: pins
     services:
       postgres:
-        image: postgres:16-alpine
+        image: ${{ needs.pins.outputs.postgres }}
         env:
           POSTGRES_USER: identity_test
           POSTGRES_DB: identity_test
@@ -80,16 +105,16 @@ jobs:
         ports: ["5432:5432"]
         options: --health-cmd "pg_isready -U identity_test -d identity_test" --health-interval 5s --health-timeout 3s --health-retries 10
       redis:
-        image: redis:7-alpine
+        image: ${{ needs.pins.outputs.redis }}
         ports: ["6379:6379"]
     env:
       IDENTITY_TEST_DATABASE_URL: postgres://identity_test@localhost:5432/identity_test?sslmode=disable
       IDENTITY_TEST_REDIS_URL: redis://localhost:6379/0
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
         with:
-          go-version: "1.25"
+          go-version-file: backend/services/identity/go.mod
           cache-dependency-path: backend/services/identity/go.sum
       - run: go test -race -count=1 ./...
         working-directory: backend/services/identity
@@ -97,9 +122,10 @@ jobs:
   vendor-integration:
     name: Vendor transactions and selling permission integration
     runs-on: ubuntu-latest
+    needs: pins
     services:
       postgres:
-        image: postgres:16-alpine
+        image: ${{ needs.pins.outputs.postgres }}
         env:
           POSTGRES_USER: vendor_test
           POSTGRES_DB: vendor_test
@@ -109,10 +135,10 @@ jobs:
     env:
       VENDOR_TEST_DATABASE_URL: postgres://vendor_test@localhost:5432/vendor_test?sslmode=disable
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
         with:
-          go-version: "1.25"
+          go-version-file: backend/services/vendor/go.mod
           cache-dependency-path: backend/services/vendor/go.sum
       - run: go test -race -count=1 ./...
         working-directory: backend/services/vendor
@@ -120,9 +146,10 @@ jobs:
   review-integration:
     name: Review PostgreSQL integration
     runs-on: ubuntu-latest
+    needs: pins
     services:
       postgres:
-        image: postgres:16-alpine
+        image: ${{ needs.pins.outputs.postgres }}
         env:
           POSTGRES_USER: review_test
           POSTGRES_DB: review_test
@@ -132,10 +159,10 @@ jobs:
     env:
       REVIEW_TEST_DATABASE_URL: postgres://review_test@localhost:5432/review_test?sslmode=disable
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
         with:
-          go-version: "1.25"
+          go-version-file: backend/services/review/go.mod
           cache-dependency-path: backend/services/review/go.sum
       - run: go test -race -count=1 ./...
         working-directory: backend/services/review
@@ -143,9 +170,10 @@ jobs:
   catalog-integration:
     name: Catalog PostgreSQL and checkout fencing integration
     runs-on: ubuntu-latest
+    needs: pins
     services:
       postgres:
-        image: postgres:16-alpine
+        image: ${{ needs.pins.outputs.postgres }}
         env:
           POSTGRES_USER: catalog_test
           POSTGRES_DB: catalog_test
@@ -155,10 +183,10 @@ jobs:
     env:
       CATALOG_TEST_DATABASE_URL: postgres://catalog_test@localhost:5432/catalog_test?sslmode=disable
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
         with:
-          go-version: "1.25"
+          go-version-file: backend/services/catalog/go.mod
           cache-dependency-path: backend/services/catalog/go.sum
       - run: go test -race -count=1 ./...
         working-directory: backend/services/catalog
@@ -166,9 +194,10 @@ jobs:
   inventory-integration:
     name: Inventory, Cart, Order, Payment, Shipment, Notification and event bus integration (PostgreSQL/Redis/NATS)
     runs-on: ubuntu-latest
+    needs: pins
     services:
       postgres:
-        image: postgres:16-alpine
+        image: ${{ needs.pins.outputs.postgres }}
         env:
           POSTGRES_USER: inventory_test
           POSTGRES_DB: inventory_test
@@ -176,7 +205,7 @@ jobs:
         ports: ["5432:5432"]
         options: --health-cmd "pg_isready -U inventory_test -d inventory_test" --health-interval 5s --health-timeout 3s --health-retries 10
       redis:
-        image: redis:7-alpine
+        image: ${{ needs.pins.outputs.redis }}
         ports: ["6379:6379"]
         options: --health-cmd "redis-cli ping" --health-interval 5s --health-timeout 3s --health-retries 10
     env:
@@ -189,19 +218,23 @@ jobs:
       NOTIFICATION_TEST_REDIS_URL: redis://localhost:6379/0
       EVENTBUS_TEST_DATABASE_URL: postgres://inventory_test@localhost:5432/inventory_test?sslmode=disable
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
         with:
-          go-version: "1.25"
+          go-version-file: backend/services/inventory/go.mod
           cache-dependency-path: backend/services/inventory/go.sum
       # GitHub service containers take no command; JetStream is enabled here.
       - name: Enable JetStream
+        env:
+          NATS_IMAGE: ${{ needs.pins.outputs.nats }}
         run: |
-          docker run -d --name jetstream -p 4222:4222 nats:2-alpine -js
+          docker run -d --name jetstream -p 4222:4222 "$NATS_IMAGE" -js
           echo "EVENTBUS_TEST_NATS_URL=nats://localhost:4222" >> "$GITHUB_ENV"
       # The production broker configuration (per-service users and
       # permissions) with a fake password for every user.
       - name: Broker with per-service permissions
+        env:
+          NATS_IMAGE: ${{ needs.pins.outputs.nats }}
         run: |
           # Quoted as in docker-compose.yml: unquoted, "5e62..." parses as a number.
           raw=5e62-test-eventbus-password-not-a-secret
@@ -210,7 +243,7 @@ jobs:
             -v "$PWD/deploy/nats/nats.conf:/etc/nats/nats.conf:ro" --tmpfs /data \
             -e VENDOR_EVENTBUS_PASSWORD=$pw -e CATALOG_EVENTBUS_PASSWORD=$pw -e INVENTORY_EVENTBUS_PASSWORD=$pw \
             -e ORDER_EVENTBUS_PASSWORD=$pw -e PAYMENT_EVENTBUS_PASSWORD=$pw -e SHIPMENT_EVENTBUS_PASSWORD=$pw \
-            -e NOTIFICATION_EVENTBUS_PASSWORD=$pw nats:2-alpine -c /etc/nats/nats.conf
+            -e NOTIFICATION_EVENTBUS_PASSWORD=$pw "$NATS_IMAGE" -c /etc/nats/nats.conf
           echo "EVENTBUS_AUTH_TEST_NATS_URL=nats://localhost:4223" >> "$GITHUB_ENV"
           echo "EVENTBUS_AUTH_TEST_PASSWORD=$raw" >> "$GITHUB_ENV"
       - run: go test -race -count=1 ./pkg/eventbus/... ./pkg/events/... ./services/inventory/... ./services/cart/... ./services/order/... ./services/payment/... ./services/shipment/... ./services/notification/...
@@ -219,9 +252,10 @@ jobs:
   db-roles:
     name: Database roles (migrator and per-service runtime roles)
     runs-on: ubuntu-latest
+    needs: pins
     services:
       postgres:
-        image: postgres:16-alpine
+        image: ${{ needs.pins.outputs.postgres }}
         env:
           POSTGRES_USER: roles_admin
           POSTGRES_DB: roles_admin
@@ -229,10 +263,10 @@ jobs:
         ports: ["5432:5432"]
         options: --health-cmd "pg_isready -U roles_admin" --health-interval 5s --health-timeout 3s --health-retries 10
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
         with:
-          go-version: "1.25"
+          go-version-file: backend/pkg/go.mod
           cache-dependency-path: backend/pkg/go.sum
       # Own throwaway cluster: the script drops and recreates the service databases.
       - run: bash deploy/test-db-roles.sh
@@ -251,7 +285,7 @@ jobs:
     name: Published ports and edge proxy config
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       # Nothing but Caddy may be published on a public interface, with the
       # values from .env.example (the defaults an operator starts from).
       - name: Only loopback ports in the base stack
@@ -267,10 +301,23 @@ jobs:
           jq -e '.services.gateway.environment.TRUSTED_PROXY_CIDRS == .services.caddy.networks.edge.ipv4_address' edge.json
       - name: Caddyfile is valid and formatted
         run: |
+          # The Caddy image production runs (pinned in deploy/compose.edge.yml).
+          caddy_image=$(jq -er .services.caddy.image edge.json)
           docker run --rm -e SITE_DOMAIN=shop.example.invalid -e ACME_EMAIL=ops@example.invalid \
-            -v "$PWD/deploy/caddy/Caddyfile:/etc/caddy/Caddyfile:ro" caddy:2-alpine \
+            -v "$PWD/deploy/caddy/Caddyfile:/etc/caddy/Caddyfile:ro" "$caddy_image" \
             sh -c 'caddy validate --config /etc/caddy/Caddyfile && caddy fmt /etc/caddy/Caddyfile | diff - /etc/caddy/Caddyfile'
-      - run: bash -n deploy/check-exposure.sh && bash -n deploy/rewrite-media-urls.sh && bash -n deploy/data-preflight.sh
+      # Observability is internal: loopback ports only, valid rules, loadable dashboards.
+      - name: Observability stack config
+        run: |
+          docker compose --env-file .env.example -f docker-compose.yml -f deploy/compose.edge.yml \
+            -f deploy/observability/compose.observability.yml config --format json > obs.json
+          jq -e '[.services | to_entries[] | select(.key != "caddy") | .value.ports[]? | select(.host_ip != "127.0.0.1")] | length == 0' obs.json
+          prom=$(jq -er .services.prometheus.image obs.json)
+          docker run --rm --entrypoint promtool -v "$PWD/deploy/observability:/cfg:ro" "$prom" check rules /cfg/alerts.yml
+          sed 's#/etc/prometheus/alerts.yml#/cfg/alerts.yml#' deploy/observability/prometheus.yml > prometheus-ci.yml
+          docker run --rm --entrypoint promtool -v "$PWD/deploy/observability:/cfg:ro" -v "$PWD/prometheus-ci.yml:/p.yml:ro" "$prom" check config /p.yml
+          for f in deploy/observability/grafana/dashboards/*.json; do jq -e '.uid and (.panels | length > 0)' "$f" > /dev/null; done
+      - run: bash -n deploy/check-exposure.sh && bash -n deploy/rewrite-media-urls.sh && bash -n deploy/data-preflight.sh && bash -n deploy/observability/monitor-role.sh && bash -n deploy/loadtest/run.sh
       # Plan 14 DEV-01: seed/demo data stays in the local seed tooling; nothing
       # that builds an image may carry its accounts or placeholder passwords.
       - name: No seed accounts or demo credentials in image sources
@@ -287,6 +334,28 @@ jobs:
             exit 1
           fi
 
+  # A base image or toolchain bump only reaches production through these
+  # Dockerfiles, so every image is built here from its pinned base.
+  images:
+    name: Docker image ${{ matrix.service }}
+    runs-on: ubuntu-latest
+    needs: pins
+    strategy:
+      fail-fast: false
+      matrix:
+        service: [gateway, identity, vendor, catalog, inventory, cart, order, payment, shipment, admin, notification, review, frontend]
+    steps:
+      - uses: actions/checkout@v5
+      - name: Build
+        run: docker compose --env-file .env.example build "${{ matrix.service }}"
+      - name: Runs as a non-root user
+        run: |
+          # Compose names a built image <project>-<service>; the project is "shopee".
+          image=shopee-${{ matrix.service }}
+          user=$(docker image inspect --format '{{.Config.User}}' "$image")
+          echo "$image runs as '$user'"
+          [ -n "$user" ] && [ "$user" != "root" ] && [ "$user" != "0" ]
+
   frontend:
     name: Frontend (lint + test + build)
     runs-on: ubuntu-latest
@@ -294,9 +363,9 @@ jobs:
       run:
         working-directory: frontend
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: "24"
           cache: "npm"
@@ -316,9 +385,9 @@ jobs:
       run:
         working-directory: frontend
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v5
         with:
           node-version: "24"
           cache: "npm"
@@ -330,7 +399,7 @@ jobs:
       - run: npm run test:e2e
         env:
           CI: "true"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         if: failure()
         with:
           name: playwright-report

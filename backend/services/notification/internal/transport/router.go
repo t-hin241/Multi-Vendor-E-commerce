@@ -15,6 +15,7 @@ import (
 	"shopee/backend/pkg/health"
 	"shopee/backend/pkg/middleware"
 	"shopee/backend/pkg/serviceauth"
+	"shopee/backend/pkg/telemetry"
 )
 
 func NewRouter(env string, log zerolog.Logger, jwtManager *authjwt.Manager, internal *serviceauth.Verifier, internalHandler *InternalHandler, adminHandler *AdminHandler, checkers ...health.Checker) *gin.Engine {
@@ -24,6 +25,7 @@ func NewRouter(env string, log zerolog.Logger, jwtManager *authjwt.Manager, inte
 
 	r := gin.New()
 	r.Use(middleware.RequestID())
+	r.Use(telemetry.Middleware())
 	r.Use(middleware.StructuredLogging(log))
 	r.Use(middleware.Recovery(log))
 	r.Use(func(c *gin.Context) {

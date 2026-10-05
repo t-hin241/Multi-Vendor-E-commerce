@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"shopee/backend/pkg/serviceauth"
+	"shopee/backend/pkg/telemetry"
 	"shopee/backend/pkg/vendorreport"
 )
 
@@ -23,7 +24,7 @@ func (c ReportClient) Report(ctx context.Context, id string, r vendorreport.Rang
 		return nil, err
 	}
 	serviceauth.SetRequestHeaders(req, c.Key)
-	resp, err := (&http.Client{Timeout: 3 * time.Second}).Do(req)
+	resp, err := telemetry.NewHTTPClient(3 * time.Second).Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("report service unavailable")
 	}

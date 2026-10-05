@@ -1,0 +1,59 @@
+name: govulncheck
+
+# Known vulnerabilities in code the backend actually calls. govulncheck runs
+# in source mode: it reports a vulnerable module or standard library package
+# (of the toolchain in go.mod) only when our code reaches the vulnerable
+# symbol, so a finding here is one to fix, not noise. Runs on every change and
+# weekly, because new advisories are published against unchanged code.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "17 2 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  govulncheck:
+    name: govulncheck ${{ matrix.module }}
+    runs-on: ubuntu-latest
+    strategy:
+      # Report every affected module instead of cancelling the rest.
+      fail-fast: false
+      matrix:
+        module:
+          - pkg
+          - gateway
+          - services/identity
+          - services/vendor
+          - services/catalog
+          - services/inventory
+          - services/cart
+          - services/order
+          - services/payment
+          - services/shipment
+          - services/admin
+          - services/notification
+          - services/review
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/${{ matrix.module }}/go.mod
+          cache-dependency-path: backend/${{ matrix.module }}/go.sum
+
+      # Pinned like golangci-lint so a new release cannot change CI
+      # unexpectedly; bump it deliberately. The vulnerability database it
+      # reads is always the current one.
+      - name: Install govulncheck
+        run: go install golang.org/x/vuln/cmd/govulncheck@v1.8.0
+
+      # -show traces prints the call path from our code to the vulnerable
+      # symbol, which is what decides how urgent a fix is.
+      - name: govulncheck
+        run: govulncheck -show traces ./...
+        working-directory: backend/${{ matrix.module }}

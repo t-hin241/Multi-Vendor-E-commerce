@@ -13,6 +13,7 @@ import (
 
 	"shopee/backend/pkg/apperror"
 	"shopee/backend/pkg/serviceauth"
+	"shopee/backend/pkg/telemetry"
 )
 
 // ErrNoPayoutDestination: the vendor has no verified default payout account.
@@ -34,7 +35,7 @@ type HTTPVendorClient struct {
 }
 
 func NewHTTPVendorClient(baseURL, key string) *HTTPVendorClient {
-	return &HTTPVendorClient{baseURL: strings.TrimRight(baseURL, "/"), key: key, client: &http.Client{Timeout: 5 * time.Second}}
+	return &HTTPVendorClient{baseURL: strings.TrimRight(baseURL, "/"), key: key, client: telemetry.NewHTTPClient(5 * time.Second)}
 }
 
 func (c *HTTPVendorClient) DefaultDestination(ctx context.Context, vendorID string) (*PayoutDestination, error) {

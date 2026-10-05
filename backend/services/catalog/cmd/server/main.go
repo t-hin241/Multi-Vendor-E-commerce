@@ -19,6 +19,7 @@ import (
 	"shopee/backend/pkg/platform/objectstorage"
 	"shopee/backend/pkg/platform/postgres"
 	"shopee/backend/pkg/shutdown"
+	"shopee/backend/pkg/telemetry"
 	"shopee/backend/pkg/vendorsales"
 	"shopee/backend/services/catalog/internal/adapter"
 	"shopee/backend/services/catalog/internal/config"
@@ -43,6 +44,16 @@ func main() {
 	}
 
 	log := logger.New(serviceName, cfg.Base.Env, cfg.Base.LogLevel)
+
+	telemetryCfg, err := sessionconfig.LoadTelemetry()
+	if err != nil {
+		log.Fatal().Err(err).Msg("telemetry configuration invalid")
+	}
+	tel, err := telemetry.Setup(serviceName, telemetry.Options(telemetryCfg), log)
+	if err != nil {
+		log.Fatal().Err(err).Msg("telemetry start failed")
+	}
+	defer tel.Close()
 	ctx := context.Background()
 
 	dbPool, err := postgres.NewPool(ctx, cfg.Base.DatabaseURL)
@@ -50,6 +61,12 @@ func main() {
 		log.Fatal().Err(err).Msg("database connection failed")
 	}
 	defer dbPool.Close()
+	if err := telemetry.RegisterDBPool(dbPool); err != nil {
+		log.Fatal().Err(err).Msg("database pool metrics failed")
+	}
+	if err := telemetry.RegisterOutboxes(dbPool, repository.Backlogs...); err != nil {
+		log.Fatal().Err(err).Msg("outbox metrics failed")
+	}
 	// Plan 14: the runtime role reads and writes rows of this database only.
 	if problems, err := postgres.CheckRuntimeRole(ctx, dbPool, cfg.Base.Env == "production"); err != nil {
 		log.Fatal().Err(err).Msg("database role check failed")

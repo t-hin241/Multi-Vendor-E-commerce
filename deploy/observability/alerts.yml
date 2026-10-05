@@ -1,0 +1,126 @@
+# Alert rules (OPS-04). Thresholds from docs/modular/_upgrades/15-production-operations.md;
+# tune them with docs/module-details/17-observability-capacity.md. Labels
+# carry service, route and outbox names only: no ids, no personal data.
+# Delivery (Alertmanager to a real on-call channel) is not configured yet:
+# firing alerts show in Prometheus (/alerts) and Grafana.
+groups:
+  - name: availability
+    rules:
+      - alert: ServiceDown
+        expr: up{job="services"} == 0
+        for: 2m
+        labels: {severity: critical}
+        annotations:
+          summary: "{{ $labels.service }} does not answer /metrics"
+      - alert: ContainerRestarting
+        expr: changes(container_start_time_seconds{service!=""}[15m]) > 2
+        labels: {severity: critical}
+        annotations:
+          summary: "{{ $labels.service }} restarted {{ $value }} times in 15 minutes"
+      - alert: HighErrorRate
+        expr: |
+          sum by (service) (rate(http_server_request_duration_seconds_count{code="5xx"}[5m]))
+            / sum by (service) (rate(http_server_request_duration_seconds_count[5m])) > 0.01
+        for: 5m
+        labels: {severity: critical}
+        annotations:
+          summary: "{{ $labels.service }}: {{ $value | humanizePercentage }} of requests fail with 5xx"
+
+  - name: latency
+    rules:
+      - alert: CheckoutSlow
+        expr: |
+          histogram_quantile(0.95, sum by (le) (rate(http_server_request_duration_seconds_bucket{service="order", route="/api/orders/checkout"}[5m]))) > 2
+        for: 10m
+        labels: {severity: warning}
+        annotations:
+          summary: "Checkout p95 is {{ $value | humanizeDuration }} (target 2s)"
+      - alert: ListingSlow
+        expr: |
+          histogram_quantile(0.95, sum by (le) (rate(http_server_request_duration_seconds_bucket{service="catalog", route="/api/catalog/products"}[5m]))) > 0.5
+        for: 10m
+        labels: {severity: warning}
+        annotations:
+          summary: "Product listing p95 is {{ $value | humanizeDuration }} (target 500ms)"
+
+  - name: events
+    rules:
+      - alert: OutboxStuck
+        expr: outbox_oldest_pending_seconds > 60
+        for: 2m
+        labels: {severity: critical}
+        annotations:
+          summary: "{{ $labels.service }} {{ $labels.outbox }}: oldest undelivered event waits {{ $value | humanizeDuration }}"
+      - alert: OutboxUnreadable
+        expr: outbox_probe_success == 0
+        for: 5m
+        labels: {severity: warning}
+        annotations:
+          summary: "{{ $labels.service }} cannot read {{ $labels.outbox }} for metrics"
+      - alert: EventDeliveryLagging
+        expr: |
+          histogram_quantile(0.95, sum by (service, consumer, le) (rate(eventbus_delivery_lag_seconds_bucket[5m]))) > 60
+        for: 5m
+        labels: {severity: warning}
+        annotations:
+          summary: "{{ $labels.consumer }}: events reach it {{ $value | humanizeDuration }} after the fact (p95)"
+      - alert: EventsParked
+        expr: increase(eventbus_handle_duration_seconds_count{result="parked"}[15m]) > 0
+        labels: {severity: warning}
+        annotations:
+          summary: "{{ $labels.consumer }} parked events: replay or discard them in the admin"
+      - alert: EventStreamNearCap
+        # 80% of the stream's 1 GB cap (pkg/eventbus): past the cap the
+        # oldest events are dropped, possibly before a stopped consumer reads them.
+        expr: jetstream_stream_total_bytes{stream_name="SHOPEE_EVENTS"} > 0.8 * 1073741824
+        for: 10m
+        labels: {severity: critical}
+        annotations:
+          summary: "Event stream at {{ $value | humanize1024 }}B of 1 GiB"
+      - alert: NotificationQueueBacklog
+        expr: notification_queue_latency_seconds > 300
+        for: 5m
+        labels: {severity: warning}
+        annotations:
+          summary: "Notification jobs wait {{ $value | humanizeDuration }} for a worker"
+
+  - name: budgets
+    rules:
+      - alert: HostDiskAlmostFull
+        # Every real filesystem over 1 GB: Docker's data (volumes, logs) may
+        # live on another disk than /.
+        expr: |
+          (1 - node_filesystem_avail_bytes{fstype=~"ext4|xfs|btrfs"} / node_filesystem_size_bytes{fstype=~"ext4|xfs|btrfs"}) > 0.8
+            and node_filesystem_size_bytes{fstype=~"ext4|xfs|btrfs"} > 1e9
+        for: 5m
+        labels: {severity: critical}
+        annotations:
+          summary: "{{ $labels.mountpoint }} is {{ $value | humanizePercentage }} full"
+      - alert: ContainerMemoryNearLimit
+        expr: |
+          container_memory_working_set_bytes{service!=""}
+            / (container_spec_memory_limit_bytes{service!=""} > 0) > 0.9
+        for: 5m
+        labels: {severity: warning}
+        annotations:
+          summary: "{{ $labels.service }} uses {{ $value | humanizePercentage }} of its memory limit"
+      - alert: DBPoolSaturated
+        # Requests spend more than 100 ms per second waiting for a connection.
+        expr: rate(db_pool_empty_acquire_wait_seconds_total[5m]) > 0.1
+        for: 5m
+        labels: {severity: warning}
+        annotations:
+          summary: "{{ $labels.service }} waits for database connections (DB_MAX_CONNS)"
+      - alert: PostgresConnectionsHigh
+        expr: sum(pg_stat_activity_count) / scalar(pg_settings_max_connections) > 0.85
+        for: 5m
+        labels: {severity: warning}
+        annotations:
+          summary: "PostgreSQL at {{ $value | humanizePercentage }} of max_connections"
+      - alert: RedisMemoryHigh
+        # noeviction: at maxmemory, writes (sessions, rate limits, jobs) fail.
+        expr: redis_memory_used_bytes / (redis_memory_max_bytes > 0) > 0.8
+        for: 5m
+        labels: {severity: critical}
+        annotations:
+          summary: "Redis at {{ $value | humanizePercentage }} of maxmemory"

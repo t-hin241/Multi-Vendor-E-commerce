@@ -6,10 +6,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"shopee/backend/pkg/productsales"
-	"shopee/backend/pkg/serviceauth"
 	"strings"
 	"time"
+
+	"shopee/backend/pkg/productsales"
+	"shopee/backend/pkg/serviceauth"
+	"shopee/backend/pkg/telemetry"
 )
 
 type ProductStatusPublisher struct{ URL, Key string }
@@ -26,7 +28,7 @@ func (p ProductStatusPublisher) Publish(ctx context.Context, v productsales.Stat
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Request-ID", fmt.Sprintf("catalog-%s-%d", v.ProductID, v.Version))
 	serviceauth.SetRequestHeaders(req, p.Key)
-	resp, err := (&http.Client{Timeout: 5 * time.Second}).Do(req)
+	resp, err := telemetry.NewHTTPClient(5 * time.Second).Do(req)
 	if err != nil {
 		return fmt.Errorf("order product status delivery unavailable")
 	}

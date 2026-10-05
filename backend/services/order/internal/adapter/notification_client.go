@@ -10,6 +10,7 @@ import (
 
 	"shopee/backend/pkg/apperror"
 	"shopee/backend/pkg/serviceauth"
+	"shopee/backend/pkg/telemetry"
 )
 
 type HTTPNotificationClient struct {
@@ -19,7 +20,7 @@ type HTTPNotificationClient struct {
 }
 
 func NewHTTPNotificationClient(baseURL, serviceKey string) *HTTPNotificationClient {
-	return &HTTPNotificationClient{baseURL: baseURL, serviceKey: serviceKey, client: &http.Client{Timeout: 5 * time.Second}}
+	return &HTTPNotificationClient{baseURL: baseURL, serviceKey: serviceKey, client: telemetry.NewHTTPClient(5 * time.Second)}
 }
 
 // Notify hands one notice to Notification, which records it and delivers

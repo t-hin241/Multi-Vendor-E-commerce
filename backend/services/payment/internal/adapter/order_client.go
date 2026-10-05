@@ -8,11 +8,12 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"shopee/backend/pkg/serviceauth"
 	"strings"
 	"time"
 
 	"shopee/backend/pkg/apperror"
+	"shopee/backend/pkg/serviceauth"
+	"shopee/backend/pkg/telemetry"
 	"shopee/backend/services/payment/internal/domain"
 )
 
@@ -36,7 +37,7 @@ type HTTPOrderClient struct {
 }
 
 func NewHTTPOrderClient(baseURL, key string) *HTTPOrderClient {
-	return &HTTPOrderClient{key: key, baseURL: baseURL, client: &http.Client{Timeout: 10 * time.Second}}
+	return &HTTPOrderClient{key: key, baseURL: baseURL, client: telemetry.NewHTTPClient(10 * time.Second)}
 }
 
 type internalOrderResponseBody struct {

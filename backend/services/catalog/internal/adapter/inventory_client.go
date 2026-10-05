@@ -6,9 +6,11 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
-	"shopee/backend/pkg/serviceauth"
 	"strings"
 	"time"
+
+	"shopee/backend/pkg/serviceauth"
+	"shopee/backend/pkg/telemetry"
 )
 
 // InventoryGateway lets the public product-detail page resolve current
@@ -27,7 +29,7 @@ type HTTPInventoryClient struct {
 }
 
 func NewHTTPInventoryClient(baseURL, key string) *HTTPInventoryClient {
-	return &HTTPInventoryClient{key: key, baseURL: baseURL, client: &http.Client{Timeout: 5 * time.Second}}
+	return &HTTPInventoryClient{key: key, baseURL: baseURL, client: telemetry.NewHTTPClient(5 * time.Second)}
 }
 
 type variantStockResponse struct {

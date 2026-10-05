@@ -58,7 +58,12 @@ type AuthResult struct {
 	RefreshTokenExpiresAt time.Time
 }
 
-func (uc *AuthUseCase) register(ctx context.Context, email, password, fullName, roleInput string) (*AuthResult, error) {
+// newUser validates a registration and hashes its password. It runs before
+// the transaction: bcrypt takes about 100 ms of CPU, and holding a pooled
+// connection and an open transaction for it starved session verification
+// (every authenticated request of every service) during a login burst
+// (load test, docs/module-details/17-observability-capacity.md).
+func newUser(email, password, fullName, roleInput string) (*domain.User, error) {
 	email = domain.NormalizeEmail(email)
 	role := domain.Role(roleInput)
 
@@ -71,13 +76,16 @@ func (uc *AuthUseCase) register(ctx context.Context, email, password, fullName, 
 		return nil, apperror.Internal(err)
 	}
 
-	user := &domain.User{
+	return &domain.User{
 		Email:        email,
 		PasswordHash: string(passwordHash),
 		FullName:     fullName,
 		Role:         role,
-	}
+	}, nil
+}
 
+// register stores a prepared user (newUser) and issues its first tokens.
+func (uc *AuthUseCase) register(ctx context.Context, user *domain.User) (*AuthResult, error) {
 	if err := uc.users.Create(ctx, user); err != nil {
 		if errors.Is(err, repository.ErrEmailTaken) {
 			return nil, apperror.Conflict("Email is already registered")
@@ -88,7 +96,9 @@ func (uc *AuthUseCase) register(ctx context.Context, email, password, fullName, 
 	return uc.issueTokens(ctx, user)
 }
 
-func (uc *AuthUseCase) login(ctx context.Context, email, password string) (*AuthResult, error) {
+// checkCredentials finds the account and checks the password, outside any
+// transaction (bcrypt holds no connection; see newUser).
+func (uc *AuthUseCase) checkCredentials(ctx context.Context, email, password string) (*domain.User, error) {
 	email = domain.NormalizeEmail(email)
 
 	user, err := uc.users.FindByEmail(ctx, email)
@@ -106,7 +116,23 @@ func (uc *AuthUseCase) login(ctx context.Context, email, password string) (*Auth
 	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(password)); err != nil {
 		return nil, apperror.Unauthorized("Invalid email or password")
 	}
+	return user, nil
+}
 
+// login issues tokens for an account whose credentials were checked. It
+// reads the account again inside the transaction: one deactivated or given
+// a new password while the hash was being compared gets no session.
+func (uc *AuthUseCase) login(ctx context.Context, checked *domain.User) (*AuthResult, error) {
+	user, err := uc.users.FindByID(ctx, checked.ID)
+	if err != nil {
+		if errors.Is(err, repository.ErrUserNotFound) {
+			return nil, apperror.Unauthorized("Invalid email or password")
+		}
+		return nil, apperror.Internal(err)
+	}
+	if !user.IsActive || user.PasswordHash != checked.PasswordHash {
+		return nil, apperror.Unauthorized("Invalid email or password")
+	}
 	return uc.issueTokens(ctx, user)
 }
 
@@ -292,16 +318,24 @@ func (uc *AuthUseCase) issueTokensForFamily(ctx context.Context, user *domain.Us
 }
 
 func (uc *AuthUseCase) Register(ctx context.Context, email, password, fullName, roleInput string) (result *AuthResult, err error) {
+	user, err := newUser(email, password, fullName, roleInput)
+	if err != nil {
+		return nil, err
+	}
 	err = uc.transaction(ctx, func(ctx context.Context) error {
 		var e error
-		result, e = uc.register(ctx, email, password, fullName, roleInput)
+		result, e = uc.register(ctx, user)
 		return e
 	})
 	return
 }
 
 func (uc *AuthUseCase) Login(ctx context.Context, email, password string) (result *AuthResult, err error) {
-	err = uc.transaction(ctx, func(ctx context.Context) error { var e error; result, e = uc.login(ctx, email, password); return e })
+	user, err := uc.checkCredentials(ctx, email, password)
+	if err != nil {
+		return nil, err
+	}
+	err = uc.transaction(ctx, func(ctx context.Context) error { var e error; result, e = uc.login(ctx, user); return e })
 	return
 }
 

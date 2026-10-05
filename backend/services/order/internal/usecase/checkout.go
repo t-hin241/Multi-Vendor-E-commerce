@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"sort"
+	"sync"
 
 	"github.com/google/uuid"
 
@@ -239,15 +240,25 @@ type pricedLines struct {
 // priceLines re-prices and validates every cart line against Catalog now,
 // and refuses a price the buyer has not accepted in the cart.
 func (uc *OrderUseCase) priceLines(ctx context.Context, cartLines []adapter.CartLine) (*pricedLines, error) {
+	productIDs, variantIDs := make([]string, 0, len(cartLines)), make([]string, 0, len(cartLines))
+	for _, line := range cartLines {
+		productIDs = append(productIDs, line.ProductID)
+		if line.VariantID != nil {
+			variantIDs = append(variantIDs, *line.VariantID)
+		}
+	}
+	snapshot, err := uc.Catalog.GetCheckoutSnapshot(ctx, productIDs, variantIDs)
+	if err != nil {
+		return nil, err
+	}
+	if snapshot == nil {
+		return nil, apperror.Internal(errors.New("missing catalog snapshot"))
+	}
 	out := &pricedLines{weightByVendor: map[string]int64{}, productVersions: map[string]int64{}, missingWeight: map[string]bool{}}
 	for _, line := range cartLines {
-		product, err := uc.Catalog.GetProduct(ctx, line.ProductID)
-		if err != nil {
-			var appErr *apperror.Error
-			if errors.As(err, &appErr) && appErr.Code == apperror.CodeNotFound {
-				return nil, apperror.Validation("A product in your cart no longer exists; please update your cart")
-			}
-			return nil, err
+		product := snapshot.Products[line.ProductID]
+		if product == nil {
+			return nil, apperror.Validation("A product in your cart no longer exists; please update your cart")
 		}
 		if !product.IsVisible {
 			return nil, apperror.Validation("\"" + product.Name + "\" is no longer available; please update your cart")
@@ -267,13 +278,9 @@ func (uc *OrderUseCase) priceLines(ctx context.Context, cartLines []adapter.Cart
 		checkoutLine := domain.CheckoutLine{ProductID: product.ID, VendorID: product.VendorID, ProductName: product.Name,
 			PriceAmount: product.PriceAmount, Currency: product.Currency, Quantity: line.Quantity}
 		if line.VariantID != nil {
-			variant, err := uc.Catalog.GetVariant(ctx, *line.VariantID)
-			if err != nil {
-				var appErr *apperror.Error
-				if errors.As(err, &appErr) && appErr.Code == apperror.CodeNotFound {
-					return nil, apperror.Validation("A selected option in your cart no longer exists; please update your cart")
-				}
-				return nil, err
+			variant := snapshot.Variants[*line.VariantID]
+			if variant == nil {
+				return nil, apperror.Validation("A selected option in your cart no longer exists; please update your cart")
 			}
 			if variant.ProductID != product.ID {
 				return nil, apperror.Validation("A selected option in your cart no longer matches its product; please update your cart")
@@ -302,16 +309,49 @@ func (uc *OrderUseCase) priceLines(ctx context.Context, cartLines []adapter.Cart
 
 // quoteShipping asks Shipment for one quote per vendor. A vendor Shipment
 // cannot serve is reported in failures (shipping_unavailable); any other
-// error aborts.
+// error aborts. At most four requests run concurrently per checkout. Results
+// are reduced in plan order, never completion order, so errors stay stable.
+// No quote cache: weight, destination, fee version and expiry stay authoritative.
 func (uc *OrderUseCase) quoteShipping(ctx context.Context, vendorIDs []string, province string, priced *pricedLines) (map[string]domain.ShippingQuote, map[string]*apperror.Error, error) {
 	quotes := map[string]domain.ShippingQuote{}
 	failures := map[string]*apperror.Error{}
-	for _, vendorID := range vendorIDs {
+	type result struct {
+		quote *domain.ShippingQuote
+		err   error
+	}
+	results := make([]result, len(vendorIDs))
+	jobs := make(chan int, len(vendorIDs))
+	for i, vendorID := range vendorIDs {
+		if !priced.missingWeight[vendorID] {
+			jobs <- i
+		}
+	}
+	close(jobs)
+	var workers sync.WaitGroup
+	for range min(4, len(jobs)) {
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			for i := range jobs {
+				if err := ctx.Err(); err != nil {
+					results[i].err = err
+					continue
+				}
+				id := vendorIDs[i]
+				results[i].quote, results[i].err = uc.Shipments.Quote(ctx, id, province, priced.weightByVendor[id])
+			}
+		}()
+	}
+	workers.Wait()
+	if err := ctx.Err(); err != nil {
+		return nil, nil, appError(err)
+	}
+	for i, vendorID := range vendorIDs {
 		if priced.missingWeight[vendorID] {
 			failures[vendorID] = domain.ShippingUnavailable("A product of this shop has no package weight yet, so shipping cannot be priced")
 			continue
 		}
-		q, err := uc.Shipments.Quote(ctx, vendorID, province, priced.weightByVendor[vendorID])
+		q, err := results[i].quote, results[i].err
 		if err != nil {
 			app := appError(err)
 			if app.Code == domain.CodeShippingUnavailable {
@@ -319,6 +359,9 @@ func (uc *OrderUseCase) quoteShipping(ctx context.Context, vendorIDs []string, p
 				continue
 			}
 			return nil, nil, app
+		}
+		if q == nil {
+			return nil, nil, apperror.Internal(errors.New("missing shipping quote"))
 		}
 		quotes[vendorID] = *q
 	}

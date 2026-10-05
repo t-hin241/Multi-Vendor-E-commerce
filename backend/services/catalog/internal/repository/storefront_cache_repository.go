@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"sort"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -25,16 +26,31 @@ func (r *StorefrontCacheRepository) UpsertVendorNames(ctx context.Context, entri
 	if len(entries) == 0 {
 		return nil
 	}
-	const query = `
+	ids, names := splitEntries(entries)
+	_, err := connection(ctx, r.pool).Exec(ctx, `
 		INSERT INTO vendor_name_cache (vendor_id, shop_name, updated_at)
-		VALUES ($1, $2, now())
-		ON CONFLICT (vendor_id) DO UPDATE SET shop_name = excluded.shop_name, updated_at = excluded.updated_at`
-	for vendorID, shopName := range entries {
-		if _, err := connection(ctx, r.pool).Exec(ctx, query, vendorID, shopName); err != nil {
-			return err
-		}
+		SELECT id, name, now() FROM unnest($1::uuid[], $2::text[]) AS t(id, name) ORDER BY id
+		ON CONFLICT (vendor_id) DO UPDATE SET shop_name = excluded.shop_name, updated_at = excluded.updated_at`, ids, names)
+	return err
+}
+
+// splitEntries turns a map into parallel arrays for one unnest() upsert:
+// these refreshes run on storefront reads, so one statement per call
+// instead of one per row (and one connection round trip per row). Keys are
+// sorted and the statements insert in that order: concurrent refreshes of
+// overlapping rows then lock them in the same order and cannot deadlock
+// (map order is random; the load test showed hundreds of deadlocks).
+func splitEntries[V any](entries map[string]V) ([]string, []V) {
+	keys := make([]string, 0, len(entries))
+	for k := range entries {
+		keys = append(keys, k)
 	}
-	return nil
+	sort.Strings(keys)
+	values := make([]V, 0, len(entries))
+	for _, k := range keys {
+		values = append(values, entries[k])
+	}
+	return keys, values
 }
 
 func (r *StorefrontCacheRepository) GetVendorNames(ctx context.Context, vendorIDs []string) (map[string]string, error) {
@@ -63,16 +79,12 @@ func (r *StorefrontCacheRepository) UpsertQuantitySold(ctx context.Context, entr
 	if len(entries) == 0 {
 		return nil
 	}
-	const query = `
+	ids, quantities := splitEntries(entries)
+	_, err := connection(ctx, r.pool).Exec(ctx, `
 		INSERT INTO product_sales_cache (product_id, quantity_sold, updated_at)
-		VALUES ($1, $2, now())
-		ON CONFLICT (product_id) DO UPDATE SET quantity_sold = excluded.quantity_sold, updated_at = excluded.updated_at`
-	for productID, quantity := range entries {
-		if _, err := connection(ctx, r.pool).Exec(ctx, query, productID, quantity); err != nil {
-			return err
-		}
-	}
-	return nil
+		SELECT id, qty, now() FROM unnest($1::uuid[], $2::bigint[]) AS t(id, qty) ORDER BY id
+		ON CONFLICT (product_id) DO UPDATE SET quantity_sold = excluded.quantity_sold, updated_at = excluded.updated_at`, ids, quantities)
+	return err
 }
 
 func (r *StorefrontCacheRepository) GetQuantitySold(ctx context.Context, productIDs []string) (map[string]int64, error) {
@@ -102,16 +114,12 @@ func (r *StorefrontCacheRepository) UpsertVariantStock(ctx context.Context, entr
 	if len(entries) == 0 {
 		return nil
 	}
-	const query = `
+	ids, quantities := splitEntries(entries)
+	_, err := connection(ctx, r.pool).Exec(ctx, `
 		INSERT INTO variant_stock_cache (variant_id, available_quantity, updated_at)
-		VALUES ($1, $2, now())
-		ON CONFLICT (variant_id) DO UPDATE SET available_quantity = excluded.available_quantity, updated_at = excluded.updated_at`
-	for variantID, qty := range entries {
-		if _, err := connection(ctx, r.pool).Exec(ctx, query, variantID, qty); err != nil {
-			return err
-		}
-	}
-	return nil
+		SELECT id, qty, now() FROM unnest($1::uuid[], $2::bigint[]) AS t(id, qty) ORDER BY id
+		ON CONFLICT (variant_id) DO UPDATE SET available_quantity = excluded.available_quantity, updated_at = excluded.updated_at`, ids, quantities)
+	return err
 }
 
 func (r *StorefrontCacheRepository) GetVariantStock(ctx context.Context, variantIDs []string) (map[string]int64, error) {

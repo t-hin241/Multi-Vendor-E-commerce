@@ -6,11 +6,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"time"
+
 	"shopee/backend/pkg/eventbus"
 	"shopee/backend/pkg/events"
 	"shopee/backend/pkg/serviceauth"
+	"shopee/backend/pkg/telemetry"
 	"shopee/backend/services/inventory/internal/domain"
-	"time"
 )
 
 type OrderClient struct{ URL, Key string }
@@ -21,7 +23,7 @@ func (c OrderClient) Status(ctx context.Context, id string) (string, error) {
 		return "", err
 	}
 	serviceauth.SetRequestHeaders(req, c.Key)
-	resp, err := (&http.Client{Timeout: 3 * time.Second}).Do(req)
+	resp, err := telemetry.NewHTTPClient(3 * time.Second).Do(req)
 	if err != nil {
 		return "", fmt.Errorf("order status unavailable")
 	}
@@ -54,7 +56,7 @@ func (c OrderClient) Publish(ctx context.Context, e domain.OutboxEvent) error {
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Request-ID", e.ID)
 	serviceauth.SetRequestHeaders(req, c.Key)
-	resp, err := (&http.Client{Timeout: 3 * time.Second}).Do(req)
+	resp, err := telemetry.NewHTTPClient(3 * time.Second).Do(req)
 	if err != nil {
 		return fmt.Errorf("order event delivery unavailable")
 	}
