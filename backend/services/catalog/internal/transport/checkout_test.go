@@ -9,11 +9,12 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/rs/zerolog"
 	"shopee/backend/pkg/authjwt"
 	"shopee/backend/pkg/serviceauth"
 	"shopee/backend/services/catalog/internal/domain"
 	"shopee/backend/services/catalog/internal/usecase"
+
+	"github.com/rs/zerolog"
 )
 
 type checkoutRepo struct{ usecase.ProductRepositoryPort }

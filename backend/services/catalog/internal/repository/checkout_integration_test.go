@@ -5,10 +5,11 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 	"shopee/backend/services/catalog/internal/domain"
 	"shopee/backend/services/catalog/internal/repository"
+
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 )
 
 func TestCheckoutSnapshotReadsPackagingVariantsLabelsAndMissingIDs(t *testing.T) {

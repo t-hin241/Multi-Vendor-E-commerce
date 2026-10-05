@@ -5,10 +5,11 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/google/uuid"
 	"shopee/backend/pkg/apperror"
 	"shopee/backend/services/catalog/internal/domain"
 	"shopee/backend/services/catalog/internal/usecase"
+
+	"github.com/google/uuid"
 )
 
 type checkoutVendorGateway struct {

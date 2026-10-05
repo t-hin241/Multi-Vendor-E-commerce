@@ -4,9 +4,10 @@ import (
 	"context"
 	"errors"
 
-	"github.com/google/uuid"
 	"shopee/backend/pkg/apperror"
 	"shopee/backend/services/catalog/internal/domain"
+
+	"github.com/google/uuid"
 )
 
 // ReadCheckout batches the same fresh facts/permission checks as the legacy
