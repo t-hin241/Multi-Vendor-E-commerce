@@ -17,14 +17,14 @@ services:
     image: redis:7.4.11-alpine3.21@sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499
     ports: ["127.0.0.1:56391:6379"]
   nats:
-    image: nats:2.14.7-alpine3.22@sha256:4063edae0717ba5f7501bfde75f97fd9b57f5b93597b92c70b6a6fbbf6a74e06
+    image: nats:2.15.0-alpine3.22@sha256:ac8f88a6494bffc2c2a5289a0ca61cb28a9145c11ba5677cf24265d07f46d8d4
     command: ["-js", "-sd", "/tmp/js"]
     ports: ["127.0.0.1:54222:4222"]
   # The production broker configuration (per-service users and permissions)
   # with an obviously fake password for every user, quoted as in
   # docker-compose.yml ("5e62..." would otherwise parse as a number).
   nats-auth:
-    image: nats:2.14.7-alpine3.22@sha256:4063edae0717ba5f7501bfde75f97fd9b57f5b93597b92c70b6a6fbbf6a74e06
+    image: nats:2.15.0-alpine3.22@sha256:ac8f88a6494bffc2c2a5289a0ca61cb28a9145c11ba5677cf24265d07f46d8d4
     command: ["-c", "/etc/nats/nats.conf"]
     environment:
       VENDOR_EVENTBUS_PASSWORD: '"5e62-test-eventbus-password-not-a-secret"'
