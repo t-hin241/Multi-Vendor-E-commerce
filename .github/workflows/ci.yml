@@ -18,7 +18,7 @@ jobs:
       redis: ${{ steps.images.outputs.redis }}
       nats: ${{ steps.images.outputs.nats }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - name: Every image pinned by digest, one Go toolchain everywhere
         run: bash deploy/check-pins.sh
       # The integration jobs run these images: the ones production runs.
@@ -55,9 +55,9 @@ jobs:
           - services/notification
           - services/review
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@v7
         with:
           go-version-file: backend/${{ matrix.module }}/go.mod
           cache-dependency-path: backend/${{ matrix.module }}/go.sum
@@ -113,7 +113,7 @@ jobs:
     env:
       IDENTITY_TEST_DATABASE_URL: postgres://identity_test@localhost:5432/identity_test?sslmode=disable
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       # The production ACL (deploy/redis/acl.sh): the tests run as the
       # identity user, confined to identity:* keys. Fake passwords.
       - name: Redis cache instance with per-service users
@@ -123,7 +123,7 @@ jobs:
           docker run -d --name redis-cache -p 6379:6379 -e REDIS_ROLE=cache -e REDIS_MONITOR_PASSWORD=ci-monitor-pw             -e IDENTITY_REDIS_PASSWORD=ci-identity-pw -e PAYMENT_REDIS_PASSWORD=ci-payment-pw -e REVIEW_REDIS_PASSWORD=ci-review-pw             -v "$PWD/deploy/redis/acl.sh:/etc/redis/acl.sh:ro" "$REDIS_IMAGE" sh /etc/redis/acl.sh --appendonly no --save ""
           until docker exec redis-cache redis-cli --no-auth-warning --user monitor --pass ci-monitor-pw ping | grep -q PONG; do sleep 1; done
           echo "IDENTITY_TEST_REDIS_URL=redis://identity:ci-identity-pw@localhost:6379/0" >> "$GITHUB_ENV"
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@v7
         with:
           go-version-file: backend/services/identity/go.mod
           cache-dependency-path: backend/services/identity/go.sum
@@ -146,8 +146,8 @@ jobs:
     env:
       VENDOR_TEST_DATABASE_URL: postgres://vendor_test@localhost:5432/vendor_test?sslmode=disable
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-go@v6
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version-file: backend/services/vendor/go.mod
           cache-dependency-path: backend/services/vendor/go.sum
@@ -170,8 +170,8 @@ jobs:
     env:
       REVIEW_TEST_DATABASE_URL: postgres://review_test@localhost:5432/review_test?sslmode=disable
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-go@v6
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version-file: backend/services/review/go.mod
           cache-dependency-path: backend/services/review/go.sum
@@ -194,8 +194,8 @@ jobs:
     env:
       CATALOG_TEST_DATABASE_URL: postgres://catalog_test@localhost:5432/catalog_test?sslmode=disable
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-go@v6
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version-file: backend/services/catalog/go.mod
           cache-dependency-path: backend/services/catalog/go.sum
@@ -224,8 +224,8 @@ jobs:
       NOTIFICATION_TEST_DATABASE_URL: postgres://inventory_test@localhost:5432/inventory_test?sslmode=disable
       EVENTBUS_TEST_DATABASE_URL: postgres://inventory_test@localhost:5432/inventory_test?sslmode=disable
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-go@v6
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version-file: backend/services/inventory/go.mod
           cache-dependency-path: backend/services/inventory/go.sum
@@ -278,8 +278,8 @@ jobs:
         ports: ["5432:5432"]
         options: --health-cmd "pg_isready -U roles_admin" --health-interval 5s --health-timeout 3s --health-retries 10
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-go@v6
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
           go-version-file: backend/pkg/go.mod
           cache-dependency-path: backend/pkg/go.sum
@@ -300,7 +300,7 @@ jobs:
     name: Published ports and edge proxy config
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       # Nothing but Caddy may be published on a public interface, with the
       # values from .env.example (the defaults an operator starts from).
       - name: Only loopback ports in the base stack
@@ -372,7 +372,7 @@ jobs:
       matrix:
         service: [gateway, identity, vendor, catalog, inventory, cart, order, payment, shipment, admin, notification, review, frontend]
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - name: Build
         run: docker compose --env-file .env.example build "${{ matrix.service }}"
       - name: Runs as a non-root user
@@ -390,9 +390,9 @@ jobs:
       run:
         working-directory: frontend
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@v7
         with:
           node-version: "24"
           cache: "npm"
@@ -412,9 +412,9 @@ jobs:
       run:
         working-directory: frontend
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@v7
         with:
           node-version: "24"
           cache: "npm"
@@ -426,7 +426,7 @@ jobs:
       - run: npm run test:e2e
         env:
           CI: "true"
-      - uses: actions/upload-artifact@v6
+      - uses: actions/upload-artifact@v7
         if: failure()
         with:
           name: playwright-report
