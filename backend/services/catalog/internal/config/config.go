@@ -15,7 +15,6 @@ import (
 
 type Config struct {
 	Base                config.Base
-	JWTSecret           string
 	VendorServiceURL    string
 	OrderServiceURL     string
 	InventoryServiceURL string
@@ -24,11 +23,6 @@ type Config struct {
 
 func Load() (Config, error) {
 	base, err := config.LoadBase("catalog", "8083")
-	if err != nil {
-		return Config{}, err
-	}
-
-	jwtSecret, err := config.RequireJWTSecret()
 	if err != nil {
 		return Config{}, err
 	}
@@ -55,7 +49,6 @@ func Load() (Config, error) {
 
 	return Config{
 		Base:                base,
-		JWTSecret:           jwtSecret,
 		VendorServiceURL:    vendorServiceURL,
 		OrderServiceURL:     orderServiceURL,
 		InventoryServiceURL: inventoryServiceURL,

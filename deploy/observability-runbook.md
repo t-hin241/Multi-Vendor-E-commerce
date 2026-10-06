@@ -44,7 +44,8 @@ Giới hạn khai báo trong compose; số đo thực tế và lý do chọn ở
 | Catalog | 160 MB | `GOMEMLIMIT` 136 MiB, `DB_MAX_CONNS` 24 |
 | 10 service còn lại + gateway | 128 MB mỗi cái | `GOMEMLIMIT` 108 MiB; `DB_MAX_CONNS`: order 10, identity/inventory/cart 8, vendor/payment 6, shipment/notification/review 4, admin 2 |
 | Frontend | 512 MB | Heap V8 384 MB |
-| Redis | 256 MB | `maxmemory` 192 MB, `noeviction`: đầy thì ghi lỗi, có cảnh báo ở 80% |
+| Redis (cache) | 96 MB | `maxmemory` 64 MB, `allkeys-lru`, không persistence: bộ đếm rate limit; cảnh báo khi evict kéo dài |
+| Redis (queue) | 192 MB | `maxmemory` 128 MB, `noeviction`, AOF: job notification; đầy thì enqueue lỗi, cảnh báo ở 80% |
 | NATS | 256 MB | JetStream tối đa 2 GB đĩa; stream 1 GB (cảnh báo ở 80%) |
 | MinIO | 256 MB | |
 | Caddy | 128 MB | |

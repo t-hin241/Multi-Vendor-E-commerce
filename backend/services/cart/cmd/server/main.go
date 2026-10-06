@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"os"
 
-	"shopee/backend/pkg/authjwt"
 	sessionconfig "shopee/backend/pkg/config"
 	"shopee/backend/pkg/health"
 	"shopee/backend/pkg/logger"
@@ -64,7 +63,10 @@ func main() {
 		log.Warn().Strs("problems", problems).Msg("database_role_too_powerful")
 	}
 
-	jwtManager := authjwt.NewManager(cfg.JWTSecret)
+	jwtManager, err := sessionconfig.LoadTokenVerifier()
+	if err != nil {
+		log.Fatal().Err(err).Msg("access token verifier configuration invalid")
+	}
 	verifier, err := sessionconfig.LoadSessionVerifier()
 	if err != nil {
 		log.Fatal().Err(err).Msg("session verifier configuration invalid")

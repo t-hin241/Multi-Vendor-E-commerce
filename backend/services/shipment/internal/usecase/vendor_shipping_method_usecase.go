@@ -43,7 +43,13 @@ func (uc *VendorShippingMethodUseCase) Enable(ctx context.Context, userID, vendo
 	}
 
 	method := &domain.VendorShippingMethod{VendorID: vendorID, CarrierID: carrierID, IsDefault: len(existing) == 0}
-	if err := uc.methods.Create(ctx, method); err != nil {
+	err = uc.methods.Create(ctx, method)
+	if errors.Is(err, repository.ErrVendorDefaultTaken) {
+		// Another carrier enabled at the same moment became the default.
+		method.IsDefault = false
+		err = uc.methods.Create(ctx, method)
+	}
+	if err != nil {
 		if errors.Is(err, repository.ErrVendorShippingMethodAlreadyExists) {
 			return nil, apperror.Conflict("This carrier is already enabled for your shop")
 		}

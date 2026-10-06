@@ -9,7 +9,7 @@ import (
 func TestPayoutConfiguration(t *testing.T) {
 	for key, value := range map[string]string{
 		"ENV": "development", "DATABASE_URL": "postgres://test_user@localhost/vendor_test?sslmode=disable",
-		"JWT_SECRET": "synthetic-test-jwt-key-not-for-use", "IDENTITY_SERVICE_KEY": "synthetic-test-identity-key-not-for-use",
+		"IDENTITY_SERVICE_KEY":      "synthetic-test-identity-key-not-for-use",
 		"VENDOR_PAYOUT_SERVICE_KEY": "synthetic-test-payout-key-not-for-use",
 		"NOTIFICATION_SERVICE_URL":  "http://notification.test", "OBJECT_STORAGE_ENDPOINT": "storage.test",
 		"OBJECT_STORAGE_ACCESS_KEY": "synthetic-test-access", "OBJECT_STORAGE_SECRET_KEY": "synthetic-test-secret",

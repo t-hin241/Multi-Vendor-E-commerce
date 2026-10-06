@@ -8,18 +8,14 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"shopee/backend/services/review/internal/repository/reviewdb"
 )
 
 type txKey struct{}
 
-type queryer interface {
-	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
-	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
-	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
-}
-
 // connection is the transaction carried by ctx, or the pool.
-func connection(ctx context.Context, pool *pgxpool.Pool) queryer {
+func connection(ctx context.Context, pool *pgxpool.Pool) reviewdb.DBTX {
 	if tx, ok := ctx.Value(txKey{}).(pgx.Tx); ok {
 		return tx
 	}

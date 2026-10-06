@@ -1,0 +1,38 @@
+# sqlc: the queries in internal/repository/queries are checked against the
+# schema the migrations build, and their scan code is generated into
+# internal/repository/reviewdb. Regenerate after changing either, and
+# commit both (CI runs "bash deploy/sqlc.sh diff"):
+#   bash deploy/sqlc.sh
+# sqlc checks columns in SELECT, SET, INSERT and next to parameters, but
+# not a column in a condition without one: every query still needs an
+# integration test that runs it (REVIEW_TEST_DATABASE_URL).
+version: "2"
+sql:
+  - engine: postgresql
+    schema: migrations
+    queries: internal/repository/queries
+    gen:
+      go:
+        package: reviewdb
+        out: internal/repository/reviewdb
+        sql_package: pgx/v5
+        # Nullable columns are pointers, as in the domain types.
+        emit_pointers_for_null_types: true
+        initialisms: [id, url]
+        # The domain keeps ids as strings, times as time.Time, small
+        # integers as int; pgx converts on the wire as before.
+        overrides:
+          - db_type: uuid
+            go_type: string
+          - db_type: uuid
+            nullable: true
+            go_type: { type: string, pointer: true }
+          - db_type: timestamptz
+            go_type: time.Time
+          - db_type: timestamptz
+            nullable: true
+            go_type: { import: time, type: Time, pointer: true }
+          - db_type: pg_catalog.int2
+            go_type: int
+          - db_type: pg_catalog.int4
+            go_type: int

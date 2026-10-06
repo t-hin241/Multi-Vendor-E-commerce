@@ -8,7 +8,6 @@ import (
 	"os"
 
 	"shopee/backend/pkg/adminaudit"
-	"shopee/backend/pkg/authjwt"
 	sessionconfig "shopee/backend/pkg/config"
 	"shopee/backend/pkg/eventbus"
 	"shopee/backend/pkg/health"
@@ -75,7 +74,10 @@ func main() {
 		log.Fatal().Err(err).Msg("event bus configuration invalid")
 	}
 
-	jwtManager := authjwt.NewManager(cfg.JWTSecret)
+	jwtManager, err := sessionconfig.LoadTokenVerifier()
+	if err != nil {
+		log.Fatal().Err(err).Msg("access token verifier configuration invalid")
+	}
 	verifier, err := sessionconfig.LoadSessionVerifier()
 	if err != nil {
 		log.Fatal().Err(err).Msg("session verifier configuration invalid")

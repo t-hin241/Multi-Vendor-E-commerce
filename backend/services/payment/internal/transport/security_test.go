@@ -10,6 +10,7 @@ import (
 	"github.com/rs/zerolog"
 
 	"shopee/backend/pkg/authjwt"
+	"shopee/backend/pkg/authjwt/authjwttest"
 	"shopee/backend/pkg/serviceauth"
 	"shopee/backend/services/payment/internal/usecase"
 )
@@ -39,7 +40,7 @@ func testRouter(jwt *authjwt.Manager) http.Handler {
 }
 
 func TestRefundRoutesRequireServiceKeyOrAdmin(t *testing.T) {
-	jwt := authjwt.NewManager("fake-test-signing-key-not-a-real-secret")
+	jwt := authjwttest.Manager()
 	r := testRouter(jwt)
 	token := func(role string) map[string]string {
 		tok, _, err := jwt.IssueAccessToken(someID, role, time.Minute)
@@ -75,7 +76,7 @@ func TestRefundRoutesRequireServiceKeyOrAdmin(t *testing.T) {
 }
 
 func TestAdminAndInternalRoutesAreProtected(t *testing.T) {
-	jwt := authjwt.NewManager("fake-test-signing-key-not-a-real-secret")
+	jwt := authjwttest.Manager()
 	r := testRouter(jwt)
 	token := func(role string) map[string]string {
 		tok, _, err := jwt.IssueAccessToken(someID, role, time.Minute)

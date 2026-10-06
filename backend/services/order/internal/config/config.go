@@ -13,7 +13,6 @@ import (
 
 type Config struct {
 	Base                   config.Base
-	JWTSecret              string
 	CartServiceURL         string
 	CatalogServiceURL      string
 	VendorServiceURL       string
@@ -34,11 +33,6 @@ func (c Config) ReturnPolicyVersion() string {
 
 func Load() (Config, error) {
 	base, err := config.LoadBase("order", "8086")
-	if err != nil {
-		return Config{}, err
-	}
-
-	jwtSecret, err := config.RequireJWTSecret()
 	if err != nil {
 		return Config{}, err
 	}
@@ -82,7 +76,6 @@ func Load() (Config, error) {
 
 	return Config{
 		Base:                   base,
-		JWTSecret:              jwtSecret,
 		CartServiceURL:         cartServiceURL,
 		CatalogServiceURL:      catalogServiceURL,
 		VendorServiceURL:       vendorServiceURL,

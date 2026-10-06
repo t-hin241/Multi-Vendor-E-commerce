@@ -13,7 +13,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/rs/zerolog"
 
-	"shopee/backend/pkg/authjwt"
+	"shopee/backend/pkg/authjwt/authjwttest"
 	"shopee/backend/pkg/middleware"
 	"shopee/backend/services/admin/internal/adapter"
 	"shopee/backend/services/admin/internal/transport"
@@ -33,7 +33,7 @@ func (r *recorder) Get(_ context.Context, _, _ string, q url.Values, _ string) (
 
 func TestAdminRoutesNeedAnAdminTokenAndOnlyRead(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	jwt := authjwt.NewManager("test-signing-secret-not-a-real-secret-000")
+	jwt := authjwttest.Manager()
 	rec := &recorder{}
 	svc := usecase.Service{Upstreams: []usecase.Upstream{{Name: "order", URL: "http://order"}}, Reader: rec, Roles: allow{}, Log: zerolog.Nop()}
 	router := transport.NewRouter("test", zerolog.Nop(), jwt, svc)

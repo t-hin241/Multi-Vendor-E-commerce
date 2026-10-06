@@ -10,7 +10,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/rs/zerolog"
 
-	"shopee/backend/pkg/authjwt"
+	"shopee/backend/pkg/authjwt/authjwttest"
 	"shopee/backend/pkg/serviceauth"
 	"shopee/backend/services/notification/internal/transport"
 )
@@ -19,7 +19,7 @@ import (
 // every admin route needs an admin token.
 func TestRoutesNeedServiceKeyOrAdmin(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	jwt := authjwt.NewManager("test-signing-secret-not-a-real-secret-000")
+	jwt := authjwttest.Manager()
 	key := "test-internal-key-not-a-real-secret-0000"
 	router := transport.NewRouter("test", zerolog.Nop(), jwt, serviceauth.SharedKey(key), transport.NewInternalHandler(nil, zerolog.Nop()), transport.NewAdminHandler(nil, zerolog.Nop()))
 	send := func(method, path string, headers map[string]string) int {

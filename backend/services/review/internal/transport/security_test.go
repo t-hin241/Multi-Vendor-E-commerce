@@ -13,7 +13,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/rs/zerolog"
 
-	"shopee/backend/pkg/authjwt"
+	"shopee/backend/pkg/authjwt/authjwttest"
 	"shopee/backend/services/review/internal/domain"
 )
 
@@ -60,7 +60,7 @@ func (allow) Allow(context.Context, string, int64, time.Duration) (bool, error) 
 
 func TestRoutesNeedTheRightRoleAndAreRateLimited(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	jwt := authjwt.NewManager("test-signing-secret-not-a-real-secret-000")
+	jwt := authjwttest.Manager()
 	send := func(router http.Handler, method, path, token string) int {
 		req := httptest.NewRequest(method, path, strings.NewReader(`{}`))
 		if token != "" {

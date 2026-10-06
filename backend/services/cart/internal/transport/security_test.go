@@ -10,6 +10,7 @@ import (
 	"github.com/rs/zerolog"
 
 	"shopee/backend/pkg/authjwt"
+	"shopee/backend/pkg/authjwt/authjwttest"
 	"shopee/backend/pkg/serviceauth"
 )
 
@@ -20,7 +21,7 @@ const (
 )
 
 func newTestRouter() (http.Handler, *authjwt.Manager) {
-	jwt := authjwt.NewManager(testSigningKey)
+	jwt := authjwttest.Manager()
 	return NewRouter("test", zerolog.Nop(), jwt, &CartHandler{}, &InternalHandler{}, serviceauth.SharedKey(testServiceKey)), jwt
 }
 

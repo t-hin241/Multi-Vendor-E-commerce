@@ -22,7 +22,6 @@ const (
 
 type Config struct {
 	Base                config.Base
-	JWTSecret           string
 	CatalogServiceURL   string
 	InventoryServiceURL string
 	Retention           Retention
@@ -41,11 +40,6 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 
-	jwtSecret, err := config.RequireJWTSecret()
-	if err != nil {
-		return Config{}, err
-	}
-
 	catalogServiceURL, err := requireEnv("CATALOG_SERVICE_URL")
 	if err != nil {
 		return Config{}, err
@@ -60,7 +54,7 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 
-	return Config{Base: base, JWTSecret: jwtSecret, CatalogServiceURL: catalogServiceURL,
+	return Config{Base: base, CatalogServiceURL: catalogServiceURL,
 		InventoryServiceURL: inventoryServiceURL, Retention: retention}, nil
 }
 

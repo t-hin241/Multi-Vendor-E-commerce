@@ -11,7 +11,7 @@ import (
 
 func setupConfig(t *testing.T) {
 	t.Setenv("DATABASE_URL", "postgres://synthetic@localhost/identity_test?sslmode=disable")
-	t.Setenv("JWT_SECRET", strings.Repeat("j", 32))
+	t.Setenv("IDENTITY_RATE_LIMIT_KEY", strings.Repeat("r", 32))
 	t.Setenv("IDENTITY_SERVICE_KEY", strings.Repeat("s", 32))
 	t.Setenv("IDENTITY_RESET_DELIVERY_KEY", strings.Repeat("d", 32))
 	t.Setenv("IDENTITY_RESET_ENCRYPTION_KEY", base64.StdEncoding.EncodeToString(bytes.Repeat([]byte{1}, 32)))

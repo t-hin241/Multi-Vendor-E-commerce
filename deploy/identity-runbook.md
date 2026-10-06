@@ -32,7 +32,10 @@ chỉ là placeholder; không dùng để chạy service, không ghi secret th�
 | Biến | Nơi dùng | Yêu cầu |
 |---|---|---|
 | `ENV` | Backend services và Gateway qua Compose | `staging` hoặc `production`; mặc định local là `development` |
-| `JWT_SECRET` | Identity và các service xác thực | Ngẫu nhiên, tối thiểu 32 ký tự ở staging/production |
+| `JWT_SIGNING_KEY_ID`, `JWT_SIGNING_KEY` | **Chỉ Identity** | Khóa riêng Ed25519 ký access token (`deploy/gen-jwt-keys.sh`); xem mục "Khóa ký token" |
+| `JWT_PUBLIC_KEYS` | Mọi service xác thực | Khóa công khai `kid:base64`, chỉ xác minh được, không ký được |
+| `IDENTITY_RATE_LIMIT_KEY` | Identity | HMAC email/IP thành key rate limit (Redis không giữ email thô); tối thiểu 32 ký tự ở staging/production |
+| `IDENTITY_REDIS_PASSWORD` | Identity | User ACL `identity` trên Redis cache (`deploy/gen-redis-passwords.sh`) |
 | `IDENTITY_SERVICE_URL` | Các service gọi Identity | URL private của Identity |
 | `IDENTITY_SERVICE_KEY` | Identity và các service gọi Identity | Ngẫu nhiên, tối thiểu 32 ký tự |
 | `IDENTITY_RESET_DELIVERY_KEY` | Chỉ Identity và Notification | Ngẫu nhiên, tối thiểu 32 ký tự, khác service key |
@@ -200,3 +203,35 @@ Thư mục backup được Git bỏ qua vì chứa dữ liệu riêng tư. Đây
 Ở bước migration này, chỉ PostgreSQL được khởi động; các service ứng dụng chưa được khởi động lại.
 Kết quả sửa cấu hình, recreate service và smoke test local sau đó được tổng kết tại
 [Identity module details](../docs/module-details/01-identity.md).
+
+## Khóa ký token (Ed25519)
+
+Access token ký bằng EdDSA. **Chỉ Identity** có khóa riêng (`JWT_SIGNING_KEY`), nên chỉ nó phát được token. Mọi service khác chỉ có `JWT_PUBLIC_KEYS`: xác minh được, không ký được.
+
+Trước đây cả 11 service dùng chung `JWT_SECRET` (HS256). Bất kỳ service nào, hoặc bất kỳ ai lộ được env của một service, đều tự phát được token, kể cả token role admin.
+
+Token mang `kid` (chọn khóa công khai để kiểm) và `iss=shopee-identity`. Verifier từ chối:
+- `alg` khác EdDSA, kể cả `none` và HS256 dùng khóa công khai làm secret;
+- `kid` lạ hoặc thiếu;
+- sai issuer.
+
+### Chuyển từ HS256 sang (một lần)
+
+1. `bash deploy/gen-jwt-keys.sh` → dán `JWT_SIGNING_KEY_ID`, `JWT_SIGNING_KEY`, `JWT_PUBLIC_KEYS` vào `.env`. Thêm `IDENTITY_RATE_LIMIT_KEY=$(openssl rand -hex 32)`.
+2. Giữ `JWT_SECRET` cũ và đặt `JWT_ACCEPT_LEGACY_HS256_UNTIL=<bây giờ + 30 phút, RFC 3339 UTC>` (tối đa 24 giờ; service từ chối khởi động nếu xa hơn).
+3. `docker compose up -d`. Token cũ vẫn dùng được tới hết hạn (≤15 phút); token mới là EdDSA. Trong cửa sổ này, token cũ vẫn bị đối chiếu session/role với Identity, nên không thể dùng nó để nâng quyền.
+4. Sau mốc trên: xóa `JWT_ACCEPT_LEGACY_HS256_UNTIL` và `JWT_SECRET` khỏi `.env`, rồi `docker compose up -d`. Thực ra hết mốc là HS256 đã tự bị từ chối.
+
+Người dùng không bị đăng xuất: gặp 401, frontend tự refresh một lần, vì refresh token nằm trong DB và không phụ thuộc thuật toán ký.
+
+### Xoay khóa (không ai bị đăng xuất)
+
+1. `bash deploy/gen-jwt-keys.sh <id-mới>`. Nối khóa công khai mới vào `JWT_PUBLIC_KEYS` (`id-cũ:...,id-mới:...`), rồi `docker compose up -d`: mọi service chấp nhận cả hai.
+2. Đổi `JWT_SIGNING_KEY_ID`/`JWT_SIGNING_KEY` sang cặp mới, rồi `docker compose up -d identity`.
+3. Sau 15 phút, bỏ mục cũ khỏi `JWT_PUBLIC_KEYS` và `docker compose up -d`.
+
+### Khi có sự cố
+
+- **Lộ khóa riêng:** xoay ngay. Có thể bỏ khóa cũ khỏi `JWT_PUBLIC_KEYS` ngay ở bước 1 nếu chấp nhận người dùng phải refresh. Thu hồi session nghi vấn ở `/admin`. Mọi token vẫn bị kiểm session ở Identity, nên token giả cần một session thật khớp user/role.
+- **Lộ khóa công khai:** không cần làm gì: khóa công khai không ký được token.
+- **Rollback image cũ (HS256):** cần lại `JWT_SECRET` trong `.env` (image cũ đọc biến này). Vì vậy chỉ xóa nó khi bản mới đã ổn định.

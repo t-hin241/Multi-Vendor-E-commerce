@@ -22,7 +22,6 @@ type Upstream struct {
 
 type Config struct {
 	Base      config.Base
-	JWTSecret string
 	Upstreams []Upstream
 	// UpstreamTimeout bounds each read from a domain service, so one slow
 	// service shows as unavailable instead of stalling the page.
@@ -51,11 +50,7 @@ func Load() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
-	secret, err := config.RequireJWTSecret()
-	if err != nil {
-		return Config{}, err
-	}
-	cfg := Config{Base: base, JWTSecret: secret, UpstreamTimeout: 4 * time.Second}
+	cfg := Config{Base: base, UpstreamTimeout: 4 * time.Second}
 	for _, u := range upstreams {
 		raw := strings.TrimRight(strings.TrimSpace(os.Getenv(u.env)), "/")
 		if raw == "" {

@@ -17,7 +17,6 @@ type Config struct {
 	PayoutKey                        []byte
 	PayoutServiceKey                 string
 	Base                             config.Base
-	JWTSecret                        string
 	Internal                         config.InternalServices
 	CatalogURL, OrderURL, PaymentURL string
 	NotificationServiceURL           string
@@ -26,11 +25,6 @@ type Config struct {
 
 func Load() (Config, error) {
 	base, err := config.LoadBase("vendor", "8082")
-	if err != nil {
-		return Config{}, err
-	}
-
-	jwtSecret, err := config.RequireJWTSecret()
 	if err != nil {
 		return Config{}, err
 	}
@@ -67,7 +61,6 @@ func Load() (Config, error) {
 	return Config{
 		PaymentURL: envDefault("PAYMENT_SERVICE_URL", "http://payment:8087"), PayoutKey: payoutKey, PayoutServiceKey: payoutServiceKey, Internal: internal, CatalogURL: envDefault("CATALOG_SERVICE_URL", "http://catalog:8083"), OrderURL: envDefault("ORDER_SERVICE_URL", "http://order:8086"),
 		Base:                   base,
-		JWTSecret:              jwtSecret,
 		NotificationServiceURL: notificationServiceURL,
 		ObjectStorage:          objectStorageCfg,
 	}, nil

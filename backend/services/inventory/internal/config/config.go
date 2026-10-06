@@ -14,18 +14,12 @@ type Config struct {
 	OrderServiceURL   string
 	ExpiryEnabled     bool
 	Base              config.Base
-	JWTSecret         string
 	VendorServiceURL  string
 	CatalogServiceURL string
 }
 
 func Load() (Config, error) {
 	base, err := config.LoadBase("inventory", "8084")
-	if err != nil {
-		return Config{}, err
-	}
-
-	jwtSecret, err := config.RequireJWTSecret()
 	if err != nil {
 		return Config{}, err
 	}
@@ -54,7 +48,6 @@ func Load() (Config, error) {
 	}
 	return Config{OrderServiceURL: orderURL, ExpiryEnabled: expiry,
 		Base:              base,
-		JWTSecret:         jwtSecret,
 		VendorServiceURL:  vendorServiceURL,
 		CatalogServiceURL: catalogServiceURL,
 	}, nil

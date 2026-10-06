@@ -2,16 +2,17 @@ package transport
 
 import (
 	"net/http/httptest"
-	"shopee/backend/pkg/authjwt"
-	"shopee/backend/pkg/serviceauth"
 	"strings"
 	"testing"
+
+	"shopee/backend/pkg/authjwt/authjwttest"
+	"shopee/backend/pkg/serviceauth"
 
 	"github.com/rs/zerolog"
 )
 
 func TestInternalCatalogRequiresServiceAuthentication(t *testing.T) {
-	r := NewRouter("test", zerolog.Nop(), authjwt.NewManager("fake-test-signing-key-not-a-real-secret"), &CategoryHandler{}, &ProductHandler{}, &StorefrontHandler{}, &AdminHandler{}, &InternalHandler{}, &AttributeHandler{}, serviceauth.SharedKey("fake-test-service-key-not-a-real-secret"))
+	r := NewRouter("test", zerolog.Nop(), authjwttest.Manager(), &CategoryHandler{}, &ProductHandler{}, &StorefrontHandler{}, &AdminHandler{}, &InternalHandler{}, &AttributeHandler{}, serviceauth.SharedKey("fake-test-service-key-not-a-real-secret"))
 	for _, path := range []string{"/internal/products/00000000-0000-0000-0000-000000000001", "/internal/products/variants/00000000-0000-0000-0000-000000000002"} {
 		response := httptest.NewRecorder()
 		r.ServeHTTP(response, httptest.NewRequest("GET", path, nil))

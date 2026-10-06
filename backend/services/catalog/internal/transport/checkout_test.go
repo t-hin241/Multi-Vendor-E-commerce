@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"shopee/backend/pkg/authjwt"
+	"shopee/backend/pkg/authjwt/authjwttest"
 	"shopee/backend/pkg/serviceauth"
 	"shopee/backend/services/catalog/internal/domain"
 	"shopee/backend/services/catalog/internal/usecase"
@@ -39,7 +39,7 @@ func TestCheckoutSnapshotRequiresOrderAndPreservesVisibilityFence(t *testing.T) 
 	const key = "fake-checkout-test-key-not-a-real-secret"
 	hash := sha256.Sum256([]byte(key))
 	verifier := serviceauth.NewVerifier(map[string][][]byte{"order": {hash[:]}, "cart": {hash[:]}}, "")
-	r := NewRouter("test", zerolog.Nop(), authjwt.NewManager("fake-jwt-key-not-a-real-secret"), &CategoryHandler{}, &ProductHandler{}, &StorefrontHandler{}, &AdminHandler{}, NewInternalHandler(uc, zerolog.Nop()), &AttributeHandler{}, verifier)
+	r := NewRouter("test", zerolog.Nop(), authjwttest.Manager(), &CategoryHandler{}, &ProductHandler{}, &StorefrontHandler{}, &AdminHandler{}, NewInternalHandler(uc, zerolog.Nop()), &AttributeHandler{}, verifier)
 	for _, caller := range []string{"", "cart", "order"} {
 		req := httptest.NewRequest(http.MethodPost, "/internal/products/checkout-snapshot", strings.NewReader(`{"product_ids":["00000000-0000-0000-0000-000000000001"],"variant_ids":[]}`))
 		req.Header.Set("Content-Type", "application/json")

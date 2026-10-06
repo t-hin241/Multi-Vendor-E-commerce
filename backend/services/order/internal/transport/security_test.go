@@ -10,13 +10,14 @@ import (
 	"github.com/rs/zerolog"
 
 	"shopee/backend/pkg/authjwt"
+	"shopee/backend/pkg/authjwt/authjwttest"
 	"shopee/backend/pkg/serviceauth"
 )
 
 const someID = "00000000-0000-0000-0000-000000000001"
 
 func testRouter() (http.Handler, *authjwt.Manager) {
-	jwt := authjwt.NewManager("fake-test-signing-key-not-a-real-secret")
+	jwt := authjwttest.Manager()
 	return NewRouter("test", zerolog.Nop(), jwt, &OrderHandler{}, &BuyerAddressHandler{}, &AdminHandler{}, &InternalHandler{}, &ReturnHandler{},
 		serviceauth.SharedKey("fake-test-service-key-not-a-real-secret")), jwt
 }

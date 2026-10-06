@@ -10,7 +10,6 @@ import (
 	sessionconfig "shopee/backend/pkg/config"
 
 	"shopee/backend/pkg/adminaudit"
-	"shopee/backend/pkg/authjwt"
 	"shopee/backend/pkg/health"
 	"shopee/backend/pkg/logger"
 	"shopee/backend/pkg/middleware"
@@ -74,7 +73,10 @@ func main() {
 	}
 	defer redisClient.Close()
 
-	jwtManager := authjwt.NewManager(cfg.JWTSecret)
+	jwtManager, err := sessionconfig.LoadTokenIssuer()
+	if err != nil {
+		log.Fatal().Err(err).Msg("access token issuer configuration invalid")
+	}
 
 	userRepo := repository.NewUserRepository(dbPool)
 	refreshTokenRepo := repository.NewRefreshTokenRepository(dbPool)
@@ -97,7 +99,7 @@ func main() {
 	adminHandler := transport.NewAdminHandler(adminUseCase, log)
 	internalHandler := transport.NewInternalHandler(authUseCase, log)
 
-	router := transport.NewRouter(cfg.Base.Env, log, jwtManager, authHandler, adminHandler, internalHandler, transport.Security{TrustedProxies: cfg.TrustedProxies, Origins: cfg.Origins, ServiceKey: cfg.ServiceKey, Services: cfg.Internal.Verifier, DeliveryKey: cfg.ResetDeliveryKey, RateKey: cfg.JWTSecret, Redis: redisClient}, resetDelivery,
+	router := transport.NewRouter(cfg.Base.Env, log, jwtManager, authHandler, adminHandler, internalHandler, transport.Security{TrustedProxies: cfg.TrustedProxies, Origins: cfg.Origins, ServiceKey: cfg.ServiceKey, Services: cfg.Internal.Verifier, DeliveryKey: cfg.ResetDeliveryKey, RateKey: cfg.RateKey, Redis: redisClient}, resetDelivery,
 		health.Checker{Name: "postgres", Ping: func(ctx context.Context) error { return dbPool.Ping(ctx) }},
 		health.Checker{Name: "redis", Ping: func(ctx context.Context) error { return redisClient.Ping(ctx).Err() }},
 	)

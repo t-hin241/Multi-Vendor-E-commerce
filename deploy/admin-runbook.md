@@ -8,7 +8,7 @@ Không có secret mới. Admin đọc các service bằng chính token của adm
 
 | Biến (service `admin`) | Mặc định | Ý nghĩa |
 |---|---|---|
-| `JWT_SECRET`, `IDENTITY_SERVICE_URL`, `IDENTITY_SERVICE_KEY` | dùng chung | Xác thực token và xác minh lại vai trò admin với Identity |
+| `JWT_PUBLIC_KEYS`, `IDENTITY_SERVICE_URL`, `IDENTITY_SERVICE_KEY` | dùng chung | Xác thực token (chỉ khóa công khai) và xác minh lại vai trò admin với Identity |
 | `VENDOR_SERVICE_URL` … `SHIPMENT_SERVICE_URL`, `NOTIFICATION_SERVICE_URL` | bắt buộc | Nơi đọc số liệu vận hành và audit |
 | `REVIEW_SERVICE_URL` (Compose: `ADMIN_REVIEW_SERVICE_URL`) | `http://review:8091` | Để rỗng khi tắt review: audit review không được tra cứu |
 | `ADMIN_UPSTREAM_TIMEOUT` | `4s` | Giới hạn mỗi lần đọc một service (500ms–30s). Quá hạn thì service đó hiện "unavailable" |
@@ -16,6 +16,7 @@ Không có secret mới. Admin đọc các service bằng chính token của adm
 ## Thay đổi hành vi và API
 
 - Các thao tác sau **bắt buộc lý do** (400 nếu thiếu): đặt commission rule, replay side effect của Order, thử lại hoàn tiền trả hàng, replay trạng thái shop (Vendor), bật/tắt carrier, đặt fee rule. Tạo carrier/zone, thêm tỉnh nhận ghi chú tùy chọn.
+- Tắt carrier giờ chặn **báo giá mới** trên carrier đó (trước đây báo giá vẫn chạy). Shop dùng carrier đó làm mặc định sẽ hiện "shipping unavailable" lúc checkout, log `shipment_quote_unavailable` với `reason=carrier_inactive`, cho tới khi bật lại carrier hoặc shop chọn carrier khác. Đơn đã thanh toán vẫn tạo shipment như cũ, với phí buyer đã trả.
 - Hoàn tiền admin ở Order nhận `Idempotency-Key` (header hoặc `idempotency_key`). Gửi lại cùng key và cùng nội dung trả về hoàn tiền đã tạo; khác nội dung thì 409. Frontend tự gửi key.
 - Order và Shipment từ chối thao tác admin khi không xác minh được với Identity hoặc không ghi được audit (trước đây Order bỏ qua kiểm tra khi thiếu Identity). Cấu hình shipping và kiểm duyệt review giờ xác minh lại admin với Identity.
 - `X-Request-Id` từ client chỉ được giữ nếu dài 8–64 ký tự `[A-Za-z0-9._:-]`; khác đi thì gateway/service tạo id mới.

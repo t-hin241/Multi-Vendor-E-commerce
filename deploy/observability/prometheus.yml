@@ -49,9 +49,13 @@ scrape_configs:
     static_configs:
       - targets: [postgres-exporter:9187]
 
+  # redis: rate-limit counters (evicts when full); queue: notification jobs (never evicts).
   - job_name: redis
     static_configs:
       - targets: [redis-exporter:9121]
+        labels: {redis: cache}
+      - targets: [redis-queue-exporter:9121]
+        labels: {redis: queue}
 
   - job_name: nats
     static_configs:

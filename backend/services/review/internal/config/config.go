@@ -11,9 +11,9 @@ import (
 
 // Config is Review's configuration; secrets are read here only.
 type Config struct {
-	Base                                                             baseconfig.Base
-	JWTSecret, OrderServiceURL, VendorServiceURL, IdentityServiceURL string
-	ObjectStorage                                                    objectstorage.Config
+	Base                                                  baseconfig.Base
+	OrderServiceURL, VendorServiceURL, IdentityServiceURL string
+	ObjectStorage                                         objectstorage.Config
 	// ShowUnverified also lists reviews that are not verified purchases
 	// (seeded demo data). Refused in production (REV-05).
 	ShowUnverified bool
@@ -21,10 +21,6 @@ type Config struct {
 
 func Load() (Config, error) {
 	base, err := baseconfig.LoadBase("review", "8091")
-	if err != nil {
-		return Config{}, err
-	}
-	jwt, err := baseconfig.RequireJWTSecret()
 	if err != nil {
 		return Config{}, err
 	}
@@ -65,7 +61,7 @@ func Load() (Config, error) {
 	if showUnverified && base.Env == "production" {
 		return Config{}, fmt.Errorf("config: REVIEW_SHOW_UNVERIFIED is not allowed in production")
 	}
-	return Config{ShowUnverified: showUnverified, Base: base, JWTSecret: jwt, OrderServiceURL: orderURL, VendorServiceURL: vendorURL, IdentityServiceURL: identityURL, ObjectStorage: objectstorage.Config{Endpoint: endpoint, AccessKey: access, SecretKey: secret, Bucket: bucket, PublicBaseURL: publicURL, UseSSL: ssl}}, nil
+	return Config{ShowUnverified: showUnverified, Base: base, OrderServiceURL: orderURL, VendorServiceURL: vendorURL, IdentityServiceURL: identityURL, ObjectStorage: objectstorage.Config{Endpoint: endpoint, AccessKey: access, SecretKey: secret, Bucket: bucket, PublicBaseURL: publicURL, UseSSL: ssl}}, nil
 }
 func requireEnv(key string) (string, error) {
 	if v := os.Getenv(key); v != "" {

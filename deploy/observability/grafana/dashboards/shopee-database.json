@@ -812,7 +812,7 @@
             "uid": "prometheus"
           },
           "expr": "redis_memory_used_bytes / (redis_memory_max_bytes > 0)",
-          "legendFormat": "used",
+          "legendFormat": "{{redis}}",
           "instant": false,
           "format": "time_series"
         }
@@ -821,7 +821,7 @@
     {
       "id": 53,
       "type": "timeseries",
-      "title": "Redis commands /s",
+      "title": "Redis commands /s and evictions",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -869,8 +869,19 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum(rate(redis_commands_processed_total[5m]))",
-          "legendFormat": "commands",
+          "expr": "sum by (redis) (rate(redis_commands_processed_total[5m]))",
+          "legendFormat": "{{redis}} commands",
+          "instant": false,
+          "format": "time_series"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "sum by (redis) (rate(redis_evicted_keys_total[5m]))",
+          "legendFormat": "{{redis}} evicted",
           "instant": false,
           "format": "time_series"
         }

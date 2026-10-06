@@ -84,3 +84,34 @@ Production từ chối khởi động nếu thiếu khóa riêng (trừ khi bậ
 - **Xác thực:** đặt `INTERNAL_AUTH_ACCEPT_SHARED_KEY=true`. Image cũ (dùng khóa chung) được image mới chấp nhận.
 - **Image cũ:** đọc được schema mới (chỉ thêm bảng). Effect `report_rejected_outcome` còn tồn sẽ không chạy được với image Order cũ: xử lý trước khi rollback Order (Payment review tay).
 - **Migration down:** `event_inbox` từ chối down khi còn event park hoặc đã có audit; Order `000015` down lỗi khi còn effect `report_rejected_outcome`.
+
+## Redis: tách theo loại dữ liệu và ACL theo service
+
+| | `redis` (cache) | `redis-queue` |
+|---|---|---|
+| Dữ liệu | Bộ đếm rate limit: `identity:rate:*`, `payment:webhook:*`, `review:rate:*` (mất được) | Job Asynq của Notification `asynq:*` (khôi phục được từ PostgreSQL, nhưng không nên mất) |
+| Khi đầy | `allkeys-lru`: bỏ key cũ, rate limit yếu đi (cảnh báo `RedisCacheEvicting`) | `noeviction`: enqueue lỗi, Notification giữ `pending` (cảnh báo `RedisQueueMemoryHigh`) |
+| Persistence | Không | AOF `everysec`, volume `redis-data` (của instance cũ) |
+| User ACL | `identity`, `payment`, `review`: chỉ prefix và lệnh rate limit của mình | `notification`: chỉ `asynq:*`, không lệnh admin/dangerous |
+
+- User `default` tắt; user `monitor` chỉ đọc thống kê (exporter, healthcheck).
+- Service không dùng Redis không nhận `REDIS_URL`.
+- ACL dựng lúc khởi động từ mật khẩu trong env (`deploy/redis/acl.sh`). File ACL chỉ chứa SHA-256 và chỉ user `redis` đọc được.
+- Kiểm chứng: `bash deploy/test-redis-acl.sh` (CI chạy). Integration test của Identity và Notification trong CI chạy bằng đúng user ACL của chúng.
+
+Vì sao: trước đây mọi service dùng chung một Redis, không mật khẩu, cùng một `maxmemory` với `noeviction`.
+- Hàng đợi notification phình to (provider email ngừng) làm lệnh rate limit của Identity lỗi OOM, tức **đăng nhập trả 503**.
+- Bất kỳ container nào cũng đọc/xóa được key của service khác, hoặc chạy `FLUSHALL`.
+
+Load test 2026-10-06: làm đầy `redis-queue` tới 128 MB (mọi lệnh ghi hàng đợi `OOM`), trong lúc đó đăng ký, đăng nhập, xác thực và rate limit 429 vẫn đúng.
+
+### Chuyển một deployment đang chạy
+
+1. `bash deploy/gen-redis-passwords.sh` → dán 5 dòng vào `.env`.
+2. `docker compose up -d`.
+   - `redis-queue` lên trên volume cũ: job đang chờ được giữ nguyên.
+   - `redis` (cache) lên trống: bộ đếm rate limit bắt đầu lại từ 0, tức một phút giới hạn bị nới.
+   - Các key `identity:rate:*` cũ trong volume tự hết hạn sau ≤60 s.
+3. Kiểm tra: Prometheus target `redis`/`redis-queue` up; dashboard Notification không báo "queue unreachable"; đăng nhập sai 6 lần thì nhận 429.
+
+**Rollback:** image và compose cũ dùng một Redis không ACL trên volume `redis-data`. Quay lại compose cũ: job vẫn còn, bộ đếm rate limit mất (không sao).

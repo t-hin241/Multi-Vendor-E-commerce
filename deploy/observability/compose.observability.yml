@@ -121,13 +121,26 @@ services:
       DATA_SOURCE_PASS: ${MONITOR_DB_PASSWORD:?set MONITOR_DB_PASSWORD in .env}
     depends_on: [postgres]
 
+  # One per Redis instance, as the statistics-only ACL user "monitor".
   redis-exporter:
     <<: *observability
     image: oliver006/redis_exporter:v1.93.0@sha256:6ca518a72f30f7f576ef92963de1b91d3c3f5fd3aeac949f878bfda183587820
     mem_limit: 48m
     environment:
       REDIS_ADDR: redis://redis:6379
+      REDIS_USER: monitor
+      REDIS_PASSWORD: ${REDIS_MONITOR_PASSWORD:?set REDIS_MONITOR_PASSWORD in .env}
     depends_on: [redis]
+
+  redis-queue-exporter:
+    <<: *observability
+    image: oliver006/redis_exporter:v1.93.0@sha256:6ca518a72f30f7f576ef92963de1b91d3c3f5fd3aeac949f878bfda183587820
+    mem_limit: 48m
+    environment:
+      REDIS_ADDR: redis://redis-queue:6379
+      REDIS_USER: monitor
+      REDIS_PASSWORD: ${REDIS_MONITOR_PASSWORD:?set REDIS_MONITOR_PASSWORD in .env}
+    depends_on: [redis-queue]
 
   # JetStream stream size and consumers' pending/redelivered counts.
   nats-exporter:

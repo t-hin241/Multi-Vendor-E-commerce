@@ -2,17 +2,18 @@ package transport
 
 import (
 	"net/http/httptest"
-	"shopee/backend/pkg/authjwt"
-	"shopee/backend/pkg/serviceauth"
 	"strings"
 	"testing"
 	"time"
+
+	"shopee/backend/pkg/authjwt/authjwttest"
+	"shopee/backend/pkg/serviceauth"
 
 	"github.com/rs/zerolog"
 )
 
 func TestInventoryMutationsRequireAuthentication(t *testing.T) {
-	jwt := authjwt.NewManager("fake-test-signing-key-not-a-real-secret")
+	jwt := authjwttest.Manager()
 	r := NewRouter("test", zerolog.Nop(), jwt, &ItemHandler{}, &InternalHandler{}, &AdminHandler{}, serviceauth.SharedKey("fake-test-internal-key-not-a-real-secret"))
 	for _, path := range []string{"/internal/inventory/reserve", "/internal/inventory/commit", "/internal/inventory/release", "/internal/inventory/returns"} {
 		w := httptest.NewRecorder()
@@ -29,7 +30,7 @@ func TestInventoryMutationsRequireAuthentication(t *testing.T) {
 }
 
 func TestStockCountRequiresVendorAndValidInput(t *testing.T) {
-	jwt := authjwt.NewManager("fake-test-signing-key-not-a-real-secret")
+	jwt := authjwttest.Manager()
 	r := NewRouter("test", zerolog.Nop(), jwt, &ItemHandler{}, &InternalHandler{}, &AdminHandler{}, serviceauth.SharedKey("fake-test-internal-key-not-a-real-secret"))
 	const item = "/api/inventory/items/00000000-0000-0000-0000-000000000001/stock-counts"
 	body := `{"count_id":"00000000-0000-0000-0000-000000000002","counted_on_hand":1,"reason":"damaged"}`

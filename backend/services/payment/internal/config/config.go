@@ -14,7 +14,6 @@ import (
 
 type Config struct {
 	Base              config.Base
-	JWTSecret         string
 	OrderServiceURL   string
 	Provider          string
 	MockWebhookSecret string
@@ -32,11 +31,6 @@ type Config struct {
 
 func Load() (Config, error) {
 	base, err := config.LoadBase("payment", "8087")
-	if err != nil {
-		return Config{}, err
-	}
-
-	jwtSecret, err := config.RequireJWTSecret()
 	if err != nil {
 		return Config{}, err
 	}
@@ -86,7 +80,7 @@ func Load() (Config, error) {
 
 	return Config{
 		VendorServiceURL: getEnv("VENDOR_SERVICE_URL", "http://vendor:8082"), WebhookRatePerMinute: rate,
-		Base: base, JWTSecret: jwtSecret, OrderServiceURL: orderServiceURL,
+		Base: base, OrderServiceURL: orderServiceURL,
 		Provider: provider, MockWebhookSecret: mockWebhookSecret, PayOSClientID: payosClientID, PayOSAPIKey: payosAPIKey, PayOSChecksumKey: payosChecksumKey, PayOSBaseURL: getEnv("PAYOS_API_URL", "https://api-merchant.payos.vn"), PayOSReturnURL: payosReturnURL, PayOSCancelURL: payosCancelURL,
 	}, nil
 }

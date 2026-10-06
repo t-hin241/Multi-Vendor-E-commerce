@@ -32,6 +32,7 @@ updates:
       - /deploy
       - /deploy/observability
       - /deploy/loadtest
+      - /deploy/tools
     schedule:
       interval: weekly
     groups:

@@ -23,6 +23,7 @@ import (
 	"github.com/rs/zerolog"
 
 	"shopee/backend/pkg/authjwt"
+	"shopee/backend/pkg/authjwt/authjwttest"
 	"shopee/backend/services/identity/internal/adapter"
 	"shopee/backend/services/identity/internal/config"
 	"shopee/backend/services/identity/internal/repository"
@@ -193,7 +194,7 @@ func setup(t *testing.T) *fixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	f := &fixture{pool: pool, users: repository.NewUserRepository(pool), resets: repository.NewPasswordResetRepository(pool), refresh: repository.NewRefreshTokenRepository(pool), tx: repository.Transactions{Pool: pool}, cipher: cipher, jwt: authjwt.NewManager("synthetic-integration-signing-key")}
+	f := &fixture{pool: pool, users: repository.NewUserRepository(pool), resets: repository.NewPasswordResetRepository(pool), refresh: repository.NewRefreshTokenRepository(pool), tx: repository.Transactions{Pool: pool}, cipher: cipher, jwt: authjwttest.Manager()}
 	f.auth = usecase.NewAuthUseCase(f.users, f.refresh, f.resets, f.jwt, zerolog.Nop(), f.tx, cipher)
 	f.jwt.SetVerifier(f.auth.ValidateSession)
 	return f

@@ -117,10 +117,25 @@ groups:
         labels: {severity: warning}
         annotations:
           summary: "PostgreSQL at {{ $value | humanizePercentage }} of max_connections"
-      - alert: RedisMemoryHigh
-        # noeviction: at maxmemory, writes (sessions, rate limits, jobs) fail.
-        expr: redis_memory_used_bytes / (redis_memory_max_bytes > 0) > 0.8
+      - alert: RedisQueueMemoryHigh
+        # noeviction: at maxmemory, enqueueing notification jobs fails.
+        expr: redis_memory_used_bytes{redis="queue"} / (redis_memory_max_bytes{redis="queue"} > 0) > 0.8
         for: 5m
         labels: {severity: critical}
         annotations:
-          summary: "Redis at {{ $value | humanizePercentage }} of maxmemory"
+          summary: "redis-queue at {{ $value | humanizePercentage }} of maxmemory"
+      - alert: RedisCacheEvicting
+        # The cache instance evicts when full by design; sustained eviction
+        # means rate-limit counters are dropped early (limits weaken): a flood
+        # or a too small maxmemory.
+        expr: rate(redis_evicted_keys_total{redis="cache"}[5m]) > 1
+        for: 10m
+        labels: {severity: warning}
+        annotations:
+          summary: "Redis cache evicts {{ $value | humanize }} keys/s: rate limits weaken"
+      - alert: RedisDown
+        expr: redis_up == 0
+        for: 2m
+        labels: {severity: critical}
+        annotations:
+          summary: "Redis {{ $labels.redis }} unreachable (logins/webhooks or notification jobs fail)"

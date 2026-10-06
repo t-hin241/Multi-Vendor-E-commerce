@@ -1,0 +1,8 @@
+# Developer tools, run in containers so nobody installs them and everyone
+# (CI included) runs the same pinned version. Not part of any stack:
+# deploy/sqlc.sh reads the image from here; Dependabot and
+# deploy/check-pins.sh keep it pinned.
+services:
+  sqlc:
+    image: sqlc/sqlc:1.31.1@sha256:70f53171d27b2424e9358869975455a6e955a5aa8e58a998a270a6e34e525537
+    profiles: [tools]

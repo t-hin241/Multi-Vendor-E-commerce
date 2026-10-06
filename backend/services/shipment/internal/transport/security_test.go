@@ -9,7 +9,7 @@ import (
 
 	"github.com/rs/zerolog"
 
-	"shopee/backend/pkg/authjwt"
+	"shopee/backend/pkg/authjwt/authjwttest"
 	"shopee/backend/pkg/serviceauth"
 	"shopee/backend/services/shipment/internal/usecase"
 )
@@ -20,7 +20,7 @@ const (
 )
 
 func TestShipmentRoutesAreProtected(t *testing.T) {
-	jwt := authjwt.NewManager("fake-test-signing-key-not-a-real-secret")
+	jwt := authjwttest.Manager()
 	uc := usecase.NewShipmentUseCase(usecase.Deps{})
 	r := NewRouter("test", zerolog.Nop(), jwt, NewShipmentHandler(uc, zerolog.Nop()), &AdminHandler{}, &VendorShippingMethodHandler{},
 		NewInternalHandler(uc, zerolog.Nop()), NewWebhookHandler(uc, zerolog.Nop()), NewOpsHandler(uc, zerolog.Nop()), serviceauth.SharedKey(testKey))

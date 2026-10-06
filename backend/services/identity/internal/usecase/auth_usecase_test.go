@@ -9,7 +9,7 @@ import (
 	"github.com/rs/zerolog"
 
 	"shopee/backend/pkg/apperror"
-	"shopee/backend/pkg/authjwt"
+	"shopee/backend/pkg/authjwt/authjwttest"
 	"shopee/backend/services/identity/internal/usecase"
 )
 
@@ -31,7 +31,7 @@ func newTestAuthUseCaseWithLog() (*usecase.AuthUseCase, *authFixture) {
 	}
 	resets := newFakePasswordResetRepository()
 	resets.cipher = tokenCipher
-	uc := usecase.NewAuthUseCase(newFakeUserRepository(), newFakeRefreshTokenRepository(), resets, authjwt.NewManager("test-secret"), zerolog.New(buf), &fakeTransactions{}, tokenCipher)
+	uc := usecase.NewAuthUseCase(newFakeUserRepository(), newFakeRefreshTokenRepository(), resets, authjwttest.Manager(), zerolog.New(buf), &fakeTransactions{}, tokenCipher)
 	return uc, &authFixture{buf, resets}
 }
 func (f *authFixture) Reset() { f.log.Reset() }

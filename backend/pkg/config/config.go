@@ -73,14 +73,6 @@ func LoadBase(serviceName, defaultPort string) (Base, error) {
 	}, nil
 }
 
-// RequireJWTSecret reads the shared access-token signing secret. Only
-// services that verify or issue access tokens call this, so services with
-// no auth surface (payment, shipment, notification, ...) are not forced to
-// carry an unused secret.
-func RequireJWTSecret() (string, error) {
-	return requireEnv("JWT_SECRET")
-}
-
 // RequireEventBusPassword reads this service's event-bus password
 // (EVENTBUS_PASSWORD; the broker identifies the service by its name and
 // lets it publish only its own event types). Only services on the event

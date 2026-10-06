@@ -12,8 +12,8 @@ import (
 )
 
 type Config struct {
-	Base                                                               baseconfig.Base
-	JWTSecret, ServiceKey, ResetDeliveryKey, NotificationURL, ResetURL string
+	Base                                                             baseconfig.Base
+	ServiceKey, ResetDeliveryKey, RateKey, NotificationURL, ResetURL string
 	// Internal verifies calling services (PLT-01).
 	Internal           baseconfig.InternalServices
 	ResetEncryptionKey []byte
@@ -31,10 +31,6 @@ func Load() (Config, error) {
 	if c.Base.Env != "development" && c.Base.Env != "test" && c.Base.Env != "staging" && c.Base.Env != "production" {
 		return c, fmt.Errorf("invalid identity ENV")
 	}
-	c.JWTSecret, err = baseconfig.RequireJWTSecret()
-	if err != nil {
-		return c, err
-	}
 	c.ServiceKey = os.Getenv("IDENTITY_SERVICE_KEY")
 	c.ResetDeliveryKey = os.Getenv("IDENTITY_RESET_DELIVERY_KEY")
 	if (c.ServiceKey != "" && len(c.ServiceKey) < 32) || len(c.ResetDeliveryKey) < 32 {
@@ -47,8 +43,12 @@ func Load() (Config, error) {
 		return c, err
 	}
 	secure := c.Base.Env == "production" || c.Base.Env == "staging"
-	if secure && len(c.JWTSecret) < 32 {
-		return c, fmt.Errorf("staging/production JWT_SECRET must have at least 32 characters")
+	// Keys the HMAC that turns email and IP into rate-limit keys, so Redis
+	// never holds an email address. Its own secret: it used to be the token
+	// signing secret, which only Identity holds now (asymmetric JWT).
+	c.RateKey = os.Getenv("IDENTITY_RATE_LIMIT_KEY")
+	if c.RateKey == "" || (secure && len(c.RateKey) < 32) {
+		return c, fmt.Errorf("IDENTITY_RATE_LIMIT_KEY is required (at least 32 characters in staging/production)")
 	}
 	c.ResetEncryptionKey, err = base64.StdEncoding.DecodeString(os.Getenv("IDENTITY_RESET_ENCRYPTION_KEY"))
 	if err != nil || len(c.ResetEncryptionKey) != 32 {

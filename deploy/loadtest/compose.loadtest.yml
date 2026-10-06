@@ -16,6 +16,7 @@ x-stack-cpus: &stack-cpus
 services:
   postgres: {<<: *stack-cpus, ports: !reset []}
   redis: {<<: *stack-cpus, ports: !reset []}
+  redis-queue: {<<: *stack-cpus, ports: !reset []}
   nats: {<<: *stack-cpus, ports: !reset []}
   minio: {<<: *stack-cpus, ports: !reset []}
   identity: {<<: *stack-cpus}
@@ -45,6 +46,7 @@ services:
   node-exporter: {<<: *stack-cpus}
   postgres-exporter: {<<: *stack-cpus}
   redis-exporter: {<<: *stack-cpus}
+  redis-queue-exporter: {<<: *stack-cpus}
   nats-exporter: {<<: *stack-cpus}
 
   k6:

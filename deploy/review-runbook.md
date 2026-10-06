@@ -8,7 +8,7 @@ Xem [chi tiết module](../docs/module-details/11-review.md). Quyết định D0
 |---|---|---|
 | `REVIEW_SHOW_UNVERIFIED` | `false` | `true`: storefront hiện cả review không phải "đã mua hàng" (dữ liệu seed demo). Chỉ local/staging; service từ chối khởi động khi `ENV=production` |
 | `IDENTITY_SERVICE_KEY` | dùng chung | Gọi Order (eligibility), Vendor (chủ shop), Identity (tên, xác minh admin) |
-| `REDIS_URL` | dùng chung | Bộ đếm rate limit (`review:rate:*`, mất được) |
+| `REDIS_URL` | riêng | Bộ đếm rate limit (`review:rate:*`, mất được) trên Redis cache, user ACL `review`; `REVIEW_REDIS_PASSWORD` |
 | `OBJECT_STORAGE_*` | có sẵn | Bucket `review-images` |
 
 Không có secret mới. Review không còn kết nối NATS (không dùng).

@@ -35,12 +35,19 @@ x-service-defaults: &service-defaults
 x-service-env-defaults: &service-env-defaults
   ENV: ${ENV:-development}
   LOG_LEVEL: info
-  REDIS_URL: redis://redis:6379/0
   NATS_URL: nats://nats:4222
   SHUTDOWN_TIMEOUT: "10"
   HTTP_READ_TIMEOUT: "5"
   HTTP_IDLE_TIMEOUT: "60"
-  JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env}
+  # Access tokens are Ed25519-signed by Identity only (its block below has
+  # the private key); every service verifies with these public keys and can
+  # issue nothing. deploy/gen-jwt-keys.sh, rotation in deploy/identity-runbook.md.
+  JWT_PUBLIC_KEYS: ${JWT_PUBLIC_KEYS:?set JWT_PUBLIC_KEYS in .env (deploy/gen-jwt-keys.sh)}
+  # Switch-over from the former shared HS256 secret only: until this time
+  # (RFC 3339, at most 24h ahead) tokens signed with JWT_SECRET are still
+  # accepted, never issued. Leave both empty afterwards.
+  JWT_ACCEPT_LEGACY_HS256_UNTIL: ${JWT_ACCEPT_LEGACY_HS256_UNTIL:-}
+  JWT_SECRET: ${JWT_SECRET:-}
   IDENTITY_SERVICE_URL: http://identity:8081
   # PLT-01: each service's own key (per service below) and the registry of
   # key hashes every service checks callers against. Without per-service
@@ -126,23 +133,59 @@ services:
       timeout: 5s
       retries: 10
 
+  # Two Redis instances by kind of data, so one cannot starve the other:
+  #   redis        rate-limit counters (identity, payment, review): lose-able,
+  #                no persistence, least-recently-used keys evicted when full;
+  #   redis-queue  Notification's Asynq jobs: append-only file, never evicts.
+  # Both: one ACL user per service, limited to its own key prefix, and no
+  # anonymous access (deploy/redis/acl.sh, passwords from
+  # deploy/gen-redis-passwords.sh). See deploy/platform-runbook.md.
   redis:
     image: redis:7.4.11-alpine3.21@sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499
     restart: unless-stopped
     networks: [shopee]
-    # Notification's delivery jobs (Asynq) live here: append-only file so a
-    # restart keeps them, and never evict keys to free memory (PostgreSQL
-    # can rebuild lost jobs, but eviction would make that routine). At
-    # maxmemory, writes fail instead: an alert fires at 80% of it.
-    command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec", "--maxmemory", "192mb", "--maxmemory-policy", "noeviction"]
+    command: ["sh", "/etc/redis/acl.sh", "--appendonly", "no", "--save", "", "--maxmemory", "64mb", "--maxmemory-policy", "allkeys-lru"]
     logging: *logging
-    mem_limit: 256m
+    mem_limit: 96m
+    environment:
+      REDIS_ROLE: cache
+      REDIS_MONITOR_PASSWORD: ${REDIS_MONITOR_PASSWORD:?set REDIS_MONITOR_PASSWORD in .env}
+      IDENTITY_REDIS_PASSWORD: ${IDENTITY_REDIS_PASSWORD:?set IDENTITY_REDIS_PASSWORD in .env}
+      PAYMENT_REDIS_PASSWORD: ${PAYMENT_REDIS_PASSWORD:?set PAYMENT_REDIS_PASSWORD in .env}
+      REVIEW_REDIS_PASSWORD: ${REVIEW_REDIS_PASSWORD:?set REVIEW_REDIS_PASSWORD in .env}
     ports:
       - "${INTERNAL_BIND_ADDRESS:-127.0.0.1}:${REDIS_PORT:-6379}:6379"
     volumes:
-      - redis-data:/data
+      - ./deploy/redis/acl.sh:/etc/redis/acl.sh:ro
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD-SHELL", "redis-cli --no-auth-warning --user monitor --pass \"$$REDIS_MONITOR_PASSWORD\" ping | grep -q PONG"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis-queue:
+    image: redis:7.4.11-alpine3.21@sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499
+    restart: unless-stopped
+    networks: [shopee]
+    # Append-only file so a restart keeps the jobs; never evict (PostgreSQL
+    # can rebuild lost jobs, but eviction would make that routine). At
+    # maxmemory, enqueueing fails instead: an alert fires at 80% of it.
+    command: ["sh", "/etc/redis/acl.sh", "--appendonly", "yes", "--appendfsync", "everysec", "--maxmemory", "128mb", "--maxmemory-policy", "noeviction"]
+    logging: *logging
+    mem_limit: 192m
+    environment:
+      REDIS_ROLE: queue
+      REDIS_MONITOR_PASSWORD: ${REDIS_MONITOR_PASSWORD:?set REDIS_MONITOR_PASSWORD in .env}
+      NOTIFICATION_REDIS_PASSWORD: ${NOTIFICATION_REDIS_PASSWORD:?set NOTIFICATION_REDIS_PASSWORD in .env}
+    ports:
+      - "${INTERNAL_BIND_ADDRESS:-127.0.0.1}:${REDIS_QUEUE_PORT:-6380}:6379"
+    volumes:
+      # The volume that held the single instance's data: queued jobs survive
+      # the split.
+      - redis-data:/data
+      - ./deploy/redis/acl.sh:/etc/redis/acl.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli --no-auth-warning --user monitor --pass \"$$REDIS_MONITOR_PASSWORD\" ping | grep -q PONG"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -219,9 +262,14 @@ services:
     environment:
       <<: *service-env-defaults
       INTERNAL_SERVICE_NAME: identity
+      REDIS_URL: redis://identity:${IDENTITY_REDIS_PASSWORD}@redis:6379/0
       DB_MAX_CONNS: "8"
       INTERNAL_SERVICE_KEY: ${IDENTITY_INTERNAL_KEY:-}
       IDENTITY_RESET_DELIVERY_KEY: ${IDENTITY_RESET_DELIVERY_KEY:?set IDENTITY_RESET_DELIVERY_KEY in .env}
+      # The only place the token signing key goes.
+      JWT_SIGNING_KEY_ID: ${JWT_SIGNING_KEY_ID:?set JWT_SIGNING_KEY_ID in .env (deploy/gen-jwt-keys.sh)}
+      JWT_SIGNING_KEY: ${JWT_SIGNING_KEY:?set JWT_SIGNING_KEY in .env (deploy/gen-jwt-keys.sh)}
+      IDENTITY_RATE_LIMIT_KEY: ${IDENTITY_RATE_LIMIT_KEY:?set IDENTITY_RATE_LIMIT_KEY in .env}
       IDENTITY_RESET_ENCRYPTION_KEY: ${IDENTITY_RESET_ENCRYPTION_KEY:?set IDENTITY_RESET_ENCRYPTION_KEY in .env}
       IDENTITY_TRUSTED_PROXY_CIDRS: ${IDENTITY_TRUSTED_PROXY_CIDRS:-172.16.0.0/12}
       IDENTITY_ALLOWED_ORIGINS: ${IDENTITY_ALLOWED_ORIGINS:-${ALLOWED_ORIGINS:-http://localhost:3000}}
@@ -421,6 +469,7 @@ services:
     environment:
       <<: *service-env-defaults
       INTERNAL_SERVICE_NAME: payment
+      REDIS_URL: redis://payment:${PAYMENT_REDIS_PASSWORD}@redis:6379/0
       DB_MAX_CONNS: "6"
       INTERNAL_SERVICE_KEY: ${PAYMENT_INTERNAL_KEY:-}
       EVENTBUS_PASSWORD: ${PAYMENT_INTERNAL_KEY:-${IDENTITY_SERVICE_KEY}}
@@ -519,6 +568,7 @@ services:
     environment:
       <<: *service-env-defaults
       INTERNAL_SERVICE_NAME: review
+      REDIS_URL: redis://review:${REVIEW_REDIS_PASSWORD}@redis:6379/0
       DB_MAX_CONNS: "4"
       INTERNAL_SERVICE_KEY: ${REVIEW_INTERNAL_KEY:-}
       PORT: "8091"
@@ -545,7 +595,7 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-      redis:
+      redis-queue:
         condition: service_healthy
       nats:
         condition: service_healthy
@@ -557,6 +607,7 @@ services:
     environment:
       <<: *service-env-defaults
       INTERNAL_SERVICE_NAME: notification
+      REDIS_URL: redis://notification:${NOTIFICATION_REDIS_PASSWORD}@redis-queue:6379/0
       DB_MAX_CONNS: "4"
       INTERNAL_SERVICE_KEY: ${NOTIFICATION_INTERNAL_KEY:-}
       EVENTBUS_PASSWORD: ${NOTIFICATION_INTERNAL_KEY:-${IDENTITY_SERVICE_KEY}}

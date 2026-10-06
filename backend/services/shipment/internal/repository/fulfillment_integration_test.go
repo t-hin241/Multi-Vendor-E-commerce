@@ -143,8 +143,8 @@ func newEnv(t *testing.T, withMock bool) *env {
 		}
 	}
 	deps := usecase.Deps{Tx: repository.Transactions{Pool: pool}, Shipments: repository.NewShipmentRepository(pool),
-		VendorMethods: repository.NewVendorShippingMethodRepository(pool), Zones: repository.NewZoneRepository(pool),
-		FeeRules: repository.NewFeeRuleRepository(pool), Events: repository.NewTrackingEventRepository(pool), Outbox: repository.OrderOutbox{Pool: pool},
+		VendorMethods: repository.NewVendorShippingMethodRepository(pool), Carriers: repository.NewCarrierRepository(pool),
+		Zones: repository.NewZoneRepository(pool), FeeRules: repository.NewFeeRuleRepository(pool), Events: repository.NewTrackingEventRepository(pool), Outbox: repository.OrderOutbox{Pool: pool},
 		Vendors: e.vendors, Orders: e.orders, Identity: allowAdmin{}, Audit: repository.AuditRepository{Pool: pool}, Carrier: manual.Provider{}, Verifier: manual.Provider{}, Log: zerolog.Nop()}
 	if withMock {
 		e.mock = mock.New("fake-carrier-secret-not-a-real-secret")
@@ -202,6 +202,41 @@ func TestQuoteIsExplicitAboutPriceExpiryAndUnavailability(t *testing.T) {
 	}
 	if e.count(t, `SELECT count(*) FROM shipments`) != 0 {
 		t.Fatal("a quote creates nothing")
+	}
+}
+
+// An admin turning a carrier off stops new quotes on it, so checkout
+// shows shipping unavailable; orders the buyer already paid still ship.
+func TestInactiveCarrierTakesNoNewQuotes(t *testing.T) {
+	e := newEnv(t, false)
+	ctx := t.Context()
+	carriers := repository.NewCarrierRepository(e.pool)
+	if err := carriers.SetActive(ctx, e.carrier, false); err != nil {
+		t.Fatal(err)
+	}
+	_, err := e.uc.Quote(ctx, e.vendorA, "HN", 2500)
+	expectCode(t, err, apperror.CodeValidation)
+
+	var rule string
+	if err := e.pool.QueryRow(ctx, `SELECT id FROM shipping_fee_rules LIMIT 1`).Scan(&rule); err != nil {
+		t.Fatal(err)
+	}
+	paid, err := e.uc.CreateAuto(ctx, usecase.CreateShipmentInput{VendorOrderID: uuid.NewString(), VendorID: e.vendorA,
+		BuyerID: uuid.NewString(), PackageWeightGrams: 500, RecipientName: "R", Phone: "0900000000", Province: "HN", StreetAddress: "S",
+		Quote: &domain.QuotedFee{FeeAmount: 12345, CarrierID: e.carrier, ZoneID: e.zone, FeeRuleID: rule}})
+	if err != nil || paid.FeeAmount != 12345 || *paid.CarrierID != e.carrier {
+		t.Fatalf("paid order with its checkout fee: %+v %v", paid, err)
+	}
+	// Paid before checkout snapshotted the fee: priced now, on its carrier.
+	if legacy := e.paidShipment(t); legacy.FeeAmount != 20000+5000 || *legacy.CarrierID != e.carrier {
+		t.Fatalf("paid order without a snapshot: %+v", legacy)
+	}
+
+	if err := carriers.SetActive(ctx, e.carrier, true); err != nil {
+		t.Fatal(err)
+	}
+	if q, err := e.uc.Quote(ctx, e.vendorA, "HN", 2500); err != nil || q.FeeAmount != 20000+2*5000 || q.CarrierID != e.carrier {
+		t.Fatalf("quote after the carrier is back: %+v %v", q, err)
 	}
 }
 

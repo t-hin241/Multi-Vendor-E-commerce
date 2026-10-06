@@ -10,7 +10,6 @@ import (
 	"shopee/backend/pkg/adminaudit"
 	"shopee/backend/pkg/middleware"
 
-	"shopee/backend/pkg/authjwt"
 	sessionconfig "shopee/backend/pkg/config"
 	"shopee/backend/pkg/eventbus"
 	"shopee/backend/pkg/events"
@@ -84,7 +83,10 @@ func main() {
 		log.Fatal().Err(err).Msg("event bus configuration invalid")
 	}
 
-	jwtManager := authjwt.NewManager(cfg.JWTSecret)
+	jwtManager, err := sessionconfig.LoadTokenVerifier()
+	if err != nil {
+		log.Fatal().Err(err).Msg("access token verifier configuration invalid")
+	}
 	verifier, err := sessionconfig.LoadSessionVerifier()
 	if err != nil {
 		log.Fatal().Err(err).Msg("session verifier configuration invalid")
@@ -101,7 +103,7 @@ func main() {
 	outbox := repository.OrderOutbox{Pool: dbPool}
 
 	deps := usecase.Deps{
-		Tx: repository.Transactions{Pool: dbPool}, Shipments: shipmentRepo, VendorMethods: vendorMethodRepo, Zones: zoneRepo,
+		Tx: repository.Transactions{Pool: dbPool}, Shipments: shipmentRepo, VendorMethods: vendorMethodRepo, Carriers: carrierRepo, Zones: zoneRepo,
 		FeeRules: feeRuleRepo, Events: repository.NewTrackingEventRepository(dbPool), Outbox: outbox,
 		Vendors: vendorClient, Orders: orderClient, Identity: identityclient.Client{URL: internalServices.IdentityURL, Key: internalServices.Key},
 		Audit: repository.AuditRepository{Pool: dbPool},

@@ -22,6 +22,7 @@ type Deps struct {
 	Tx            Transactor
 	Shipments     ShipmentRepositoryPort
 	VendorMethods VendorShippingMethodRepositoryPort
+	Carriers      CarrierRepositoryPort
 	Zones         ZoneRepositoryPort
 	FeeRules      FeeRuleRepositoryPort
 	Events        TrackingEventRepositoryPort
@@ -75,10 +76,17 @@ type CreateShipmentInput struct {
 	Quote *domain.QuotedFee
 }
 
-// Quote prices a vendor's package to a destination without creating a
-// shipment. A shop without a shipping method, a destination outside every
-// zone, a missing fee rule or a missing weight is unavailable, never free.
+// Quote prices a vendor's package to a destination for a new purchase,
+// without creating a shipment. A shop without a shipping method, a carrier
+// the admin turned off, a destination outside every zone, a missing fee
+// rule or a missing weight is unavailable, never free.
 func (uc *ShipmentUseCase) Quote(ctx context.Context, vendorID, province string, weightGrams int64) (*domain.Quote, error) {
+	return uc.quote(ctx, vendorID, province, weightGrams, true)
+}
+
+// quote is Quote; newPurchase=false prices an order the buyer already paid,
+// which still ships with its carrier when that carrier was turned off since.
+func (uc *ShipmentUseCase) quote(ctx context.Context, vendorID, province string, weightGrams int64, newPurchase bool) (*domain.Quote, error) {
 	if err := domain.ValidateQuoteInput(vendorID, province, weightGrams); err != nil {
 		uc.Log.Info().Str("vendor_id", vendorID).Str("reason", "invalid_input").Msg("shipment_quote_unavailable")
 		return nil, err
@@ -93,6 +101,15 @@ func (uc *ShipmentUseCase) Quote(ctx context.Context, vendorID, province string,
 	}
 	if err != nil {
 		return nil, apperror.Internal(err)
+	}
+	if newPurchase {
+		carrier, err := uc.Carriers.FindByID(ctx, method.CarrierID)
+		if err != nil && !errors.Is(err, repository.ErrCarrierNotFound) {
+			return nil, apperror.Internal(err)
+		}
+		if err != nil || !carrier.IsActive {
+			return nil, unavailable("carrier_inactive", "This shop's shipping carrier is not available right now")
+		}
 	}
 	zone, err := uc.Zones.FindZoneByProvinceCode(ctx, province)
 	if errors.Is(err, repository.ErrZoneNotFound) {
@@ -138,8 +155,9 @@ func (uc *ShipmentUseCase) resolveAndCreate(ctx context.Context, in CreateShipme
 			quote.ZoneName = zone.Name
 		}
 	} else {
+		// An order paid before checkout snapshotted its fee: priced now.
 		var err error
-		if quote, err = uc.Quote(ctx, in.VendorID, in.Province, in.PackageWeightGrams); err != nil {
+		if quote, err = uc.quote(ctx, in.VendorID, in.Province, in.PackageWeightGrams, false); err != nil {
 			return nil, err
 		}
 	}

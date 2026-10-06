@@ -13,7 +13,7 @@ Xem [chi tiết module](../docs/module-details/10-notification.md).
 | `NOTIFICATION_ATTEMPT_RETENTION_DAYS` | `90` | Giữ lịch sử từng lần gửi bao lâu (`0` giữ mãi, còn lại 7–3650). Dòng thông báo với trạng thái cuối được giữ |
 | `NOTIFICATION_DELIVERY_PAUSED` | `false` | `true`: worker không chạy, vẫn nhận, ghi yêu cầu và đẩy job; bật lại thì gửi tiếp |
 | `NOTIFICATION_WORKER_CONCURRENCY` | `10` | Số job gửi chạy song song mỗi instance (1–100) |
-| `REDIS_URL` | dùng chung | Hàng đợi job Asynq (queue `notification`). Đã có sẵn trong cấu hình chung |
+| `REDIS_URL` | riêng | Hàng đợi job Asynq (queue `notification`) trên instance `redis-queue`, user ACL `notification` (chỉ key/kênh `asynq:*`); `NOTIFICATION_REDIS_PASSWORD` |
 | `IDENTITY_SERVICE_KEY` | dùng chung | Giờ **bắt buộc** (≥ 32 ký tự): Order/Vendor phải gửi key này khi gọi `/internal/notifications` |
 
 Không có secret mới. `SMTP_PASSWORD` chỉ đọc ở config layer, không ghi log.

@@ -2,3 +2,8 @@
 *.sh text eol=lf
 # psql scripts: a CR would end up inside \set values.
 *.psql text eol=lf
+# sqlc input and output: deploy/sqlc.sh diff compares generated code byte
+# for byte, so it must not depend on the checkout's line endings.
+backend/services/*/sqlc.yaml text eol=lf
+backend/services/*/internal/repository/queries/*.sql text eol=lf
+backend/services/*/internal/repository/*db/*.go text eol=lf

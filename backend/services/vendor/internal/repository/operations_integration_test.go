@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
-	"encoding/hex"
 	"errors"
 	"net/http/httptest"
 	"os"
@@ -21,7 +20,7 @@ import (
 	"github.com/rs/zerolog"
 
 	"shopee/backend/pkg/apperror"
-	"shopee/backend/pkg/authjwt"
+	"shopee/backend/pkg/authjwt/authjwttest"
 	"shopee/backend/pkg/middleware"
 	"shopee/backend/pkg/serviceauth"
 	"shopee/backend/pkg/vendorsales"
@@ -437,7 +436,7 @@ func TestIntegrationAPIAuthAndPayoutScopes(t *testing.T) {
 	if _, err := rand.Read(key); err != nil {
 		t.Fatal(err)
 	}
-	manager := authjwt.NewManager(hex.EncodeToString(key))
+	manager := authjwttest.Manager()
 	gin.SetMode(gin.ReleaseMode)
 	log := zerolog.Nop()
 	router := transport.NewRouter("test", log, manager, transport.NewVendorHandler(f.uc, log), transport.NewVendorAddressHandler(f.addresses, log), transport.NewAdminHandler(f.uc, log), transport.NewInternalHandler(f.uc, log), serviceauth.SharedKey("test-internal-service-key"))

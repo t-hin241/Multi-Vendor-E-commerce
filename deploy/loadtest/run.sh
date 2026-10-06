@@ -22,8 +22,8 @@ STATE=${LOADTEST_STATE_DIR:-${TMPDIR:-/tmp}/shopee-loadtest}
 ENV_FILE="$STATE/loadtest.env"
 FILES=(-f docker-compose.yml -f deploy/observability/compose.observability.yml -f deploy/loadtest/compose.loadtest.yml)
 # Everything but the frontend (not under test) and the edge proxy.
-STACK=(postgres redis nats minio identity vendor catalog inventory cart order payment shipment admin review notification gateway
-  prometheus tempo grafana cadvisor node-exporter postgres-exporter redis-exporter nats-exporter)
+STACK=(postgres redis redis-queue nats minio identity vendor catalog inventory cart order payment shipment admin review notification gateway
+  prometheus tempo grafana cadvisor node-exporter postgres-exporter redis-exporter redis-queue-exporter nats-exporter)
 SERVICES=(identity vendor catalog inventory cart order payment shipment admin notification review)
 MIGRATE_IMAGE=migrate/migrate:v4.19.1@sha256:cc4ad8e19d66791e3689405d9a028ce6e9614f32032db14acda1469f7201d6e4
 ALPINE_IMAGE=alpine:3.24.2@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6
@@ -35,20 +35,22 @@ env_value() { grep -E "^$1=" "$ENV_FILE" | tail -1 | cut -d= -f2-; }
 make_env() {
   [ -f "$ENV_FILE" ] && return 0
   mkdir -p "$STATE" && chmod 700 "$STATE"
-  local keys
+  local keys jwt
   keys=$(bash deploy/gen-service-keys.sh)
+  jwt=$(bash deploy/gen-jwt-keys.sh loadtest)
   {
     while IFS= read -r line; do
       line=${line%$'\r'}
       case "$line" in
         "#"* | "") continue ;;
-        *_INTERNAL_KEY=* | INTERNAL_SERVICE_KEYS=*) continue ;;
+        *_INTERNAL_KEY=* | INTERNAL_SERVICE_KEYS=* | JWT_SIGNING_KEY*=* | JWT_PUBLIC_KEYS=*) continue ;;
         *ENCRYPTION_KEY=CHANGE_ME) echo "${line%%=*}=$(openssl rand -base64 32)" ;;
         *=CHANGE_ME) echo "${line%%=*}=lt$(openssl rand -hex 24)" ;;
         *) echo "$line" ;;
       esac
     done < .env.example
     echo "$keys"
+    echo "$jwt"
     echo "ENV=development"
     echo "PAYMENT_PROVIDER=mock"
     echo "OTEL_EXPORTER_OTLP_ENDPOINT=http://tempo:4318"
@@ -142,7 +144,7 @@ case "${1:-}" in
       exit 1
     fi
     compose build "${SERVICES[@]}" gateway
-    compose up -d --wait postgres redis nats minio
+    compose up -d --wait postgres redis redis-queue nats minio
     migrate
     # A developer machine's disk can be 100x slower to fsync than a VPS's
     # NVMe (pg_test_fsync: Docker Desktop ~100 ms, NVMe ~1 ms), which would

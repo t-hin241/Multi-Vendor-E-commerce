@@ -14,7 +14,6 @@ import (
 
 type Config struct {
 	Base                     config.Base
-	JWTSecret                string
 	VendorServiceURL         string
 	OrderServiceURL          string
 	CarrierProvider          string
@@ -26,11 +25,6 @@ type Config struct {
 
 func Load() (Config, error) {
 	base, err := config.LoadBase("shipment", "8088")
-	if err != nil {
-		return Config{}, err
-	}
-
-	jwtSecret, err := config.RequireJWTSecret()
 	if err != nil {
 		return Config{}, err
 	}
@@ -67,7 +61,7 @@ func Load() (Config, error) {
 	}
 
 	return Config{
-		Base: base, JWTSecret: jwtSecret, VendorServiceURL: vendorServiceURL, OrderServiceURL: orderServiceURL,
+		Base: base, VendorServiceURL: vendorServiceURL, OrderServiceURL: orderServiceURL,
 		CarrierProvider: carrierProvider, CarrierMockWebhookSecret: carrierMockWebhookSecret,
 		AddressRetention: time.Duration(retentionDays) * 24 * time.Hour,
 	}, nil

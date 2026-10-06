@@ -16,7 +16,6 @@ import (
 
 type Config struct {
 	Base               config.Base
-	JWTSecret          string
 	IdentityServiceURL string
 	// IdentityServiceKey authenticates internal calls both ways: producers
 	// queueing a notification, and Notification reading recipients.
@@ -37,10 +36,6 @@ type Config struct {
 
 func Load() (Config, error) {
 	base, err := config.LoadBase("notification", "8090")
-	if err != nil {
-		return Config{}, err
-	}
-	jwtSecret, err := config.RequireJWTSecret()
 	if err != nil {
 		return Config{}, err
 	}
@@ -100,7 +95,7 @@ func Load() (Config, error) {
 	}
 
 	return Config{
-		Base: base, JWTSecret: jwtSecret, IdentityServiceURL: identityServiceURL, IdentityServiceKey: internal.Key, InternalVerifier: internal.Verifier,
+		Base: base, IdentityServiceURL: identityServiceURL, IdentityServiceKey: internal.Key, InternalVerifier: internal.Verifier,
 		ResetDeliveryKey: key, SMTPHost: smtpHost, SMTPPort: port, SMTPUsername: os.Getenv("SMTP_USERNAME"),
 		SMTPPassword: os.Getenv("SMTP_PASSWORD"), SMTPFrom: smtpFrom, SMTPAllowPlaintext: plain,
 		EmailProvider: provider, AttemptRetention: time.Duration(days) * 24 * time.Hour,
