@@ -2,9 +2,10 @@ package repository
 
 import (
 	"context"
+	"shopee/backend/pkg/casesla"
+
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"shopee/backend/pkg/casesla"
 )
 
 func NewCaseSLAStore(pool *pgxpool.Pool) casesla.Store {

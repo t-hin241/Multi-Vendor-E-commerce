@@ -8,12 +8,13 @@ import (
 	"slices"
 	"time"
 
-	"github.com/jackc/pgx/v5"
-	"github.com/rs/zerolog"
 	"shopee/backend/pkg/apperror"
 	"shopee/backend/pkg/config"
 	"shopee/backend/pkg/eventbus"
 	"shopee/backend/pkg/events"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/rs/zerolog"
 )
 
 type Publisher interface {

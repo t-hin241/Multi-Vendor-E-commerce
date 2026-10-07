@@ -24,7 +24,9 @@ start() { # name role env...
 cli() { # name [redis-cli args...]
   local name=$1
   shift
-  MSYS_NO_PATHCONV=1 docker exec "$name" redis-cli --no-auth-warning "$@" 2>&1 | head -1
+  # All of it: a refused AUTH goes to stderr, the command's NOAUTH reply to
+  # stdout, and docker exec does not keep their order.
+  MSYS_NO_PATHCONV=1 docker exec "$name" redis-cli --no-auth-warning "$@" 2>&1
 }
 expect() { # description pattern output
   if [[ "$3" =~ $2 ]]; then ok "$1"; else bad "$1: $3"; fi

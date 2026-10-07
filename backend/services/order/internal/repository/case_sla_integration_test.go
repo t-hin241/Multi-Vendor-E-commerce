@@ -5,10 +5,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/google/uuid"
 	"shopee/backend/pkg/casesla"
 	"shopee/backend/services/order/internal/repository"
 	"shopee/backend/services/order/internal/usecase"
+
+	"github.com/google/uuid"
 )
 
 func TestCaseSLABackfillKeepsOriginalDateAndRequiresActivation(t *testing.T) {

@@ -10,13 +10,14 @@ import (
 	"testing"
 	"time"
 
+	"shopee/backend/pkg/apperror"
+	"shopee/backend/pkg/config"
+	"shopee/backend/pkg/eventbus"
+
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rs/zerolog"
-	"shopee/backend/pkg/apperror"
-	"shopee/backend/pkg/config"
-	"shopee/backend/pkg/eventbus"
 )
 
 //go:embed schema.sql
