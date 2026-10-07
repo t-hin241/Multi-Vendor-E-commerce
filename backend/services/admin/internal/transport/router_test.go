@@ -13,6 +13,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/rs/zerolog"
 
+	"shopee/backend/pkg/adminaccess/adminaccesstest"
 	"shopee/backend/pkg/authjwt/authjwttest"
 	"shopee/backend/pkg/middleware"
 	"shopee/backend/services/admin/internal/adapter"
@@ -36,7 +37,9 @@ func TestAdminRoutesNeedAnAdminTokenAndOnlyRead(t *testing.T) {
 	jwt := authjwttest.Manager()
 	rec := &recorder{}
 	svc := usecase.Service{Upstreams: []usecase.Upstream{{Name: "order", URL: "http://order"}}, Reader: rec, Roles: allow{}, Log: zerolog.Nop()}
-	router := transport.NewRouter("test", zerolog.Nop(), jwt, svc)
+	router := transport.NewRouter("test", zerolog.Nop(), jwt, svc, adminaccesstest.Guard(transport.AdminRoutes))
+	// AF-19: every admin route names the permission bundle it needs.
+	adminaccesstest.AssertCovered(t, router, transport.AdminRoutes)
 	send := func(method, path, role string) int {
 		req := httptest.NewRequest(method, path, nil)
 		if role != "" {

@@ -27,6 +27,9 @@ type Config struct {
 	VendorServiceURL string
 	// WebhookRatePerMinute bounds webhook deliveries per client IP.
 	WebhookRatePerMinute int64
+	// AdminApprovals is FEATURE_ADMIN_SCOPED_PERMISSIONS_ENABLED (AF-19):
+	// manual refund/payout results and ledger adjustments need a second admin.
+	AdminApprovals bool
 }
 
 func Load() (Config, error) {
@@ -78,7 +81,13 @@ func Load() (Config, error) {
 		return Config{}, fmt.Errorf("config: PAYMENT_WEBHOOK_RATE_PER_MINUTE must be between 10 and 100000")
 	}
 
+	approvals, err := strconv.ParseBool(getEnv("FEATURE_ADMIN_SCOPED_PERMISSIONS_ENABLED", "false"))
+	if err != nil {
+		return Config{}, fmt.Errorf("config: FEATURE_ADMIN_SCOPED_PERMISSIONS_ENABLED must be true or false")
+	}
+
 	return Config{
+		AdminApprovals:   approvals,
 		VendorServiceURL: getEnv("VENDOR_SERVICE_URL", "http://vendor:8082"), WebhookRatePerMinute: rate,
 		Base: base, OrderServiceURL: orderServiceURL,
 		Provider: provider, MockWebhookSecret: mockWebhookSecret, PayOSClientID: payosClientID, PayOSAPIKey: payosAPIKey, PayOSChecksumKey: payosChecksumKey, PayOSBaseURL: getEnv("PAYOS_API_URL", "https://api-merchant.payos.vn"), PayOSReturnURL: payosReturnURL, PayOSCancelURL: payosCancelURL,

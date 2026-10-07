@@ -24,6 +24,7 @@ func NewRouter(
 	internalHandler *InternalHandler,
 	policyHandler *PolicyHandler,
 	staffHandler *StaffHandler,
+	adminGuard gin.HandlerFunc,
 	internal *serviceauth.Verifier,
 	checkers ...health.Checker,
 ) *gin.Engine {
@@ -77,7 +78,7 @@ func NewRouter(
 		vendorGroup.POST("/:vendorId/policy-proposals", middleware.RequireRole("vendor"), policyHandler.Propose)
 		vendorGroup.GET("/:vendorId/policy-proposals", middleware.RequireRole("vendor"), policyHandler.ListMine)
 
-		adminGroup := vendorGroup.Group("/admin", middleware.RequireRole("admin"))
+		adminGroup := vendorGroup.Group("/admin", middleware.RequireRole("admin"), adminGuard)
 		{
 			adminGroup.GET("/operations", adminHandler.Operations)
 			adminGroup.GET("/applications", adminHandler.ListApplications)

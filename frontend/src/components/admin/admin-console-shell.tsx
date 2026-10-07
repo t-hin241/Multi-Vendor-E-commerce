@@ -9,14 +9,32 @@ import { SystemStatus } from "@/components/system-status";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
+import { canOpenAdminPage } from "@/lib/admin-access";
 import { useAuth } from "@/lib/auth-context";
 import { ADMIN_NAV_GROUPS, ADMIN_NAV_LINKS } from "@/lib/admin-nav";
+import { useAdminPermissions } from "@/lib/hooks/use-admin-permissions";
 import { cn } from "@/lib/utils";
 
-function NavGroups({ pathname, onNavigate }: { pathname: string; onNavigate?: () => void }) {
+function NavGroups({
+  pathname,
+  permissions,
+  onNavigate,
+}: {
+  pathname: string;
+  permissions: string[] | undefined;
+  onNavigate?: () => void;
+}) {
+  // AF-19: only the pages this admin's bundles open (all while loading);
+  // services check again.
+  const groups = ADMIN_NAV_GROUPS.map((group) => ({
+    ...group,
+    items: group.items.filter(
+      (link) => permissions === undefined || canOpenAdminPage(link.href, permissions),
+    ),
+  })).filter((group) => group.items.length > 0);
   return (
     <nav className="flex flex-col gap-4">
-      {ADMIN_NAV_GROUPS.map((group) => (
+      {groups.map((group) => (
         <div key={group.label}>
           <p className="px-2 text-xs font-medium tracking-wide text-muted-foreground uppercase">
             {group.label}
@@ -53,6 +71,8 @@ export function AdminConsoleShell({ children }: { children: React.ReactNode }) {
   const { user, isReady } = useAuth();
   const router = useRouter();
   const pathname = usePathname();
+  const permissionsQuery = useAdminPermissions();
+  const permissions = permissionsQuery.data?.permissions;
 
   useEffect(() => {
     if (isReady && (!user || user.role !== "admin")) {
@@ -67,7 +87,7 @@ export function AdminConsoleShell({ children }: { children: React.ReactNode }) {
   return (
     <div className="mx-auto flex max-w-6xl flex-col gap-6 px-4 py-6 sm:px-6 md:flex-row md:items-start">
       <aside className="hidden shrink-0 md:sticky md:top-20 md:block md:w-56">
-        <NavGroups pathname={pathname} />
+        <NavGroups pathname={pathname} permissions={permissions} />
       </aside>
 
       <div className="min-w-0 flex-1">
@@ -88,7 +108,7 @@ export function AdminConsoleShell({ children }: { children: React.ReactNode }) {
                 <SheetTitle>Admin console</SheetTitle>
               </SheetHeader>
               <div className="px-4">
-                <NavGroups pathname={pathname} />
+                <NavGroups pathname={pathname} permissions={permissions} />
               </div>
             </SheetContent>
           </Sheet>
@@ -102,6 +122,16 @@ export function AdminConsoleShell({ children }: { children: React.ReactNode }) {
           </div>
         </div>
 
+        {permissionsQuery.isError && (
+          <p className="mt-4 text-sm text-destructive">
+            Your admin permissions could not be loaded; actions may be refused.
+          </p>
+        )}
+        {permissionsQuery.data && !canOpenAdminPage(pathname, permissions) && (
+          <p className="mt-4 rounded-md border p-3 text-sm text-muted-foreground">
+            Your admin account lacks the permission for this page. Ask an access manager.
+          </p>
+        )}
         <div className="mt-6">{children}</div>
       </div>
     </div>

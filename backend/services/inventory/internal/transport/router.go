@@ -25,6 +25,7 @@ func NewRouter(
 	itemHandler *ItemHandler,
 	internalHandler *InternalHandler,
 	adminHandler *AdminHandler,
+	adminGuard gin.HandlerFunc,
 	internal *serviceauth.Verifier,
 	checkers ...health.Checker,
 ) *gin.Engine {
@@ -59,7 +60,7 @@ func NewRouter(
 		vendorGroup.POST("/items/:itemID/stock-counts", itemHandler.RecordStockCount)
 	}
 
-	adminGroup := r.Group("/api/inventory/admin", middleware.RequireAuth(jwtManager), middleware.RequireRole("admin"))
+	adminGroup := r.Group("/api/inventory/admin", middleware.RequireAuth(jwtManager), middleware.RequireRole("admin"), adminGuard)
 	{
 		adminGroup.GET("/restock-requests", adminHandler.ListRestockRequests)
 		adminGroup.PATCH("/restock-requests/:id/approve", adminHandler.Approve)

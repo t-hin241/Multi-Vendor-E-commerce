@@ -42,7 +42,7 @@ func rateLimit(l Limiter, log zerolog.Logger, action string, limit int64, window
 	}
 }
 
-func NewRouter(env string, log zerolog.Logger, jwt *authjwt.Manager, h *Handler, limiter Limiter, checkers ...health.Checker) *gin.Engine {
+func NewRouter(env string, log zerolog.Logger, jwt *authjwt.Manager, h *Handler, limiter Limiter, adminGuard gin.HandlerFunc, checkers ...health.Checker) *gin.Engine {
 	if env == "production" {
 		gin.SetMode(gin.ReleaseMode)
 	}
@@ -65,7 +65,7 @@ func NewRouter(env string, log zerolog.Logger, jwt *authjwt.Manager, h *Handler,
 	vendor.PUT("/:id/reply", rateLimit(limiter, log, "reply", 60, time.Hour), h.Reply)
 	vendor.POST("/:id/reports", rateLimit(limiter, log, "report", 30, time.Hour), h.Report)
 	vendor.GET("/moderation-reasons", h.ActiveReasons)
-	admin := r.Group("/api/reviews/admin", auth, middleware.RequireRole("admin"))
+	admin := r.Group("/api/reviews/admin", auth, middleware.RequireRole("admin"), adminGuard)
 	admin.GET("", h.ListAdmin)
 	admin.GET("/operations", h.Operations)
 	admin.POST("/:id/hide", h.Hide)

@@ -22,7 +22,7 @@ import (
 // NewRouter builds the service's Gin engine. Admin exposes only GET routes:
 // actions stay in the domain service that owns the data, with its own
 // checks and audit.
-func NewRouter(env string, log zerolog.Logger, jwt *authjwt.Manager, svc usecase.Service, checkers ...health.Checker) *gin.Engine {
+func NewRouter(env string, log zerolog.Logger, jwt *authjwt.Manager, svc usecase.Service, adminGuard gin.HandlerFunc, checkers ...health.Checker) *gin.Engine {
 	if env == "production" {
 		gin.SetMode(gin.ReleaseMode)
 	}
@@ -42,7 +42,7 @@ func NewRouter(env string, log zerolog.Logger, jwt *authjwt.Manager, svc usecase
 	health.RegisterRoutes(r, checkers...)
 
 	h := handler{svc: svc, log: log}
-	admin := r.Group("/api/admin", middleware.RequireAuth(jwt), middleware.RequireRole("admin"), func(c *gin.Context) {
+	admin := r.Group("/api/admin", middleware.RequireAuth(jwt), middleware.RequireRole("admin"), adminGuard, func(c *gin.Context) {
 		c.Header("Cache-Control", "no-store")
 		c.Next()
 	})

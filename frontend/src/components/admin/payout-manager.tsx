@@ -27,6 +27,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { orApprovalDraft } from "@/lib/admin-access";
 import * as api from "@/lib/api-client";
 import { useAuth } from "@/lib/auth-context";
 import { formatMoney } from "@/lib/format";
@@ -249,8 +250,16 @@ export function PayoutManager() {
                           description="The amount becomes payable again in the next batch."
                           confirmLabel="Record failure"
                           onConfirm={async (note) => {
-                            await callWithAuth((token) =>
-                              api.resolvePayoutItem(token, item.id, { outcome: "failed", note }),
+                            await orApprovalDraft(
+                              callWithAuth,
+                              (token) =>
+                                api.resolvePayoutItem(token, item.id, { outcome: "failed", note }),
+                              {
+                                operation_kind: "payout_item_resolution",
+                                target_id: item.id,
+                                payload: { outcome: "failed", note },
+                                reason: note,
+                              },
                             );
                             await refresh();
                           }}
@@ -305,11 +314,19 @@ function PaidDialog({ itemId, onDone }: { itemId: string; onDone: () => Promise<
               setBusy(true);
               setError(null);
               try {
-                await callWithAuth((token) =>
-                  api.resolvePayoutItem(token, itemId, {
-                    outcome: "succeeded",
-                    evidence_reference: reference.trim(),
-                  }),
+                const input = {
+                  outcome: "succeeded" as const,
+                  evidence_reference: reference.trim(),
+                };
+                await orApprovalDraft(
+                  callWithAuth,
+                  (token) => api.resolvePayoutItem(token, itemId, input),
+                  {
+                    operation_kind: "payout_item_resolution",
+                    target_id: itemId,
+                    payload: input,
+                    reason: `Transfer paid: ${input.evidence_reference}`,
+                  },
                 );
                 setOpen(false);
                 await onDone();
@@ -372,13 +389,21 @@ function AdjustmentDialog({ vendorId, onDone }: { vendorId: string; onDone: () =
             onClick={async () => {
               setError(null);
               try {
-                await callWithAuth((token) =>
-                  api.createSettlementAdjustment(token, {
-                    vendor_id: vendorId,
-                    amount: value,
-                    currency: "VND",
+                await orApprovalDraft(
+                  callWithAuth,
+                  (token) =>
+                    api.createSettlementAdjustment(token, {
+                      vendor_id: vendorId,
+                      amount: value,
+                      currency: "VND",
+                      reason: reason.trim(),
+                    }),
+                  {
+                    operation_kind: "settlement_adjustment",
+                    target_id: vendorId,
+                    payload: { amount: value, currency: "VND", reason: reason.trim() },
                     reason: reason.trim(),
-                  }),
+                  },
                 );
                 setOpen(false);
                 setAmount("");

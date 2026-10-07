@@ -24,6 +24,7 @@ func NewRouter(
 	adminHandler *AdminHandler,
 	internalHandler *InternalHandler,
 	attributeHandler *AttributeHandler,
+	adminGuard gin.HandlerFunc,
 	internal *serviceauth.Verifier,
 	checkers ...health.Checker,
 ) *gin.Engine {
@@ -44,14 +45,14 @@ func NewRouter(
 
 	// Categories: public read, admin write.
 	r.GET("/api/catalog/categories", categoryHandler.List)
-	r.POST("/api/catalog/categories", requireAuth, middleware.RequireRole("admin"), categoryHandler.Create)
+	r.POST("/api/catalog/categories", requireAuth, middleware.RequireRole("admin"), adminGuard, categoryHandler.Create)
 
 	// Attribute template: public — describes which fields apply to a
 	// category, same trust level as GET /categories.
 	r.GET("/api/catalog/categories/:id/attribute-template", attributeHandler.GetTemplate)
 
 	// Attribute catalog + category attribute rules: admin-authored.
-	attributeAdminGroup := r.Group("/api/catalog", requireAuth, middleware.RequireRole("admin"))
+	attributeAdminGroup := r.Group("/api/catalog", requireAuth, middleware.RequireRole("admin"), adminGuard)
 	{
 		attributeAdminGroup.GET("/attributes", attributeHandler.List)
 		attributeAdminGroup.POST("/attributes", attributeHandler.Create)
@@ -90,7 +91,7 @@ func NewRouter(
 	}
 
 	// Admin moderation.
-	adminGroup := r.Group("/api/catalog/products/admin", requireAuth, middleware.RequireRole("admin"))
+	adminGroup := r.Group("/api/catalog/products/admin", requireAuth, middleware.RequireRole("admin"), adminGuard)
 	{
 		adminGroup.GET("", adminHandler.ListForModeration)
 		adminGroup.GET("/:id", adminHandler.GetForModeration)

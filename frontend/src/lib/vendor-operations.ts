@@ -58,11 +58,13 @@ export function decideAccount(
   account: PayoutAccount,
   verify: boolean,
   reason: string,
+  proof?: string,
 ) {
+  // proof: the AF-19 password confirmation, needed once scoped permissions are on.
   return request<PayoutAccount>(`${path(vendorId, true)}/${account.id}/decision`, {
     token,
     method: "POST",
-    json: { version: account.version, verify, reason },
+    json: { version: account.version, verify, reason, ...(proof ? { proof } : {}) },
   });
 }
 export function accountDetails(
@@ -70,11 +72,12 @@ export function accountDetails(
   vendorId: string,
   account: PayoutAccount,
   purpose: string,
+  proof?: string,
 ) {
   return request<PayoutDetails>(`${path(vendorId, true)}/${account.id}/details`, {
     token,
     method: "POST",
-    json: { version: account.version, purpose },
+    json: { version: account.version, purpose, ...(proof ? { proof } : {}) },
   });
 }
 export function changeStatus(

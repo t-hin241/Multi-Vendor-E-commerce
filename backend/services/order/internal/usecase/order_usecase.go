@@ -12,6 +12,7 @@ import (
 
 	"github.com/rs/zerolog"
 
+	"shopee/backend/pkg/adminaccess"
 	"shopee/backend/pkg/apperror"
 	"shopee/backend/services/order/internal/adapter"
 	"shopee/backend/services/order/internal/domain"
@@ -21,17 +22,20 @@ import (
 // Deps are OrderUseCase's collaborators. Repositories own Order's data;
 // gateways reach other services over their contracts.
 type Deps struct {
-	Orders          OrderRepositoryPort
-	VendorOrders    VendorOrderRepositoryPort
-	BuyerAddresses  BuyerAddressRepositoryPort
-	CommissionRules CommissionRuleRepositoryPort
-	CartConsumption CartConsumptionRepositoryPort
-	CheckoutOps     CheckoutOperationRepositoryPort
-	Payments        PaymentRecordRepositoryPort
-	Effects         EffectRepositoryPort
-	Refunds         RefundRepositoryPort
-	Returns         ReturnRepositoryPort
-	Support         SupportCaseRepositoryPort
+	// AdminPermissions (AF-19), when set, also requires a support case
+	// assignee to hold support.manage.
+	AdminPermissions adminaccess.Checker
+	Orders           OrderRepositoryPort
+	VendorOrders     VendorOrderRepositoryPort
+	BuyerAddresses   BuyerAddressRepositoryPort
+	CommissionRules  CommissionRuleRepositoryPort
+	CartConsumption  CartConsumptionRepositoryPort
+	CheckoutOps      CheckoutOperationRepositoryPort
+	Payments         PaymentRecordRepositoryPort
+	Effects          EffectRepositoryPort
+	Refunds          RefundRepositoryPort
+	Returns          ReturnRepositoryPort
+	Support          SupportCaseRepositoryPort
 	// Policies is the read model of published policies (AF-02).
 	Policies PolicyVersionPort
 

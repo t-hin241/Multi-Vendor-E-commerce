@@ -12,6 +12,7 @@ import (
 	"shopee/backend/pkg/adminaudit"
 	"shopee/backend/pkg/middleware"
 
+	"shopee/backend/pkg/adminaccess"
 	sessionconfig "shopee/backend/pkg/config"
 	"shopee/backend/pkg/eventbus"
 	"shopee/backend/pkg/events"
@@ -135,6 +136,7 @@ func main() {
 
 	vendorOrderRepo := repository.NewVendorOrderRepository(dbPool)
 	orderUseCase := usecase.NewOrderUseCase(usecase.Deps{
+		AdminPermissions:  adminaccess.Client{URL: internalServices.IdentityURL, Key: internalServices.Key},
 		Events:            eventPublisher,
 		Orders:            repository.NewOrderRepository(dbPool),
 		VendorOrders:      vendorOrderRepo,
@@ -175,8 +177,10 @@ func main() {
 	internalHandler := transport.NewInternalHandler(orderUseCase, log)
 	returnHandler := transport.NewReturnHandler(orderUseCase, log)
 	supportHandler := transport.NewSupportHandler(orderUseCase, log)
+	// AF-19: every admin route needs the bundle named in transport.AdminRoutes.
+	adminGuard := adminaccess.Guard(adminaccess.Client{URL: internalServices.IdentityURL, Key: internalServices.Key}, transport.AdminRoutes, log)
 	router := transport.NewRouter(cfg.Base.Env, log, jwtManager, orderHandler, addressHandler, adminHandler, internalHandler, returnHandler,
-		supportHandler, internalServices.Verifier, checkers...,
+		supportHandler, adminGuard, internalServices.Verifier, checkers...,
 	)
 
 	salesStore := vendorsales.Store{Pool: dbPool}
@@ -199,11 +203,11 @@ func main() {
 
 	router.GET("/internal/vendor-reports/:vendorId", internalServices.Verifier.Allow("vendor"), vendorreport.Handler(vendorreport.Service{Repository: vendorOrderRepo}, log))
 
-	adminGroup := router.Group("/api/orders/admin", middleware.RequireAuth(jwtManager), middleware.RequireRole("admin"))
+	adminGroup := router.Group("/api/orders/admin", middleware.RequireAuth(jwtManager), middleware.RequireRole("admin"), adminGuard)
 	slaRoles := identityclient.Client{URL: internalServices.IdentityURL, Key: internalServices.Key}
 	slaStore := repository.NewCaseSLAStore(dbPool)
-	casesla.Register(adminGroup, casesla.Service{Repo: slaStore, Roles: slaRoles}, log)
-	go (casesla.Worker{Store: slaStore, Owner: "order", Config: slaConfig, Roles: slaRoles, Publisher: bus.Bus, Log: log}).Run(workerCtx)
+	casesla.Register(adminGroup, casesla.Service{Repo: slaStore, Roles: slaRoles, Permissions: adminaccess.Client{URL: internalServices.IdentityURL, Key: internalServices.Key}}, log)
+	go (casesla.Worker{Store: slaStore, Owner: "order", Config: slaConfig, Roles: slaRoles, Permissions: adminaccess.Client{URL: internalServices.IdentityURL, Key: internalServices.Key}, Publisher: bus.Bus, Log: log}).Run(workerCtx)
 	bus.RegisterAdmin(adminGroup, identityclient.Client{URL: internalServices.IdentityURL, Key: internalServices.Key})
 	adminaudit.Register(adminGroup, "/audit-events",
 		adminaudit.Source{Name: "order", SQL: repository.AuditSearchSQL + " UNION ALL " + eventbus.InboxAuditSearchSQL + " UNION ALL " + casesla.AuditSearchSQL, DB: dbPool, Roles: identityclient.Client{URL: internalServices.IdentityURL, Key: internalServices.Key}}, log)

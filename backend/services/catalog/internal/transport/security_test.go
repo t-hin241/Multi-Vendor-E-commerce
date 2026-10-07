@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"shopee/backend/pkg/adminaccess/adminaccesstest"
 	"shopee/backend/pkg/authjwt/authjwttest"
 	"shopee/backend/pkg/serviceauth"
 
@@ -12,7 +13,7 @@ import (
 )
 
 func TestInternalCatalogRequiresServiceAuthentication(t *testing.T) {
-	r := NewRouter("test", zerolog.Nop(), authjwttest.Manager(), &CategoryHandler{}, &ProductHandler{}, &StorefrontHandler{}, &AdminHandler{}, &InternalHandler{}, &AttributeHandler{}, serviceauth.SharedKey("fake-test-service-key-not-a-real-secret"))
+	r := NewRouter("test", zerolog.Nop(), authjwttest.Manager(), &CategoryHandler{}, &ProductHandler{}, &StorefrontHandler{}, &AdminHandler{}, &InternalHandler{}, &AttributeHandler{}, adminaccesstest.Guard(AdminRoutes), serviceauth.SharedKey("fake-test-service-key-not-a-real-secret"))
 	for _, path := range []string{"/internal/products/00000000-0000-0000-0000-000000000001", "/internal/products/variants/00000000-0000-0000-0000-000000000002"} {
 		response := httptest.NewRecorder()
 		r.ServeHTTP(response, httptest.NewRequest("GET", path, nil))
@@ -32,4 +33,10 @@ func TestInternalCatalogRequiresServiceAuthentication(t *testing.T) {
 	if response.Code != 401 {
 		t.Fatalf("unprotected vendor mutation: %d", response.Code)
 	}
+}
+
+// AF-19: every admin route names the permission bundle it needs.
+func TestEveryAdminRouteNamesAPermission(t *testing.T) {
+	r := NewRouter("test", zerolog.Nop(), authjwttest.Manager(), &CategoryHandler{}, &ProductHandler{}, &StorefrontHandler{}, &AdminHandler{}, &InternalHandler{}, &AttributeHandler{}, adminaccesstest.Guard(AdminRoutes), serviceauth.SharedKey("fake-test-service-key-not-a-real-secret"))
+	adminaccesstest.AssertCovered(t, r, AdminRoutes, adminOnlyRoutes...)
 }

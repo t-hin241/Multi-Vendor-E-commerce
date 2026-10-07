@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 
+	"shopee/backend/pkg/adminaccess"
 	"shopee/backend/pkg/adminaudit"
 	sessionconfig "shopee/backend/pkg/config"
 	"shopee/backend/pkg/eventbus"
@@ -129,8 +130,10 @@ func main() {
 	internalHandler := transport.NewInternalHandler(vendorUseCase, log)
 	policyHandler := transport.NewPolicyHandler(policyUseCase, vendorUseCase, log)
 	staffHandler := transport.NewStaffHandler(staffUseCase, log)
+	// AF-19: every admin route needs the bundle named in transport.AdminRoutes.
+	adminGuard := adminaccess.Guard(adminaccess.Client{URL: cfg.Internal.IdentityURL, Key: cfg.Internal.Key}, transport.AdminRoutes, log)
 
-	router := transport.NewRouter(cfg.Base.Env, log, jwtManager, vendorHandler, addressHandler, adminHandler, internalHandler, policyHandler, staffHandler, cfg.Internal.Verifier,
+	router := transport.NewRouter(cfg.Base.Env, log, jwtManager, vendorHandler, addressHandler, adminHandler, internalHandler, policyHandler, staffHandler, adminGuard, cfg.Internal.Verifier,
 		health.Checker{Name: "postgres", Ping: func(ctx context.Context) error { return dbPool.Ping(ctx) }},
 		health.Checker{Name: "object_storage", Ping: objectStore.Ping},
 	)
@@ -139,14 +142,15 @@ func main() {
 	if err != nil {
 		log.Fatal().Msg("payout encryption configuration invalid")
 	}
-	payoutUC := &usecase.PayoutUseCase{Accounts: repository.PayoutRepository{Pool: dbPool}, Vendors: vendorRepo, Audit: auditLogRepo, Ops: ops, Cipher: cipher}
-	(transport.PayoutHandler{UseCase: payoutUC, Log: log}).Register(router, middleware.RequireAuth(jwtManager), cfg.PayoutServiceKey, cfg.Internal.Verifier)
+	payoutUC := &usecase.PayoutUseCase{Accounts: repository.PayoutRepository{Pool: dbPool}, Vendors: vendorRepo, Audit: auditLogRepo, Ops: ops, Cipher: cipher,
+		Proofs: adminaccess.Client{URL: cfg.Internal.IdentityURL, Key: cfg.Internal.Key}, RequireProof: cfg.AdminReauth}
+	(transport.PayoutHandler{UseCase: payoutUC, Log: log, AdminGuard: adminGuard}).Register(router, middleware.RequireAuth(jwtManager), cfg.PayoutServiceKey, cfg.Internal.Verifier)
 
 	dashboard := usecase.Dashboard{Vendors: vendorUseCase, Orders: adapter.ReportClient{URL: cfg.OrderURL, Key: cfg.Internal.Key}, Payments: adapter.ReportClient{URL: cfg.PaymentURL, Key: cfg.Internal.Key},
 		Access: staffUseCase}
 	router.GET("/api/vendor/:vendorId/dashboard", middleware.RequireAuth(jwtManager), middleware.RequireRole("vendor", "buyer"), transport.DashboardHandler(dashboard, log))
 
-	adminaudit.Register(router.Group("/api/vendor/admin", middleware.RequireAuth(jwtManager), middleware.RequireRole("admin")), "/audit-events",
+	adminaudit.Register(router.Group("/api/vendor/admin", middleware.RequireAuth(jwtManager), middleware.RequireRole("admin"), adminGuard), "/audit-events",
 		adminaudit.Source{Name: "vendor", SQL: repository.AuditSearchSQL, DB: dbPool, Roles: identityclient.Client{URL: cfg.Internal.IdentityURL, Key: cfg.Internal.Key}}, log)
 
 	srv := &http.Server{

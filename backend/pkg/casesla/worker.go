@@ -8,6 +8,7 @@ import (
 	"slices"
 	"time"
 
+	"shopee/backend/pkg/adminaccess"
 	"shopee/backend/pkg/apperror"
 	"shopee/backend/pkg/config"
 	"shopee/backend/pkg/eventbus"
@@ -21,13 +22,16 @@ type Publisher interface {
 	Publish(context.Context, eventbus.Envelope) error
 }
 type Worker struct {
-	Store     Store
-	Owner     string
-	Config    config.CaseSLA
-	Roles     Roles
-	Publisher Publisher
-	Log       zerolog.Logger
-	Now       func() time.Time
+	Store  Store
+	Owner  string
+	Config config.CaseSLA
+	Roles  Roles
+	// Permissions (AF-19), when set, also requires recipients to hold
+	// support.manage; one without it is skipped like an inactive admin.
+	Permissions adminaccess.Checker
+	Publisher   Publisher
+	Log         zerolog.Logger
+	Now         func() time.Time
 }
 
 func (w Worker) now() time.Time {
@@ -99,6 +103,9 @@ func (w Worker) Tick(ctx context.Context) error {
 				return false, errors.New("SLA recipient verification unavailable")
 			}
 			e := w.Roles.RequireRole(ctx, id, "admin")
+			if e == nil && w.Permissions != nil {
+				_, e = w.Permissions.Require(ctx, id, adminaccess.SupportManage)
+			}
 			var app *apperror.Error
 			if e != nil && !(errors.As(e, &app) && app.Status == 403) {
 				return false, e

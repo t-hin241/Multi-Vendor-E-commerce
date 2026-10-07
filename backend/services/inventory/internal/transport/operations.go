@@ -11,8 +11,8 @@ import (
 	"github.com/rs/zerolog"
 )
 
-func RegisterOperations(r *gin.Engine, jwt *authjwt.Manager, m usecase.Maintenance, log zerolog.Logger) {
-	group := r.Group("/api/inventory/admin/operations", middleware.RequireAuth(jwt), middleware.RequireRole("admin"))
+func RegisterOperations(r *gin.Engine, jwt *authjwt.Manager, adminGuard gin.HandlerFunc, m usecase.Maintenance, log zerolog.Logger) {
+	group := r.Group("/api/inventory/admin/operations", middleware.RequireAuth(jwt), middleware.RequireRole("admin"), adminGuard)
 	group.GET("", func(c *gin.Context) {
 		v, err := m.Stats(c.Request.Context(), middleware.GetUserID(c))
 		if err != nil {

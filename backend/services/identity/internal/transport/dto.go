@@ -54,12 +54,14 @@ type adminUserResponse struct {
 	Role      string    `json:"role"`
 	IsActive  bool      `json:"is_active"`
 	CreatedAt time.Time `json:"created_at"`
+	// PermissionVersion is the expected_version for grant changes (AF-19).
+	PermissionVersion int64 `json:"permission_version"`
 }
 
 func toAdminUserResponse(u *domain.User) adminUserResponse {
 	return adminUserResponse{
 		ID: u.ID, Email: u.Email, FullName: u.FullName, Role: string(u.Role),
-		IsActive: u.IsActive, CreatedAt: u.CreatedAt,
+		IsActive: u.IsActive, CreatedAt: u.CreatedAt, PermissionVersion: u.PermissionVersion,
 	}
 }
 

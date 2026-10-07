@@ -13,6 +13,7 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 
+	"shopee/backend/pkg/adminaccess"
 	"shopee/backend/pkg/adminaudit"
 	sessionconfig "shopee/backend/pkg/config"
 	"shopee/backend/pkg/eventbus"
@@ -138,11 +139,13 @@ func main() {
 	internalHandler := transport.NewInternalHandler(notificationUseCase, log)
 	adminHandler := transport.NewAdminHandler(notificationUseCase, log)
 
-	router := transport.NewRouter(cfg.Base.Env, log, jwtManager, cfg.InternalVerifier, internalHandler, adminHandler,
+	// AF-19: every admin route needs the bundle named in transport.AdminRoutes.
+	adminGuard := adminaccess.Guard(adminaccess.Client{URL: cfg.IdentityServiceURL, Key: cfg.IdentityServiceKey}, transport.AdminRoutes, log)
+	router := transport.NewRouter(cfg.Base.Env, log, jwtManager, cfg.InternalVerifier, internalHandler, adminHandler, adminGuard,
 		health.Checker{Name: "postgres", Ping: func(ctx context.Context) error { return dbPool.Ping(ctx) }},
 		health.Checker{Name: "redis", Ping: func(ctx context.Context) error { return redisClient.Ping(ctx).Err() }},
 	)
-	adminGroup := router.Group("/api/notifications/admin", middleware.RequireAuth(jwtManager), middleware.RequireRole("admin"))
+	adminGroup := router.Group("/api/notifications/admin", middleware.RequireAuth(jwtManager), middleware.RequireRole("admin"), adminGuard)
 	bus.RegisterAdmin(adminGroup, roles)
 	adminaudit.Register(adminGroup, "/audit-events",
 		adminaudit.Source{Name: "notification", SQL: repository.AuditSearchSQL + " UNION ALL " + eventbus.InboxAuditSearchSQL, DB: dbPool, Roles: roles}, log)

@@ -7,8 +7,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gin-gonic/gin"
 	"github.com/rs/zerolog"
 
+	"shopee/backend/pkg/adminaccess/adminaccesstest"
 	"shopee/backend/pkg/authjwt"
 	"shopee/backend/pkg/authjwt/authjwttest"
 	"shopee/backend/pkg/serviceauth"
@@ -34,9 +36,16 @@ func send(r http.Handler, method, path, body string, headers map[string]string) 
 func testRouter(jwt *authjwt.Manager) http.Handler {
 	return NewRouter("test", zerolog.Nop(), jwt, Handlers{
 		Payment: &PaymentHandler{}, Webhook: &WebhookHandler{},
-		Refund: NewRefundHandler(usecase.NewRefundUseCase(nil, nil, zerolog.Nop()), zerolog.Nop()),
-		Admin:  NewAdminHandler(usecase.NewReconciliationUseCase(usecase.ReconciliationDeps{}), usecase.NewSettlementUseCase(usecase.SettlementDeps{}), zerolog.Nop()),
+		Refund:     NewRefundHandler(usecase.NewRefundUseCase(nil, nil, zerolog.Nop()), zerolog.Nop()),
+		Admin:      NewAdminHandler(usecase.NewReconciliationUseCase(usecase.ReconciliationDeps{}), usecase.NewSettlementUseCase(usecase.SettlementDeps{}), zerolog.Nop()),
+		Approval:   NewApprovalHandler(&usecase.ApprovalUseCase{}, zerolog.Nop()),
+		AdminGuard: adminaccesstest.Guard(AdminRoutes),
 	}, serviceauth.SharedKey(testServiceKey))
+}
+
+// AF-19: every admin route names the permission bundle it needs.
+func TestEveryAdminRouteNamesAPermission(t *testing.T) {
+	adminaccesstest.AssertCovered(t, testRouter(authjwttest.Manager()).(*gin.Engine), AdminRoutes)
 }
 
 func TestRefundRoutesRequireServiceKeyOrAdmin(t *testing.T) {

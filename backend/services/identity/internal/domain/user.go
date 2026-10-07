@@ -32,6 +32,8 @@ type User struct {
 	IsActive     bool
 	CreatedAt    time.Time
 	UpdatedAt    time.Time
+	// PermissionVersion changes with every admin grant change (AF-19).
+	PermissionVersion int64
 }
 
 const minPasswordLength = 8

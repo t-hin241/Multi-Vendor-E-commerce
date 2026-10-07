@@ -274,6 +274,8 @@ services:
       IDENTITY_TRUSTED_PROXY_CIDRS: ${IDENTITY_TRUSTED_PROXY_CIDRS:-172.16.0.0/12}
       IDENTITY_ALLOWED_ORIGINS: ${IDENTITY_ALLOWED_ORIGINS:-${ALLOWED_ORIGINS:-http://localhost:3000}}
       IDENTITY_PASSWORD_RESET_URL: ${IDENTITY_PASSWORD_RESET_URL:-http://localhost:3000/reset-password}
+      # AF-19: deny-by-default admin bundles. Provision grants first.
+      FEATURE_ADMIN_SCOPED_PERMISSIONS_ENABLED: ${IDENTITY_FEATURE_ADMIN_SCOPED_PERMISSIONS_ENABLED:-false}
       NOTIFICATION_SERVICE_URL: http://notification:8090
       PORT: "8081"
       DATABASE_URL: postgres://identity_app:${IDENTITY_DB_PASSWORD:?set IDENTITY_DB_PASSWORD in .env}@postgres:5432/identity_db?sslmode=disable
@@ -318,6 +320,8 @@ services:
       FEATURE_VERSIONED_POLICIES_ENABLED: ${FEATURE_VERSIONED_POLICIES_ENABLED:-false}
       # AF-17: shop staff. Off = owner-only; key and URL needed once on.
       FEATURE_SHOP_STAFF_ENABLED: ${FEATURE_SHOP_STAFF_ENABLED:-false}
+      # AF-19: payout destination decisions/details need a password proof.
+      FEATURE_ADMIN_SCOPED_PERMISSIONS_ENABLED: ${VENDOR_FEATURE_ADMIN_SCOPED_PERMISSIONS_ENABLED:-false}
       SHOP_STAFF_INVITES_PAUSED: ${SHOP_STAFF_INVITES_PAUSED:-false}
       STAFF_INVITATION_FINGERPRINT_KEY: ${STAFF_INVITATION_FINGERPRINT_KEY:-}
       STAFF_INVITATION_ACCEPT_URL: ${STAFF_INVITATION_ACCEPT_URL:-}
@@ -494,6 +498,8 @@ services:
       dockerfile: services/payment/Dockerfile
     environment:
       FEATURE_CASE_SLA_ENABLED: ${PAYMENT_FEATURE_CASE_SLA_ENABLED:-false}
+      # AF-19: manual refund/payout results and adjustments need two admins.
+      FEATURE_ADMIN_SCOPED_PERMISSIONS_ENABLED: ${PAYMENT_FEATURE_ADMIN_SCOPED_PERMISSIONS_ENABLED:-false}
       SLA_POLL_INTERVAL: ${SLA_POLL_INTERVAL:-60s}
       SLA_ON_CALL_ADMIN_IDS: ${SLA_ON_CALL_ADMIN_IDS:-}
       SLA_ESCALATION_ADMIN_IDS: ${SLA_ESCALATION_ADMIN_IDS:-}

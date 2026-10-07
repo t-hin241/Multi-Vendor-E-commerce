@@ -35,4 +35,8 @@ export const queryKeys = {
   shopMembers: (vendorId: string) => ["shop-members", vendorId] as const,
   staffInvitations: (vendorId: string) => ["staff-invitations", vendorId] as const,
   staffPermissions: () => ["staff-permissions"] as const,
+  // AF-19: the admin's bundles, access screen and approval queue.
+  adminPermissions: (userId: string) => ["admin-permissions", userId] as const,
+  permissionSubjects: () => ["permission-subjects"] as const,
+  approvalRequests: (status: string) => ["approval-requests", status] as const,
 } as const;

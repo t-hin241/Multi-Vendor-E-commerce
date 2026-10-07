@@ -16,6 +16,18 @@ func LoadBootstrap() (Bootstrap, error) {
 	return c, nil
 }
 
+// AccessBootstrap configures cmd/bootstrap-access (AF-19).
+type AccessBootstrap struct{ DatabaseURL, Email, Operator, Reason string }
+
+func LoadAccessBootstrap() (AccessBootstrap, error) {
+	c := AccessBootstrap{DatabaseURL: os.Getenv("DATABASE_URL"), Email: os.Getenv("IDENTITY_BOOTSTRAP_ACCESS_EMAIL"),
+		Operator: os.Getenv("IDENTITY_BOOTSTRAP_OPERATOR"), Reason: os.Getenv("IDENTITY_BOOTSTRAP_REASON")}
+	if os.Getenv("IDENTITY_BOOTSTRAP_CONFIRM") != "true" || c.DatabaseURL == "" || c.Email == "" || c.Operator == "" || c.Reason == "" {
+		return c, fmt.Errorf("explicit confirmation, database, admin email, operator and reason required")
+	}
+	return c, nil
+}
+
 // TestDatabaseURL accepts only URLs targeting the identity_test database.
 func TestDatabaseURL() (string, error) {
 	raw := os.Getenv("IDENTITY_TEST_DATABASE_URL")

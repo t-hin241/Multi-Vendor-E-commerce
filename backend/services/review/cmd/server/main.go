@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 
+	"shopee/backend/pkg/adminaccess"
 	"shopee/backend/pkg/adminaudit"
 	sessionconfig "shopee/backend/pkg/config"
 	"shopee/backend/pkg/health"
@@ -100,11 +101,13 @@ func main() {
 	}
 	jwtManager.SetVerifier(verifier)
 	limiter := adapter.RedisRateLimiter{Client: redis, Prefix: "review:rate:"}
-	router := transport.NewRouter(cfg.Base.Env, log, jwtManager, transport.NewHandler(uc, log), limiter,
+	// AF-19: every admin route needs the bundle named in transport.AdminRoutes.
+	adminGuard := adminaccess.Guard(adminaccess.Client{URL: internalServices.IdentityURL, Key: internalServices.Key}, transport.AdminRoutes, log)
+	router := transport.NewRouter(cfg.Base.Env, log, jwtManager, transport.NewHandler(uc, log), limiter, adminGuard,
 		health.Checker{Name: "postgres", Ping: func(ctx context.Context) error { return db.Ping(ctx) }},
 		health.Checker{Name: "redis", Ping: func(ctx context.Context) error { return redis.Ping(ctx).Err() }},
 		health.Checker{Name: "object_storage", Ping: store.Ping})
-	adminaudit.Register(router.Group("/api/reviews/admin", middleware.RequireAuth(jwtManager), middleware.RequireRole("admin")), "/audit-events",
+	adminaudit.Register(router.Group("/api/reviews/admin", middleware.RequireAuth(jwtManager), middleware.RequireRole("admin"), adminGuard), "/audit-events",
 		adminaudit.Source{Name: "review", SQL: repository.AuditSearchSQL, DB: db, Roles: roles}, log)
 
 	srv := &http.Server{Addr: ":" + cfg.Base.Port, Handler: router, ReadHeaderTimeout: cfg.Base.HTTPReadTimeout, ReadTimeout: cfg.Base.HTTPReadTimeout,

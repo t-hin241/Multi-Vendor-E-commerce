@@ -6,9 +6,11 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"time"
 
 	sessionconfig "shopee/backend/pkg/config"
 
+	"shopee/backend/pkg/adminaccess"
 	"shopee/backend/pkg/adminaudit"
 	"shopee/backend/pkg/health"
 	"shopee/backend/pkg/logger"
@@ -98,13 +100,33 @@ func main() {
 	adminUseCase := usecase.NewAdminUseCase(userRepo, refreshTokenRepo, transactions)
 	adminHandler := transport.NewAdminHandler(adminUseCase, log)
 	internalHandler := transport.NewInternalHandler(authUseCase, log)
+	// AF-19: admin bundles and reauthentication proofs; Identity's own admin
+	// routes use the same table-driven guard as the other services.
+	accessUseCase := &usecase.AccessUseCase{Store: repository.AccessRepository{Pool: dbPool}, Users: userRepo, Tx: transactions,
+		Scoped: cfg.ScopedAdminPermissions}
+	accessHandler := transport.NewAccessHandler(accessUseCase, log)
+	adminGuard := adminaccess.Guard(accessUseCase, transport.AdminRoutes, log)
+	go func() {
+		tick := time.NewTicker(time.Hour)
+		defer tick.Stop()
+		for {
+			select {
+			case <-workerCtx.Done():
+				return
+			case <-tick.C:
+				if _, err := (repository.AccessRepository{Pool: dbPool}).PurgeProofs(workerCtx, time.Now()); err != nil {
+					log.Warn().Msg("reauth_proof_purge_failed")
+				}
+			}
+		}
+	}()
 
-	router := transport.NewRouter(cfg.Base.Env, log, jwtManager, authHandler, adminHandler, internalHandler, transport.Security{TrustedProxies: cfg.TrustedProxies, Origins: cfg.Origins, ServiceKey: cfg.ServiceKey, Services: cfg.Internal.Verifier, DeliveryKey: cfg.ResetDeliveryKey, RateKey: cfg.RateKey, Redis: redisClient}, resetDelivery,
+	router := transport.NewRouter(cfg.Base.Env, log, jwtManager, authHandler, adminHandler, internalHandler, accessHandler, adminGuard, transport.Security{TrustedProxies: cfg.TrustedProxies, Origins: cfg.Origins, ServiceKey: cfg.ServiceKey, Services: cfg.Internal.Verifier, DeliveryKey: cfg.ResetDeliveryKey, RateKey: cfg.RateKey, Redis: redisClient}, resetDelivery,
 		health.Checker{Name: "postgres", Ping: func(ctx context.Context) error { return dbPool.Ping(ctx) }},
 		health.Checker{Name: "redis", Ping: func(ctx context.Context) error { return redisClient.Ping(ctx).Err() }},
 	)
 
-	adminaudit.Register(router.Group("/api/auth/admin", middleware.RequireAuth(jwtManager), middleware.RequireRole("admin")), "/audit-events",
+	adminaudit.Register(router.Group("/api/auth/admin", middleware.RequireAuth(jwtManager), middleware.RequireRole("admin"), adminGuard), "/audit-events",
 		adminaudit.Source{Name: "identity", SQL: repository.AuditSearchSQL, DB: dbPool, Roles: adminUseCase}, log)
 
 	srv := &http.Server{

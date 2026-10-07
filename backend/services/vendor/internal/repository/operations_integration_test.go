@@ -19,6 +19,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rs/zerolog"
 
+	"shopee/backend/pkg/adminaccess/adminaccesstest"
 	"shopee/backend/pkg/apperror"
 	"shopee/backend/pkg/authjwt/authjwttest"
 	"shopee/backend/pkg/identityclient"
@@ -449,13 +450,13 @@ func TestIntegrationAPIAuthAndPayoutScopes(t *testing.T) {
 	manager := authjwttest.Manager()
 	gin.SetMode(gin.ReleaseMode)
 	log := zerolog.Nop()
-	router := transport.NewRouter("test", log, manager, transport.NewVendorHandler(f.uc, log), transport.NewVendorAddressHandler(f.addresses, log), transport.NewAdminHandler(f.uc, log), transport.NewInternalHandler(f.uc, log), transport.NewPolicyHandler(&usecase.PolicyUseCase{}, f.uc, log), transport.NewStaffHandler(&usecase.StaffUseCase{Staff: repository.StaffRepository{Pool: f.db}, Vendors: f.vendors, Accounts: f.ops.Actors.(actors), Tx: f.ops.Tx}, log), serviceauth.SharedKey("test-internal-service-key"))
+	router := transport.NewRouter("test", log, manager, transport.NewVendorHandler(f.uc, log), transport.NewVendorAddressHandler(f.addresses, log), transport.NewAdminHandler(f.uc, log), transport.NewInternalHandler(f.uc, log), transport.NewPolicyHandler(&usecase.PolicyUseCase{}, f.uc, log), transport.NewStaffHandler(&usecase.StaffUseCase{Staff: repository.StaffRepository{Pool: f.db}, Vendors: f.vendors, Accounts: f.ops.Actors.(actors), Tx: f.ops.Tx}, log), adminaccesstest.Guard(transport.AdminRoutes), serviceauth.SharedKey("test-internal-service-key"))
 	cipher, err := adapter.NewPayoutCipher(key)
 	if err != nil {
 		t.Fatal(err)
 	}
 	uc := &usecase.PayoutUseCase{Accounts: repository.PayoutRepository{Pool: f.db}, Vendors: f.vendors, Audit: f.audit, Ops: f.ops, Cipher: cipher}
-	(transport.PayoutHandler{UseCase: uc, Log: log}).Register(router, middleware.RequireAuth(manager), "test-payment-scope-key", serviceauth.SharedKey("test-internal-service-key"))
+	(transport.PayoutHandler{UseCase: uc, Log: log, AdminGuard: adminaccesstest.Guard(transport.AdminRoutes)}).Register(router, middleware.RequireAuth(manager), "test-payment-scope-key", serviceauth.SharedKey("test-internal-service-key"))
 	ownerToken, _, err := manager.IssueAccessToken(f.owner, "vendor", time.Minute)
 	if err != nil {
 		t.Fatal(err)

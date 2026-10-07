@@ -17,11 +17,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
 	"github.com/rs/zerolog"
 
+	"shopee/backend/pkg/adminaccess"
 	"shopee/backend/pkg/authjwt"
 	"shopee/backend/pkg/authjwt/authjwttest"
 	"shopee/backend/services/identity/internal/adapter"
@@ -42,13 +44,23 @@ type fixture struct {
 	jwt     *authjwt.Manager
 }
 
+func (f *fixture) access() *usecase.AccessUseCase {
+	return &usecase.AccessUseCase{Store: repository.AccessRepository{Pool: f.pool}, Users: f.users, Tx: f.tx}
+}
+func (f *fixture) accessHandler() *transport.AccessHandler {
+	return transport.NewAccessHandler(f.access(), zerolog.Nop())
+}
+func (f *fixture) accessGuard() gin.HandlerFunc {
+	return adminaccess.Guard(f.access(), transport.AdminRoutes, zerolog.Nop())
+}
+
 func TestIntegrationResetDeliveryRetryWipeAndExpiry(t *testing.T) {
 	f := setup(t)
 	f.register(t)
 	// Simulate an ID-only notification job that fetches material from Identity.
 	key := strings.Repeat("d", 32)
 	delivery := &usecase.ResetDeliveryUseCase{Store: f.resets, Cipher: f.cipher, ResetURL: "https://shop.example.invalid/reset-password", Log: zerolog.Nop()}
-	router := transport.NewRouter("production", zerolog.Nop(), f.jwt, transport.NewAuthHandler(f.auth, zerolog.Nop(), true), transport.NewAdminHandler(usecase.NewAdminUseCase(f.users, f.refresh, f.tx), zerolog.Nop()), transport.NewInternalHandler(f.auth, zerolog.Nop()), transport.Security{ServiceKey: strings.Repeat("s", 32), DeliveryKey: key}, delivery)
+	router := transport.NewRouter("production", zerolog.Nop(), f.jwt, transport.NewAuthHandler(f.auth, zerolog.Nop(), true), transport.NewAdminHandler(usecase.NewAdminUseCase(f.users, f.refresh, f.tx), zerolog.Nop()), transport.NewInternalHandler(f.auth, zerolog.Nop()), f.accessHandler(), f.accessGuard(), transport.Security{ServiceKey: strings.Repeat("s", 32), DeliveryKey: key}, delivery)
 	identity := httptest.NewServer(router)
 	defer identity.Close()
 	links := make(chan string, 1)
@@ -181,7 +193,7 @@ func setup(t *testing.T) *fixture {
 		}
 		admin.Close()
 	})
-	for _, name := range []string{"000002_identity_core.up.sql", "000003_identity_sessions.up.sql", "000004_audit_search.up.sql"} {
+	for _, name := range []string{"000002_identity_core.up.sql", "000003_identity_sessions.up.sql", "000004_audit_search.up.sql", "000005_admin_permissions.up.sql"} {
 		sql, e := os.ReadFile(filepath.Join("..", "..", "migrations", name))
 		if e != nil {
 			t.Fatal(e)
@@ -381,7 +393,7 @@ func TestIntegrationCookieCSRFAndRateLimit(t *testing.T) {
 	client := redis.NewClient(options)
 	defer client.Close()
 	security := transport.Security{Origins: []string{"http://localhost:3000"}, Redis: client, RateKey: uuid.NewString(), ServiceKey: strings.Repeat("s", 32), DeliveryKey: strings.Repeat("d", 32)}
-	router := transport.NewRouter("production", zerolog.Nop(), f.jwt, transport.NewAuthHandler(f.auth, zerolog.Nop(), true), transport.NewAdminHandler(usecase.NewAdminUseCase(f.users, f.refresh, f.tx), zerolog.Nop()), transport.NewInternalHandler(f.auth, zerolog.Nop()), security, &usecase.ResetDeliveryUseCase{})
+	router := transport.NewRouter("production", zerolog.Nop(), f.jwt, transport.NewAuthHandler(f.auth, zerolog.Nop(), true), transport.NewAdminHandler(usecase.NewAdminUseCase(f.users, f.refresh, f.tx), zerolog.Nop()), transport.NewInternalHandler(f.auth, zerolog.Nop()), f.accessHandler(), f.accessGuard(), security, &usecase.ResetDeliveryUseCase{})
 	request := func(path, body, origin string, cookie *http.Cookie) *httptest.ResponseRecorder {
 		req := httptest.NewRequest("POST", path, strings.NewReader(body))
 		req.RemoteAddr = "192.0.2.5:1000"

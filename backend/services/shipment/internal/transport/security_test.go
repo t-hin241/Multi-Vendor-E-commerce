@@ -9,6 +9,7 @@ import (
 
 	"github.com/rs/zerolog"
 
+	"shopee/backend/pkg/adminaccess/adminaccesstest"
 	"shopee/backend/pkg/authjwt/authjwttest"
 	"shopee/backend/pkg/serviceauth"
 	"shopee/backend/services/shipment/internal/usecase"
@@ -23,7 +24,9 @@ func TestShipmentRoutesAreProtected(t *testing.T) {
 	jwt := authjwttest.Manager()
 	uc := usecase.NewShipmentUseCase(usecase.Deps{})
 	r := NewRouter("test", zerolog.Nop(), jwt, NewShipmentHandler(uc, zerolog.Nop()), &AdminHandler{}, &VendorShippingMethodHandler{},
-		NewInternalHandler(uc, zerolog.Nop()), NewWebhookHandler(uc, zerolog.Nop()), NewOpsHandler(uc, zerolog.Nop()), serviceauth.SharedKey(testKey))
+		NewInternalHandler(uc, zerolog.Nop()), NewWebhookHandler(uc, zerolog.Nop()), NewOpsHandler(uc, zerolog.Nop()), adminaccesstest.Guard(AdminRoutes), serviceauth.SharedKey(testKey))
+	// AF-19: every admin route names the permission bundle it needs.
+	adminaccesstest.AssertCovered(t, r, AdminRoutes)
 	send := func(method, path, body string, headers map[string]string) int {
 		req := httptest.NewRequest(method, path, strings.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")

@@ -10,6 +10,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/rs/zerolog"
 
+	"shopee/backend/pkg/adminaccess/adminaccesstest"
 	"shopee/backend/pkg/authjwt/authjwttest"
 	"shopee/backend/pkg/serviceauth"
 	"shopee/backend/services/notification/internal/transport"
@@ -21,7 +22,7 @@ func TestRoutesNeedServiceKeyOrAdmin(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	jwt := authjwttest.Manager()
 	key := "test-internal-key-not-a-real-secret-0000"
-	router := transport.NewRouter("test", zerolog.Nop(), jwt, serviceauth.SharedKey(key), transport.NewInternalHandler(nil, zerolog.Nop()), transport.NewAdminHandler(nil, zerolog.Nop()))
+	router := transport.NewRouter("test", zerolog.Nop(), jwt, serviceauth.SharedKey(key), transport.NewInternalHandler(nil, zerolog.Nop()), transport.NewAdminHandler(nil, zerolog.Nop()), adminaccesstest.Guard(transport.AdminRoutes))
 	send := func(method, path string, headers map[string]string) int {
 		req := httptest.NewRequest(method, path, strings.NewReader(`{}`))
 		for k, v := range headers {
@@ -49,4 +50,11 @@ func TestRoutesNeedServiceKeyOrAdmin(t *testing.T) {
 			t.Fatalf("%v as buyer: %d", route, code)
 		}
 	}
+}
+
+// AF-19: every admin route names the permission bundle it needs.
+func TestEveryAdminRouteNamesAPermission(t *testing.T) {
+	router := transport.NewRouter("test", zerolog.Nop(), authjwttest.Manager(), serviceauth.SharedKey("fake-test-internal-key-not-a-real-secret"),
+		transport.NewInternalHandler(nil, zerolog.Nop()), transport.NewAdminHandler(nil, zerolog.Nop()), adminaccesstest.Guard(transport.AdminRoutes))
+	adminaccesstest.AssertCovered(t, router, transport.AdminRoutes)
 }

@@ -32,6 +32,69 @@ type PayoutUseCase struct {
 	Audit    AuditLogRepositoryPort
 	Ops      Operations
 	Cipher   PayoutCipher
+	// Proofs and RequireProof (FEATURE_ADMIN_SCOPED_PERMISSIONS_ENABLED,
+	// AF-19): verifying a destination and reading its full details need a
+	// fresh password confirmation for exactly that account version.
+	Proofs       ProofConsumer
+	RequireProof bool
+}
+
+// ProofConsumer spends a recent-reauthentication proof (Identity).
+type ProofConsumer interface {
+	ConsumeProof(ctx context.Context, proof, userID, purpose, operationHash string) error
+}
+
+// Reauthentication purposes and operation references the admin console
+// confirms the password for.
+const (
+	ProofPurposePayoutDecide  = "vendor.payout.decide"
+	ProofPurposePayoutDetails = "vendor.payout.details"
+)
+
+// PayoutDecisionRef is the operation a decision proof is bound to.
+func PayoutDecisionRef(accountID string, version int64, verify bool) string {
+	action := "reject"
+	if verify {
+		action = "verify"
+	}
+	return fmt.Sprintf("payout_account:%s:v%d:%s", accountID, version, action)
+}
+
+// PayoutDetailsRef is the operation a details proof is bound to.
+func PayoutDetailsRef(accountID string, version int64) string {
+	return fmt.Sprintf("payout_account:%s:v%d:details", accountID, version)
+}
+
+func (u *PayoutUseCase) checkProof(ctx context.Context, actor, purpose, ref, proof string) error {
+	if !u.RequireProof {
+		return nil
+	}
+	if u.Proofs == nil {
+		return apperror.Internal(errors.New("reauthentication is not configured"))
+	}
+	return u.Proofs.ConsumeProof(ctx, proof, actor, purpose, ref)
+}
+
+// DecideWithProof is Decide behind the admin's password confirmation.
+func (u *PayoutUseCase) DecideWithProof(ctx context.Context, actor, vendor, id string, version int64, verify bool, reason, proof string) (*domain.PayoutAccount, error) {
+	if err := u.Ops.Actors.RequireRole(ctx, actor, "admin"); err != nil {
+		return nil, err
+	}
+	if err := u.checkProof(ctx, actor, ProofPurposePayoutDecide, PayoutDecisionRef(id, version, verify), proof); err != nil {
+		return nil, err
+	}
+	return u.Decide(ctx, actor, vendor, id, version, verify, reason)
+}
+
+// DetailsWithProof is the admin's Details behind a password confirmation.
+func (u *PayoutUseCase) DetailsWithProof(ctx context.Context, actor, vendor, id string, version int64, purpose, proof string) (*domain.PayoutDetails, error) {
+	if err := u.Ops.Actors.RequireRole(ctx, actor, "admin"); err != nil {
+		return nil, err
+	}
+	if err := u.checkProof(ctx, actor, ProofPurposePayoutDetails, PayoutDetailsRef(id, version), proof); err != nil {
+		return nil, err
+	}
+	return u.Details(ctx, actor, vendor, id, version, purpose, false)
 }
 
 func payoutAAD(a *domain.PayoutAccount, field string) string {

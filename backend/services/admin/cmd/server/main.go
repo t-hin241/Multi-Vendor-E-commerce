@@ -17,6 +17,7 @@ import (
 	"shopee/backend/pkg/shutdown"
 	"shopee/backend/pkg/telemetry"
 
+	"shopee/backend/pkg/adminaccess"
 	"shopee/backend/services/admin/internal/adapter"
 	"shopee/backend/services/admin/internal/config"
 	"shopee/backend/services/admin/internal/transport"
@@ -87,7 +88,9 @@ func main() {
 		Log:       log,
 	}
 
-	router := transport.NewRouter(cfg.Base.Env, log, jwtManager, svc,
+	// AF-19: every admin route needs the bundle named in transport.AdminRoutes.
+	adminGuard := adminaccess.Guard(adminaccess.Client{URL: internalServices.IdentityURL, Key: internalServices.Key}, transport.AdminRoutes, log)
+	router := transport.NewRouter(cfg.Base.Env, log, jwtManager, svc, adminGuard,
 		health.Checker{Name: "postgres", Ping: func(ctx context.Context) error { return dbPool.Ping(ctx) }},
 	)
 

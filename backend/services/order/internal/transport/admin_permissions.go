@@ -1,0 +1,38 @@
+package transport
+
+import "shopee/backend/pkg/adminaccess"
+
+// AdminRoutes names the permission bundle of every Order admin route
+// (AF-19); a route missing here is refused. Creating a refund request is
+// finance.prepare: the money moves only when Payment records the refund,
+// which needs a second person once approvals are on.
+var AdminRoutes = adminaccess.Routes{
+	"GET /api/orders/admin":                                                 adminaccess.SupportManage,
+	"GET /api/orders/admin/:id":                                             adminaccess.SupportManage,
+	"GET /api/orders/admin/:id/policy-snapshot":                             adminaccess.SupportManage,
+	"POST /api/orders/admin/:id/transition":                                 adminaccess.SupportManage,
+	"POST /api/orders/admin/:id/refunds":                                    adminaccess.FinancePrepare,
+	"GET /api/orders/admin/refunds":                                         adminaccess.FinanceRead,
+	"GET /api/orders/admin/payment-exceptions":                              adminaccess.FinanceRead,
+	"GET /api/orders/admin/operations":                                      adminaccess.PlatformConfigure,
+	"POST /api/orders/admin/operations/effects/:effectID/replay":            adminaccess.PlatformConfigure,
+	"GET /api/orders/admin/return-requests":                                 adminaccess.SupportManage,
+	"GET /api/orders/admin/return-requests/:id":                             adminaccess.SupportManage,
+	"GET /api/orders/admin/return-requests/:id/history":                     adminaccess.SupportManage,
+	"POST /api/orders/admin/return-requests/:id/decision":                   adminaccess.SupportManage,
+	"POST /api/orders/admin/return-requests/:id/receive":                    adminaccess.SupportManage,
+	"POST /api/orders/admin/return-requests/:id/retry-refund":               adminaccess.FinancePrepare,
+	"GET /api/orders/admin/support-cases/capability":                        adminaccess.SupportManage,
+	"GET /api/orders/admin/support-cases":                                   adminaccess.SupportManage,
+	"GET /api/orders/admin/support-cases/:caseID":                           adminaccess.SupportManage,
+	"GET /api/orders/admin/support-cases/:caseID/messages":                  adminaccess.SupportManage,
+	"POST /api/orders/admin/support-cases/:caseID/messages":                 adminaccess.SupportManage,
+	"POST /api/orders/admin/support-cases/:caseID/assignments":              adminaccess.SupportManage,
+	"POST /api/orders/admin/support-cases/:caseID/status":                   adminaccess.SupportManage,
+	"POST /api/orders/admin/support-cases/:caseID/resolutions":              adminaccess.SupportManage,
+	"POST /api/orders/admin/support-cases/:caseID/close":                    adminaccess.SupportManage,
+	"GET /api/orders/admin/support-cases/:caseID/attachments/:attachmentID": adminaccess.SupportManage,
+	"POST /api/orders/admin/support-attachments":                            adminaccess.SupportManage,
+	"GET /api/orders/admin/commission-rules":                                adminaccess.FinanceRead,
+	"POST /api/orders/admin/commission-rules":                               adminaccess.PlatformConfigure,
+}.Merge(adminaccess.Shared("/api/orders/admin", true, true, true))

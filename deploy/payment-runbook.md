@@ -92,3 +92,7 @@ Không chạy migration down khi đã có receipt, settlement hoặc payout mớ
 - Payment về bản cũ: bản cũ vẫn đọc `payment_events` (bản mới vẫn ghi song song) nên không áp lại webhook đã xử lý. Bản cũ không hiểu trạng thái `creating`/`expired`; đóng hoặc đối soát intent `creating` trước khi rollback. Intent tạo bởi bản mới vẫn tra được bằng `provider_intent_id`. Đợt payout đang mở phải xử lý xong trước.
 - Order về bản cũ: không gửi báo settlement; tác vụ đã xếp hàng giữ nguyên. Payment vẫn chạy.
 - Không đổi provider của intent đang mở khi rollback.
+
+## Quyền admin theo bundle và phê duyệt hai người (AF-19)
+
+Xem `deploy/admin-permissions-runbook.md`: migration, cờ `FEATURE_ADMIN_SCOPED_PERMISSIONS_ENABLED`, lệnh `bootstrap-access`, luồng phê duyệt và rollback.

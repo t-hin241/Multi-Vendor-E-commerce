@@ -20,10 +20,13 @@ import (
 )
 
 type Handlers struct {
-	Payment *PaymentHandler
-	Webhook *WebhookHandler
-	Refund  *RefundHandler
-	Admin   *AdminHandler
+	Payment  *PaymentHandler
+	Webhook  *WebhookHandler
+	Refund   *RefundHandler
+	Admin    *AdminHandler
+	Approval *ApprovalHandler
+	// AdminGuard enforces AdminRoutes (AF-19).
+	AdminGuard gin.HandlerFunc
 }
 
 func NewRouter(env string, log zerolog.Logger, jwtManager *authjwt.Manager, h Handlers, internal *serviceauth.Verifier, checkers ...health.Checker) *gin.Engine {
@@ -47,7 +50,7 @@ func NewRouter(env string, log zerolog.Logger, jwtManager *authjwt.Manager, h Ha
 		buyerGroup.POST("/intents/:id/simulate", h.Payment.Simulate)
 	}
 
-	adminGroup := r.Group("/api/payments/admin", middleware.RequireAuth(jwtManager), middleware.RequireRole("admin"), noStore())
+	adminGroup := r.Group("/api/payments/admin", middleware.RequireAuth(jwtManager), middleware.RequireRole("admin"), h.AdminGuard, noStore())
 	{
 		adminGroup.GET("/refunds", h.Refund.AdminList)
 		adminGroup.GET("/refunds/:id", h.Refund.AdminGet)
@@ -68,6 +71,15 @@ func NewRouter(env string, log zerolog.Logger, jwtManager *authjwt.Manager, h Ha
 		adminGroup.POST("/payouts/batches", h.Admin.CreateBatch)
 		adminGroup.GET("/payouts/batches/:id", h.Admin.GetBatch)
 		adminGroup.POST("/payouts/items/:id/resolve", h.Admin.ResolvePayoutItem)
+
+		// AF-19 maker-checker: draft -> submission (maker, password proof)
+		// -> decision (another admin with finance.approve, password proof).
+		adminGroup.GET("/approval-requests", h.Approval.List)
+		adminGroup.GET("/approval-requests/:id", h.Approval.Get)
+		adminGroup.POST("/approval-requests", h.Approval.Create)
+		adminGroup.POST("/approval-requests/:id/submission", h.Approval.Submit)
+		adminGroup.POST("/approval-requests/:id/cancellation", h.Approval.Cancel)
+		adminGroup.POST("/approval-requests/:id/decisions", h.Approval.Decide)
 	}
 
 	internalGroup := r.Group("/internal", internal.Allow("order"))

@@ -26,6 +26,9 @@ type SettlementDeps struct {
 	Vendors    VendorGateway
 	Log        zerolog.Logger
 	Now        func() time.Time
+	// RequireApprovals (AF-19): adjustments and payout results go through
+	// an approved maker-checker request only.
+	RequireApprovals bool
 }
 
 // SettlementUseCase keeps the append-only ledger of what the marketplace
@@ -143,6 +146,14 @@ func (uc *SettlementUseCase) Adjust(ctx context.Context, adminID, vendorID strin
 	if err := uc.requireAdmin(ctx, adminID); err != nil {
 		return nil, err
 	}
+	if uc.RequireApprovals {
+		return nil, ErrApprovalRequired
+	}
+	return uc.adjust(ctx, adminID, vendorID, amount, currency, reason)
+}
+
+// adjust posts the correction in the caller's transaction (or its own).
+func (uc *SettlementUseCase) adjust(ctx context.Context, adminID, vendorID string, amount int64, currency, reason string) (*domain.Entry, error) {
 	currency, reason = strings.ToUpper(currency), strings.TrimSpace(reason)
 	if err := domain.ValidateAdjustment(amount, currency, reason); err != nil {
 		return nil, err
@@ -294,6 +305,15 @@ func (uc *SettlementUseCase) ResolvePayoutItem(ctx context.Context, adminID, ite
 	if err := uc.requireAdmin(ctx, adminID); err != nil {
 		return nil, err
 	}
+	if uc.RequireApprovals {
+		return nil, ErrApprovalRequired
+	}
+	return uc.resolvePayoutItem(ctx, adminID, itemID, res, nil)
+}
+
+// resolvePayoutItem records the result in the caller's transaction (or its
+// own); check, when set, verifies the locked item first.
+func (uc *SettlementUseCase) resolvePayoutItem(ctx context.Context, adminID, itemID string, res domain.PayoutResolution, check func(*domain.PayoutItem) error) (*domain.PayoutItem, error) {
 	res.EvidenceReference, res.Note = strings.TrimSpace(res.EvidenceReference), strings.TrimSpace(res.Note)
 	var item *domain.PayoutItem
 	err := uc.Tx.Run(ctx, func(ctx context.Context) error {
@@ -301,6 +321,11 @@ func (uc *SettlementUseCase) ResolvePayoutItem(ctx context.Context, adminID, ite
 		item, err = uc.Payouts.LockItem(ctx, itemID)
 		if err != nil {
 			return err
+		}
+		if check != nil {
+			if err := check(item); err != nil {
+				return err
+			}
 		}
 		changed, err := domain.ResolvePayoutItem(item, res, adminID, uc.Now().UTC())
 		if err != nil || !changed {

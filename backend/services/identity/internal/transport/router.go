@@ -16,7 +16,7 @@ import (
 	"shopee/backend/services/identity/internal/usecase"
 )
 
-func NewRouter(env string, log zerolog.Logger, jwtManager *authjwt.Manager, authHandler *AuthHandler, adminHandler *AdminHandler, internalHandler *InternalHandler, security Security, delivery *usecase.ResetDeliveryUseCase, checkers ...health.Checker) *gin.Engine {
+func NewRouter(env string, log zerolog.Logger, jwtManager *authjwt.Manager, authHandler *AuthHandler, adminHandler *AdminHandler, internalHandler *InternalHandler, accessHandler *AccessHandler, adminGuard gin.HandlerFunc, security Security, delivery *usecase.ResetDeliveryUseCase, checkers ...health.Checker) *gin.Engine {
 	if env == "production" {
 		gin.SetMode(gin.ReleaseMode)
 	}
@@ -50,13 +50,22 @@ func NewRouter(env string, log zerolog.Logger, jwtManager *authjwt.Manager, auth
 		auth.POST("/password-reset/request", authHandler.RequestPasswordReset)
 		auth.POST("/password-reset/confirm", authHandler.ConfirmPasswordReset)
 		auth.GET("/me", requireAuth, authHandler.Me)
+		// AF-19: the caller's admin bundles, and a password re-check that
+		// returns a one-time proof for one sensitive operation.
+		auth.GET("/permissions", requireAuth, accessHandler.Mine)
+		auth.POST("/reauthentications", requireAuth, middleware.RequireRole("admin"), accessHandler.Reauthenticate)
 	}
 
-	adminGroup := r.Group("/api/auth/admin", security.BrowserProtection(), requireAuth, middleware.RequireRole("admin"))
+	adminGroup := r.Group("/api/auth/admin", security.BrowserProtection(), requireAuth, middleware.RequireRole("admin"), adminGuard)
 	{
 		adminGroup.GET("/users", adminHandler.ListUsers)
 		adminGroup.PATCH("/users/:id/active", adminHandler.SetActive)
 		adminGroup.POST("/users/:id/sessions/:sessionID/revoke", adminHandler.RevokeSession)
+
+		adminGroup.GET("/permission-subjects", accessHandler.Subjects)
+		adminGroup.GET("/permission-grants", accessHandler.ListGrants)
+		adminGroup.POST("/permission-grants", accessHandler.Grant)
+		adminGroup.DELETE("/permission-grants/:id", accessHandler.Revoke)
 	}
 
 	internalGroup := r.Group("/internal/users", security.services().Allow(sessionCallers...))
@@ -65,6 +74,8 @@ func NewRouter(env string, log zerolog.Logger, jwtManager *authjwt.Manager, auth
 	}
 
 	r.POST("/internal/sessions/verify", security.services().Allow(sessionCallers...), authHandler.VerifySession)
+	r.POST("/internal/admin-permissions/check", security.services().Allow(sessionCallers...), accessHandler.Check)
+	r.POST("/internal/reauth-proofs/consume", security.services().Allow(sessionCallers...), accessHandler.ConsumeProof)
 	r.GET("/internal/password-reset-deliveries/:id", serviceKey(security.DeliveryKey, "X-Reset-Delivery-Key"), func(c *gin.Context) {
 		message, err := delivery.Message(c.Request.Context(), c.Param("id"))
 		if err != nil {

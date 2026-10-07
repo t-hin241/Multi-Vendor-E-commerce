@@ -26,7 +26,21 @@ type RefundUseCase struct {
 	// settle posts a succeeded refund to the vendor's settlement ledger in
 	// the refund's transaction.
 	settle func(ctx context.Context, refund *domain.Refund) error
+	// approvals (AF-19): a resolution only goes through an approved
+	// maker-checker request, never directly.
+	approvals bool
 }
+
+// RequireApprovals turns the direct resolution off: it then needs an
+// approved request (ApprovalUseCase).
+func (uc *RefundUseCase) RequireApprovals(on bool) *RefundUseCase {
+	uc.approvals = on
+	return uc
+}
+
+// ErrApprovalRequired: the action needs a maker-checker request.
+var ErrApprovalRequired = &apperror.Error{Code: "approval_required", Status: 409,
+	Message: "This action needs a second admin: create an approval request instead"}
 
 func NewRefundUseCase(refunds RefundRepositoryPort, roles RoleVerifier, log zerolog.Logger) *RefundUseCase {
 	return &RefundUseCase{refunds: refunds, roles: roles, log: log, now: time.Now}
@@ -96,10 +110,25 @@ func (uc *RefundUseCase) Resolve(ctx context.Context, adminID, refundID string, 
 	if err := uc.requireAdmin(ctx, adminID); err != nil {
 		return nil, err
 	}
+	if uc.approvals {
+		return nil, ErrApprovalRequired
+	}
+	return uc.resolve(ctx, adminID, refundID, res, nil)
+}
+
+// resolve applies a resolution in the caller's transaction (or its own);
+// check, when set, verifies the locked refund first (an approval's
+// snapshot).
+func (uc *RefundUseCase) resolve(ctx context.Context, adminID, refundID string, res domain.RefundResolution, check func(*domain.Refund) error) (*domain.Refund, error) {
 	var refund *domain.Refund
 	resolve := func(ctx context.Context) error {
 		var err error
 		refund, err = uc.refunds.Resolve(ctx, refundID, func(r *domain.Refund) (bool, error) {
+			if check != nil {
+				if err := check(r); err != nil {
+					return false, err
+				}
+			}
 			return r.Resolve(res, adminID, uc.now().UTC())
 		})
 		if err != nil || uc.settle == nil {

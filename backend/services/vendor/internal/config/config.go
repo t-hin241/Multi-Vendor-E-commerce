@@ -31,6 +31,9 @@ type Config struct {
 	// address; StaffAcceptURL is the page the invitation link opens.
 	StaffFingerprintKey []byte
 	StaffAcceptURL      string
+	// AdminReauth is FEATURE_ADMIN_SCOPED_PERMISSIONS_ENABLED (AF-19):
+	// payout destination decisions and detail reads need a password proof.
+	AdminReauth bool
 }
 
 func Load() (Config, error) {
@@ -78,8 +81,15 @@ func Load() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	adminReauth := false
+	if raw := os.Getenv("FEATURE_ADMIN_SCOPED_PERMISSIONS_ENABLED"); raw != "" {
+		if adminReauth, err = strconv.ParseBool(raw); err != nil {
+			return Config{}, fmt.Errorf("config: FEATURE_ADMIN_SCOPED_PERMISSIONS_ENABLED must be true or false")
+		}
+	}
 	return Config{
-		ShopStaff: staff, StaffInvitesPaused: paused, StaffFingerprintKey: staffKey, StaffAcceptURL: acceptURL,
+		AdminReauth: adminReauth,
+		ShopStaff:   staff, StaffInvitesPaused: paused, StaffFingerprintKey: staffKey, StaffAcceptURL: acceptURL,
 		VersionedPolicies: versioned,
 		PaymentURL:        envDefault("PAYMENT_SERVICE_URL", "http://payment:8087"), PayoutKey: payoutKey, PayoutServiceKey: payoutServiceKey, Internal: internal, CatalogURL: envDefault("CATALOG_SERVICE_URL", "http://catalog:8083"), OrderURL: envDefault("ORDER_SERVICE_URL", "http://order:8086"),
 		Base:                   base,

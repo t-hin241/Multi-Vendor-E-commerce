@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"shopee/backend/pkg/adminaccess"
 	"shopee/backend/pkg/apperror"
 	"shopee/backend/pkg/shopaccess"
 	"shopee/backend/services/order/internal/domain"
@@ -510,6 +511,15 @@ func (uc *OrderUseCase) AssignSupportCase(ctx context.Context, adminID, caseID, 
 			return nil, apperror.Validation("The assignee must be an admin")
 		}
 		return nil, asError(err)
+	}
+	if uc.AdminPermissions != nil {
+		if _, err := uc.AdminPermissions.Require(ctx, assigneeID, adminaccess.SupportManage); err != nil {
+			var app *apperror.Error
+			if errors.As(err, &app) && app.Code == adminaccess.CodeMissingPermission {
+				return nil, apperror.Validation("The assignee lacks the support.manage permission")
+			}
+			return nil, err
+		}
 	}
 	return uc.mutateCase(ctx, adminID, caseID, expectedVersion, func(ctx context.Context, c *domain.SupportCase) error {
 		if c.Status == domain.CaseResolved || c.Status == domain.CaseClosed {

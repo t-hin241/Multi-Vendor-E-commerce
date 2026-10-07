@@ -30,6 +30,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
+import { orApprovalDraft } from "@/lib/admin-access";
 import * as api from "@/lib/api-client";
 import { useAuth } from "@/lib/auth-context";
 import { formatMoney } from "@/lib/format";
@@ -65,8 +66,15 @@ export function RefundOperations({ focusID }: { focusID?: string }) {
     queryFn: () => callWithAuth((token) => api.listPaymentExceptions(token, { limit: 50 })),
   });
 
+  // AF-19: with approvals on, the same input becomes a draft request for a
+  // second admin (see Approvals).
   async function resolve(id: string, input: Parameters<typeof api.resolvePaymentRefund>[2]) {
-    await callWithAuth((token) => api.resolvePaymentRefund(token, id, input));
+    await orApprovalDraft(callWithAuth, (token) => api.resolvePaymentRefund(token, id, input), {
+      operation_kind: "refund_resolution",
+      target_id: id,
+      payload: input,
+      reason: input.note || `Refund ${input.outcome}: ${input.evidence_reference ?? ""}`.trim(),
+    });
     await queryClient.invalidateQueries({ queryKey: ["payment-refunds"] });
   }
 

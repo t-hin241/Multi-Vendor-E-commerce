@@ -16,6 +16,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
 
+	"shopee/backend/pkg/adminaccess/adminaccesstest"
 	"shopee/backend/pkg/authjwt/authjwttest"
 	"shopee/backend/pkg/serviceauth"
 	"shopee/backend/pkg/shopaccess"
@@ -114,7 +115,7 @@ func TestIntegrationStaffInviteAcceptAuthorizeRevoke(t *testing.T) {
 	log := zerolog.Nop()
 	router := transport.NewRouter("test", log, authjwttest.Manager(), transport.NewVendorHandler(f.uc, log), transport.NewVendorAddressHandler(f.addresses, log),
 		transport.NewAdminHandler(f.uc, log), transport.NewInternalHandler(f.uc, log), transport.NewPolicyHandler(&usecase.PolicyUseCase{}, f.uc, log),
-		transport.NewStaffHandler(uc, log), serviceauth.SharedKey("test-internal-service-key"))
+		transport.NewStaffHandler(uc, log), adminaccesstest.Guard(transport.AdminRoutes), serviceauth.SharedKey("test-internal-service-key"))
 	authorize := func(actor, permission string) map[string]any {
 		t.Helper()
 		body, _ := json.Marshal(map[string]string{"actor_user_id": actor, "vendor_id": v.ID, "permission": permission})

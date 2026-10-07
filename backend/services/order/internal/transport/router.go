@@ -29,6 +29,7 @@ func NewRouter(
 	internalHandler *InternalHandler,
 	returnHandler *ReturnHandler,
 	supportHandler *SupportHandler,
+	adminGuard gin.HandlerFunc,
 	internal *serviceauth.Verifier,
 	checkers ...health.Checker,
 ) *gin.Engine {
@@ -97,7 +98,7 @@ func NewRouter(
 		vendorGroup.PATCH("/:vendorOrderID/status", orderHandler.UpdateVendorOrderStatus)
 	}
 
-	adminGroup := r.Group("/api/orders/admin", requireAuth, middleware.RequireRole("admin"))
+	adminGroup := r.Group("/api/orders/admin", requireAuth, middleware.RequireRole("admin"), adminGuard)
 	{
 		adminGroup.GET("", adminHandler.List)
 		adminGroup.GET("/refunds", adminHandler.ListRefunds)

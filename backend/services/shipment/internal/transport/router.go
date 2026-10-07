@@ -29,6 +29,7 @@ func NewRouter(
 	internalHandler *InternalHandler,
 	webhookHandler *WebhookHandler,
 	opsHandler *OpsHandler,
+	adminGuard gin.HandlerFunc,
 	internal *serviceauth.Verifier,
 	checkers ...health.Checker,
 ) *gin.Engine {
@@ -86,7 +87,7 @@ func NewRouter(
 		vendorMethodGroup.PATCH("/:id/active", vendorMethodHandler.SetActive)
 	}
 
-	adminGroup := r.Group("/api/shipments/admin", requireAuth, middleware.RequireRole("admin"))
+	adminGroup := r.Group("/api/shipments/admin", requireAuth, middleware.RequireRole("admin"), adminGuard)
 	{
 		adminGroup.POST("/carriers", adminHandler.CreateCarrier)
 		adminGroup.GET("/carriers", adminHandler.ListCarriers)

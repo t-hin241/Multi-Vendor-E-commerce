@@ -235,3 +235,7 @@ Người dùng không bị đăng xuất: gặp 401, frontend tự refresh một
 - **Lộ khóa riêng:** xoay ngay. Có thể bỏ khóa cũ khỏi `JWT_PUBLIC_KEYS` ngay ở bước 1 nếu chấp nhận người dùng phải refresh. Thu hồi session nghi vấn ở `/admin`. Mọi token vẫn bị kiểm session ở Identity, nên token giả cần một session thật khớp user/role.
 - **Lộ khóa công khai:** không cần làm gì: khóa công khai không ký được token.
 - **Rollback image cũ (HS256):** cần lại `JWT_SECRET` trong `.env` (image cũ đọc biến này). Vì vậy chỉ xóa nó khi bản mới đã ổn định.
+
+## Quyền admin theo bundle và phê duyệt hai người (AF-19)
+
+Xem `deploy/admin-permissions-runbook.md`: migration, cờ `FEATURE_ADMIN_SCOPED_PERMISSIONS_ENABLED`, lệnh `bootstrap-access`, luồng phê duyệt và rollback.

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"shopee/backend/pkg/adminaccess"
 	"shopee/backend/pkg/apperror"
 	"shopee/backend/pkg/httpresponse"
 	"shopee/backend/pkg/middleware"
@@ -27,7 +28,10 @@ type Repository interface {
 type Service struct {
 	Repo  Repository
 	Roles Roles
-	Now   func() time.Time
+	// Permissions (AF-19), when set, also requires the assignee to hold
+	// support.manage.
+	Permissions adminaccess.Checker
+	Now         func() time.Time
 }
 
 func (s Service) now() time.Time {
@@ -69,6 +73,14 @@ func (s Service) Mutate(ctx context.Context, actor, id, action, key string, m Mu
 		if err := s.Roles.RequireRole(ctx, m.AssigneeID, "admin"); err != nil {
 			return nil, err
 		}
+		if s.Permissions != nil {
+			if _, err := s.Permissions.Require(ctx, m.AssigneeID, adminaccess.SupportManage); err != nil {
+				if isMissing(err) {
+					return nil, apperror.Validation("The assignee lacks the support.manage permission")
+				}
+				return nil, err
+			}
+		}
 	}
 	return s.Repo.Mutate(ctx, id, actor, action, key, m, s.now())
 }
@@ -106,4 +118,9 @@ func Register(g *gin.RouterGroup, s Service, log zerolog.Logger) {
 			httpresponse.OK(c, 200, out)
 		})
 	}
+}
+
+func isMissing(err error) bool {
+	var app *apperror.Error
+	return errors.As(err, &app) && app.Code == adminaccess.CodeMissingPermission
 }

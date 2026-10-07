@@ -11,12 +11,15 @@ import (
 	"shopee/backend/pkg/httpresponse"
 	"shopee/backend/pkg/middleware"
 	"shopee/backend/pkg/serviceauth"
+	"shopee/backend/services/vendorsvc/internal/domain"
 	"shopee/backend/services/vendorsvc/internal/usecase"
 )
 
 type PayoutHandler struct {
 	UseCase *usecase.PayoutUseCase
 	Log     zerolog.Logger
+	// AdminGuard enforces AdminRoutes (AF-19) on the admin routes.
+	AdminGuard gin.HandlerFunc
 }
 
 func (h PayoutHandler) Register(r *gin.Engine, auth gin.HandlerFunc, payoutKey string, internal *serviceauth.Verifier) {
@@ -24,7 +27,7 @@ func (h PayoutHandler) Register(r *gin.Engine, auth gin.HandlerFunc, payoutKey s
 	owner.Use(payoutNoStore())
 	owner.POST("", h.Submit)
 	owner.GET("", func(c *gin.Context) { h.List(c, false) })
-	admin := r.Group("/api/vendor/admin/shops/:vendorId/payout-accounts", auth, middleware.RequireRole("admin"))
+	admin := r.Group("/api/vendor/admin/shops/:vendorId/payout-accounts", auth, middleware.RequireRole("admin"), h.AdminGuard)
 	admin.Use(payoutNoStore())
 	admin.GET("", func(c *gin.Context) { h.List(c, true) })
 	admin.POST("/:id/decision", h.Decide)
@@ -79,12 +82,14 @@ func (h PayoutHandler) Decide(c *gin.Context) {
 		Version int64  `json:"version"`
 		Verify  bool   `json:"verify"`
 		Reason  string `json:"reason"`
+		// Proof is the AF-19 password confirmation (never logged).
+		Proof string `json:"proof"`
 	}
 	if err := c.ShouldBindJSON(&in); err != nil {
 		httpresponse.HandleError(c, h.Log, apperror.Validation("Invalid payout decision"))
 		return
 	}
-	a, err := h.UseCase.Decide(c.Request.Context(), middleware.GetUserID(c), c.Param("vendorId"), c.Param("id"), in.Version, in.Verify, in.Reason)
+	a, err := h.UseCase.DecideWithProof(c.Request.Context(), middleware.GetUserID(c), c.Param("vendorId"), c.Param("id"), in.Version, in.Verify, in.Reason, in.Proof)
 	if err != nil {
 		httpresponse.HandleError(c, h.Log, err)
 		return
@@ -95,12 +100,19 @@ func (h PayoutHandler) Details(c *gin.Context, payment bool) {
 	var in struct {
 		Version int64  `json:"version"`
 		Purpose string `json:"purpose"`
+		Proof   string `json:"proof"`
 	}
 	if err := c.ShouldBindJSON(&in); err != nil || in.Version < 1 {
 		httpresponse.HandleError(c, h.Log, apperror.Validation("Invalid payout account version"))
 		return
 	}
-	a, err := h.UseCase.Details(c.Request.Context(), middleware.GetUserID(c), c.Param("vendorId"), c.Param("id"), in.Version, in.Purpose, payment)
+	var a *domain.PayoutDetails
+	var err error
+	if payment {
+		a, err = h.UseCase.Details(c.Request.Context(), middleware.GetUserID(c), c.Param("vendorId"), c.Param("id"), in.Version, in.Purpose, true)
+	} else {
+		a, err = h.UseCase.DetailsWithProof(c.Request.Context(), middleware.GetUserID(c), c.Param("vendorId"), c.Param("id"), in.Version, in.Purpose, in.Proof)
+	}
 	if err != nil {
 		httpresponse.HandleError(c, h.Log, err)
 		return

@@ -3459,3 +3459,163 @@ export function removeShopMember(
     json: { expected_version: expectedVersion, ...(reason ? { reason } : {}) },
   });
 }
+
+// ---------- Scoped admin permissions and approvals (AF-19) ----------
+// Identity holds each admin's permission bundles; Payment holds
+// maker-checker requests for manual money actions. The console only hides
+// what an admin cannot use; every service checks again.
+
+export type AdminPermissions = {
+  permissions: string[];
+  permission_version: number;
+  scoped: boolean;
+  bundles: string[];
+};
+
+export function getMyAdminPermissions(token: string): Promise<AdminPermissions> {
+  return request<AdminPermissions>("/api/auth/permissions", { token });
+}
+
+export type PermissionGrant = {
+  id: string;
+  user_id: string;
+  bundle: string;
+  status: "active" | "revoked";
+  granted_by?: string;
+  reason: string;
+  created_at: string;
+  revoked_by?: string;
+  revoke_reason?: string;
+  revoked_at?: string;
+};
+
+export type PermissionSubject = {
+  user: AdminUser & { permission_version: number };
+  grants: PermissionGrant[];
+};
+
+export function listPermissionSubjects(token: string): Promise<PermissionSubject[]> {
+  return request<PermissionSubject[]>("/api/auth/admin/permission-subjects", { token });
+}
+
+export function grantAdminPermission(
+  token: string,
+  input: { subject_id: string; bundle: string; reason: string; expected_version: number },
+): Promise<PermissionGrant> {
+  return request<PermissionGrant>("/api/auth/admin/permission-grants", {
+    method: "POST",
+    token,
+    json: input,
+  });
+}
+
+export function revokeAdminPermission(
+  token: string,
+  grantId: string,
+  reason: string,
+  expectedVersion: number,
+): Promise<{ revoked: boolean }> {
+  return request(`/api/auth/admin/permission-grants/${grantId}`, {
+    method: "DELETE",
+    token,
+    json: { reason, expected_version: expectedVersion },
+  });
+}
+
+// reauthenticate re-checks the password for one operation and returns a
+// one-time proof valid for five minutes. The password is never stored.
+export function reauthenticate(
+  token: string,
+  input: { password: string; purpose: string; operation_hash: string },
+): Promise<{ proof: string; expires_at: string }> {
+  return request("/api/auth/reauthentications", { method: "POST", token, json: input });
+}
+
+export type ApprovalKind = "refund_resolution" | "payout_item_resolution" | "settlement_adjustment";
+export type ApprovalStatus =
+  "draft" | "pending" | "approved" | "rejected" | "expired" | "cancelled";
+
+export type ApprovalRequest = {
+  id: string;
+  operation_kind: ApprovalKind;
+  target_id: string;
+  payload: Record<string, unknown>;
+  payload_hash: string;
+  snapshot: Record<string, unknown>;
+  status: ApprovalStatus;
+  maker_id: string;
+  maker_permission_version: number;
+  reason: string;
+  checker_id?: string;
+  checker_permission_version?: number;
+  decision_reason?: string;
+  version: number;
+  expires_at: string;
+  created_at: string;
+  submitted_at?: string;
+  decided_at?: string;
+  execution_ref?: string;
+};
+
+export function listApprovalRequests(
+  token: string,
+  status = "",
+): Promise<{ items: ApprovalRequest[]; enabled: boolean }> {
+  return request("/api/payments/admin/approval-requests", {
+    token,
+    query: { status: status || undefined, limit: 100 },
+  });
+}
+
+export function createApprovalRequest(
+  token: string,
+  input: { operation_kind: ApprovalKind; target_id: string; payload: unknown; reason: string },
+): Promise<ApprovalRequest> {
+  return request<ApprovalRequest>("/api/payments/admin/approval-requests", {
+    method: "POST",
+    token,
+    json: input,
+  });
+}
+
+export function submitApprovalRequest(
+  token: string,
+  id: string,
+  proof: string,
+  expectedVersion: number,
+): Promise<ApprovalRequest> {
+  return request<ApprovalRequest>(`/api/payments/admin/approval-requests/${id}/submission`, {
+    method: "POST",
+    token,
+    json: { proof, expected_version: expectedVersion },
+  });
+}
+
+export function decideApprovalRequest(
+  token: string,
+  id: string,
+  input: {
+    decision: "approve" | "reject";
+    proof: string;
+    expected_version: number;
+    reason: string;
+  },
+): Promise<ApprovalRequest> {
+  return request<ApprovalRequest>(`/api/payments/admin/approval-requests/${id}/decisions`, {
+    method: "POST",
+    token,
+    json: input,
+  });
+}
+
+export function cancelApprovalRequest(
+  token: string,
+  id: string,
+  expectedVersion: number,
+): Promise<ApprovalRequest> {
+  return request<ApprovalRequest>(`/api/payments/admin/approval-requests/${id}/cancellation`, {
+    method: "POST",
+    token,
+    json: { expected_version: expectedVersion },
+  });
+}

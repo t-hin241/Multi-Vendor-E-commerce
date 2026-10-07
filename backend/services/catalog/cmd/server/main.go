@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 
+	"shopee/backend/pkg/adminaccess"
 	"shopee/backend/pkg/adminaudit"
 	sessionconfig "shopee/backend/pkg/config"
 	"shopee/backend/pkg/eventbus"
@@ -128,14 +129,16 @@ func main() {
 	internalHandler := transport.NewInternalHandler(productUseCase, log)
 	attributeHandler := transport.NewAttributeHandler(attributeUseCase, log)
 
-	router := transport.NewRouter(cfg.Base.Env, log, jwtManager, categoryHandler, productHandler, storefrontHandler, adminHandler, internalHandler, attributeHandler, internalServices.Verifier,
+	// AF-19: every admin route needs the bundle named in transport.AdminRoutes.
+	adminGuard := adminaccess.Guard(adminaccess.Client{URL: internalServices.IdentityURL, Key: internalServices.Key}, transport.AdminRoutes, log)
+	router := transport.NewRouter(cfg.Base.Env, log, jwtManager, categoryHandler, productHandler, storefrontHandler, adminHandler, internalHandler, attributeHandler, adminGuard, internalServices.Verifier,
 		health.Checker{Name: "postgres", Ping: func(ctx context.Context) error { return dbPool.Ping(ctx) }},
 		health.Checker{Name: "object_storage", Ping: objectStore.Ping},
 	)
 
 	maintenance := transport.MaintenanceHandler{Service: usecase.Maintenance{Repository: repository.Maintenance{Pool: dbPool}, Identity: identityclient.Client{URL: internalServices.IdentityURL, Key: internalServices.Key}}, Log: log}
-	router.GET("/api/catalog/operations", middleware.RequireAuth(jwtManager), middleware.RequireRole("admin"), maintenance.Stats)
-	router.POST("/api/catalog/operations/replay", middleware.RequireAuth(jwtManager), middleware.RequireRole("admin"), maintenance.Replay)
+	router.GET("/api/catalog/operations", middleware.RequireAuth(jwtManager), middleware.RequireRole("admin"), adminGuard, maintenance.Stats)
+	router.POST("/api/catalog/operations/replay", middleware.RequireAuth(jwtManager), middleware.RequireRole("admin"), adminGuard, maintenance.Replay)
 	router.POST("/internal/stock-cache/invalidate", internalServices.Verifier.Allow("inventory"), maintenance.InvalidateStock)
 	salesStore := vendorsales.Store{Pool: dbPool}
 	router.POST("/internal/vendor-status", internalServices.Verifier.Allow("vendor"), salesStore.Handler(log))
@@ -156,7 +159,7 @@ func main() {
 	)
 	go (vendorsales.Client{URL: cfg.VendorServiceURL, Key: internalServices.Key}).Reconcile(reconcileCtx, salesStore, log)
 
-	catalogAdmin := router.Group("/api/catalog/admin", middleware.RequireAuth(jwtManager), middleware.RequireRole("admin"))
+	catalogAdmin := router.Group("/api/catalog/admin", middleware.RequireAuth(jwtManager), middleware.RequireRole("admin"), adminGuard)
 	bus.RegisterAdmin(catalogAdmin, identityclient.Client{URL: internalServices.IdentityURL, Key: internalServices.Key})
 	adminaudit.Register(catalogAdmin, "/audit-events",
 		adminaudit.Source{Name: "catalog", SQL: repository.AuditSearchSQL + " UNION ALL " + eventbus.InboxAuditSearchSQL, DB: dbPool, Roles: identityclient.Client{URL: internalServices.IdentityURL, Key: internalServices.Key}}, log)

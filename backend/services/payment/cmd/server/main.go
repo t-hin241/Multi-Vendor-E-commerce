@@ -10,6 +10,7 @@ import (
 	"shopee/backend/pkg/casesla"
 	"time"
 
+	"shopee/backend/pkg/adminaccess"
 	"shopee/backend/pkg/adminaudit"
 	sessionconfig "shopee/backend/pkg/config"
 	"shopee/backend/pkg/eventbus"
@@ -171,9 +172,16 @@ func main() {
 	settlementUseCase := usecase.NewSettlementUseCase(usecase.SettlementDeps{
 		Tx: tx, Settlement: repository.NewSettlementRepository(dbPool), Payouts: repository.NewPayoutRepository(dbPool),
 		Audit: repository.NewAuditRepository(dbPool), Roles: roles, Orders: orderClient, Vendors: vendorClient, Log: log,
+		RequireApprovals: cfg.AdminApprovals,
 	})
 	refundRepo := repository.NewRefundRepository(dbPool)
-	refundUseCase := usecase.NewRefundUseCase(refundRepo, roles, log).WithSettlement(tx, settlementUseCase)
+	refundUseCase := usecase.NewRefundUseCase(refundRepo, roles, log).WithSettlement(tx, settlementUseCase).RequireApprovals(cfg.AdminApprovals)
+	// AF-19: scoped admin permissions (Identity) and maker-checker requests.
+	admins := adminaccess.Client{URL: internalServices.IdentityURL, Key: internalServices.Key}
+	adminGuard := adminaccess.Guard(admins, transport.AdminRoutes, log)
+	approvalUseCase := &usecase.ApprovalUseCase{Store: repository.ApprovalRepository{Pool: dbPool}, Refunds: refundUseCase, Settlement: settlementUseCase,
+		Payouts: repository.NewPayoutRepository(dbPool), RefundsRepo: refundRepo, Audit: repository.NewAuditRepository(dbPool), Tx: tx, Admins: admins,
+		Enabled: cfg.AdminApprovals, Log: log}
 	reconUseCase := usecase.NewReconciliationUseCase(usecase.ReconciliationDeps{
 		Tx: tx, Payments: paymentUseCase, Refunds: refundUseCase, Intents: intentRepo, Receipts: receiptRepo,
 		OrderSync: orderSync, RefundSync: refundSync, RefundStore: refundRepo, Audit: repository.NewAuditRepository(dbPool), Roles: roles, Log: log,
@@ -181,10 +189,12 @@ func main() {
 	limiter := adapter.RedisRateLimiter{Client: redisClient, Prefix: "payment:webhook:", Limit: cfg.WebhookRatePerMinute, Window: time.Minute}
 
 	router := transport.NewRouter(cfg.Base.Env, log, jwtManager, transport.Handlers{
-		Payment: transport.NewPaymentHandler(paymentUseCase, log),
-		Webhook: transport.NewWebhookHandler(paymentUseCase, limiter, log),
-		Refund:  transport.NewRefundHandler(refundUseCase, log),
-		Admin:   transport.NewAdminHandler(reconUseCase, settlementUseCase, log),
+		Payment:    transport.NewPaymentHandler(paymentUseCase, log),
+		Webhook:    transport.NewWebhookHandler(paymentUseCase, limiter, log),
+		Refund:     transport.NewRefundHandler(refundUseCase, log),
+		Admin:      transport.NewAdminHandler(reconUseCase, settlementUseCase, log),
+		Approval:   transport.NewApprovalHandler(approvalUseCase, log),
+		AdminGuard: adminGuard,
 	}, internalServices.Verifier,
 		health.Checker{Name: "postgres", Ping: func(ctx context.Context) error { return dbPool.Ping(ctx) }},
 		health.Checker{Name: "redis", Ping: func(ctx context.Context) error { return redisClient.Ping(ctx).Err() }},
@@ -212,11 +222,11 @@ func main() {
 		eventbus.Subscription{Durable: "payment-rejected-outcomes", Types: []string{events.PaymentOutcomeRejected}, Handle: transport.OutcomeRejectedHandler(orderSync, refundSync)},
 	)
 	go (usecase.PaymentWorker{Payments: paymentUseCase, Reconciliation: reconUseCase, Log: log}).Run(syncCtx)
-	adminGroup := router.Group("/api/payments/admin", middleware.RequireAuth(jwtManager), middleware.RequireRole("admin"))
+	adminGroup := router.Group("/api/payments/admin", middleware.RequireAuth(jwtManager), middleware.RequireRole("admin"), adminGuard)
 	slaRoles := identityclient.Client{URL: internalServices.IdentityURL, Key: internalServices.Key}
 	slaStore := casesla.Store{Pool: dbPool}
-	casesla.Register(adminGroup, casesla.Service{Repo: slaStore, Roles: slaRoles}, log)
-	go (casesla.Worker{Store: slaStore, Owner: "payment", Config: slaConfig, Roles: slaRoles, Publisher: bus.Bus, Log: log}).Run(syncCtx)
+	casesla.Register(adminGroup, casesla.Service{Repo: slaStore, Roles: slaRoles, Permissions: adminaccess.Client{URL: internalServices.IdentityURL, Key: internalServices.Key}}, log)
+	go (casesla.Worker{Store: slaStore, Owner: "payment", Config: slaConfig, Roles: slaRoles, Permissions: adminaccess.Client{URL: internalServices.IdentityURL, Key: internalServices.Key}, Publisher: bus.Bus, Log: log}).Run(syncCtx)
 	bus.RegisterAdmin(adminGroup, roles)
 	adminaudit.Register(adminGroup, "/audit-events",
 		adminaudit.Source{Name: "payment", SQL: repository.AuditSearchSQL + " UNION ALL " + eventbus.InboxAuditSearchSQL + " UNION ALL " + casesla.AuditSearchSQL, DB: dbPool, Roles: roles}, log)

@@ -2,11 +2,26 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
+import { ReauthDialog } from "@/components/admin/reauth-dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent } from "@/components/ui/card";
+import {
+  needsReauthentication,
+  PAYOUT_DECIDE_PURPOSE,
+  PAYOUT_DETAILS_PURPOSE,
+  payoutDecisionRef,
+  payoutDetailsRef,
+} from "@/lib/admin-access";
 import { useAuth } from "@/lib/auth-context";
 import * as ops from "@/lib/vendor-operations";
+
+type AccountAction = {
+  account?: ops.PayoutAccount;
+  verify?: boolean;
+  read?: boolean;
+  proof?: string;
+};
 
 export function PayoutAccounts({ vendorId, admin = false }: { vendorId: string; admin?: boolean }) {
   const { callWithAuth } = useAuth();
@@ -15,6 +30,8 @@ export function PayoutAccounts({ vendorId, admin = false }: { vendorId: string; 
   const [form, setForm] = useState({ bank_bin: "", account_number: "", account_name: "" });
   const [reason, setReason] = useState("");
   const [details, setDetails] = useState<ops.PayoutDetails | null>(null);
+  // AF-19: an action the server wants confirmed with the admin's password.
+  const [confirming, setConfirming] = useState<AccountAction | null>(null);
   useEffect(() => {
     if (!details) return;
     const timer = setTimeout(() => setDetails(null), 60000);
@@ -26,20 +43,25 @@ export function PayoutAccounts({ vendorId, admin = false }: { vendorId: string; 
     queryFn: () => callWithAuth((t) => ops.listAccounts(t, vendorId, admin, offset)),
   });
   const mutation = useMutation({
-    mutationFn: async (action: {
-      account?: ops.PayoutAccount;
-      verify?: boolean;
-      read?: boolean;
-    }) => {
+    mutationFn: async (action: AccountAction) => {
       if (action.read && action.account) {
         setDetails(
-          await callWithAuth((t) => ops.accountDetails(t, vendorId, action.account!, reason)),
+          await callWithAuth((t) =>
+            ops.accountDetails(t, vendorId, action.account!, reason, action.proof),
+          ),
         );
         return;
       }
       if (action.account)
         await callWithAuth((t) =>
-          ops.decideAccount(t, vendorId, action.account!, Boolean(action.verify), reason),
+          ops.decideAccount(
+            t,
+            vendorId,
+            action.account!,
+            Boolean(action.verify),
+            reason,
+            action.proof,
+          ),
         );
       else {
         await callWithAuth((t) => ops.submitAccount(t, vendorId, form));
@@ -48,6 +70,9 @@ export function PayoutAccounts({ vendorId, admin = false }: { vendorId: string; 
       setDetails(null);
       setReason("");
       await cache.invalidateQueries({ queryKey: ["payout-accounts", vendorId] });
+    },
+    onError: (err, action) => {
+      if (needsReauthentication(err) && action.account && !action.proof) setConfirming(action);
     },
   });
   return (
@@ -176,6 +201,30 @@ export function PayoutAccounts({ vendorId, admin = false }: { vendorId: string; 
       ))}
       {query.data?.length === 0 && (
         <p className="text-sm">{admin ? "No payout accounts." : "Chưa có tài khoản nhận tiền."}</p>
+      )}
+      {confirming?.account && (
+        <ReauthDialog
+          open
+          onOpenChange={(open) => !open && setConfirming(null)}
+          title={
+            confirming.read ? "View full account details" : "Confirm payout destination decision"
+          }
+          description="Confirm your password for this account version. The action is audited."
+          purpose={confirming.read ? PAYOUT_DETAILS_PURPOSE : PAYOUT_DECIDE_PURPOSE}
+          operationHash={
+            confirming.read
+              ? payoutDetailsRef(confirming.account.id, confirming.account.version)
+              : payoutDecisionRef(
+                  confirming.account.id,
+                  confirming.account.version,
+                  Boolean(confirming.verify),
+                )
+          }
+          onProof={async (proof) => {
+            await mutation.mutateAsync({ ...confirming, proof });
+            setConfirming(null);
+          }}
+        />
       )}
       <div className="flex gap-2">
         <Button

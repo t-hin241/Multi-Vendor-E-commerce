@@ -13,6 +13,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/rs/zerolog"
 
+	"shopee/backend/pkg/adminaccess/adminaccesstest"
 	"shopee/backend/pkg/authjwt/authjwttest"
 	"shopee/backend/services/review/internal/domain"
 )
@@ -72,7 +73,7 @@ func TestRoutesNeedTheRightRoleAndAreRateLimited(t *testing.T) {
 	}
 	buyer, _, _ := jwt.IssueAccessToken("11111111-1111-1111-1111-111111111111", "buyer", time.Minute)
 	vendor, _, _ := jwt.IssueAccessToken("22222222-2222-2222-2222-222222222222", "vendor", time.Minute)
-	router := NewRouter("test", zerolog.Nop(), jwt, NewHandler(nil, zerolog.Nop()), refuse{})
+	router := NewRouter("test", zerolog.Nop(), jwt, NewHandler(nil, zerolog.Nop()), refuse{}, adminaccesstest.Guard(AdminRoutes))
 	id := "33333333-3333-3333-3333-333333333333"
 	for _, route := range [][2]string{{"GET", "/api/reviews/admin"}, {"GET", "/api/reviews/admin/operations"}, {"POST", "/api/reviews/admin/" + id + "/hide"},
 		{"POST", "/api/reviews/admin/" + id + "/restore"}, {"POST", "/api/reviews/admin/reports/" + id + "/resolve"}, {"POST", "/api/reviews/admin/moderation-reasons"}} {
@@ -99,8 +100,14 @@ func TestRoutesNeedTheRightRoleAndAreRateLimited(t *testing.T) {
 		}
 	}
 	// The counter store being down does not block reviews.
-	open := NewRouter("test", zerolog.Nop(), jwt, NewHandler(nil, zerolog.Nop()), allow{})
+	open := NewRouter("test", zerolog.Nop(), jwt, NewHandler(nil, zerolog.Nop()), allow{}, adminaccesstest.Guard(AdminRoutes))
 	if code := send(open, "POST", "/api/reviews", buyer); code != http.StatusBadRequest {
 		t.Errorf("with the limiter down the request reaches validation, got %d", code)
 	}
+}
+
+// AF-19: every admin route names the permission bundle it needs.
+func TestEveryAdminRouteNamesAPermission(t *testing.T) {
+	r := NewRouter("test", zerolog.Nop(), authjwttest.Manager(), NewHandler(nil, zerolog.Nop()), allow{}, adminaccesstest.Guard(AdminRoutes))
+	adminaccesstest.AssertCovered(t, r, AdminRoutes)
 }

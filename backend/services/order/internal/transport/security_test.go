@@ -7,8 +7,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gin-gonic/gin"
 	"github.com/rs/zerolog"
 
+	"shopee/backend/pkg/adminaccess/adminaccesstest"
 	"shopee/backend/pkg/authjwt"
 	"shopee/backend/pkg/authjwt/authjwttest"
 	"shopee/backend/pkg/serviceauth"
@@ -18,7 +20,7 @@ const someID = "00000000-0000-0000-0000-000000000001"
 
 func testRouter() (http.Handler, *authjwt.Manager) {
 	jwt := authjwttest.Manager()
-	return NewRouter("test", zerolog.Nop(), jwt, &OrderHandler{}, &BuyerAddressHandler{}, &AdminHandler{}, &InternalHandler{}, &ReturnHandler{}, &SupportHandler{},
+	return NewRouter("test", zerolog.Nop(), jwt, &OrderHandler{}, &BuyerAddressHandler{}, &AdminHandler{}, &InternalHandler{}, &ReturnHandler{}, &SupportHandler{}, adminaccesstest.Guard(AdminRoutes),
 		serviceauth.SharedKey("fake-test-service-key-not-a-real-secret")), jwt
 }
 
@@ -165,4 +167,10 @@ func TestPolicyRoutesCheckRolesAndInput(t *testing.T) {
 	if code := do(r, "POST", "/api/orders/checkout", `{"address_id":"`+someID+`","accepted_policy_versions":{"returns":"one"}}`, as(t, jwt, "buyer")); code != http.StatusBadRequest {
 		t.Fatalf("accepted versions must be numbers: %d", code)
 	}
+}
+
+// AF-19: every admin route names the permission bundle it needs.
+func TestEveryAdminRouteNamesAPermission(t *testing.T) {
+	r, _ := testRouter()
+	adminaccesstest.AssertCovered(t, r.(*gin.Engine), AdminRoutes)
 }

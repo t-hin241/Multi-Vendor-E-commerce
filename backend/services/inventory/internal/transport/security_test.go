@@ -6,15 +6,17 @@ import (
 	"testing"
 	"time"
 
+	"shopee/backend/pkg/adminaccess/adminaccesstest"
 	"shopee/backend/pkg/authjwt/authjwttest"
 	"shopee/backend/pkg/serviceauth"
+	"shopee/backend/services/inventory/internal/usecase"
 
 	"github.com/rs/zerolog"
 )
 
 func TestInventoryMutationsRequireAuthentication(t *testing.T) {
 	jwt := authjwttest.Manager()
-	r := NewRouter("test", zerolog.Nop(), jwt, &ItemHandler{}, &InternalHandler{}, &AdminHandler{}, serviceauth.SharedKey("fake-test-internal-key-not-a-real-secret"))
+	r := NewRouter("test", zerolog.Nop(), jwt, &ItemHandler{}, &InternalHandler{}, &AdminHandler{}, adminaccesstest.Guard(AdminRoutes), serviceauth.SharedKey("fake-test-internal-key-not-a-real-secret"))
 	for _, path := range []string{"/internal/inventory/reserve", "/internal/inventory/commit", "/internal/inventory/release", "/internal/inventory/returns"} {
 		w := httptest.NewRecorder()
 		r.ServeHTTP(w, httptest.NewRequest("POST", path, strings.NewReader(`{"order_id":"00000000-0000-0000-0000-000000000001"}`)))
@@ -31,7 +33,7 @@ func TestInventoryMutationsRequireAuthentication(t *testing.T) {
 
 func TestStockCountRequiresVendorAndValidInput(t *testing.T) {
 	jwt := authjwttest.Manager()
-	r := NewRouter("test", zerolog.Nop(), jwt, &ItemHandler{}, &InternalHandler{}, &AdminHandler{}, serviceauth.SharedKey("fake-test-internal-key-not-a-real-secret"))
+	r := NewRouter("test", zerolog.Nop(), jwt, &ItemHandler{}, &InternalHandler{}, &AdminHandler{}, adminaccesstest.Guard(AdminRoutes), serviceauth.SharedKey("fake-test-internal-key-not-a-real-secret"))
 	const item = "/api/inventory/items/00000000-0000-0000-0000-000000000001/stock-counts"
 	body := `{"count_id":"00000000-0000-0000-0000-000000000002","counted_on_hand":1,"reason":"damaged"}`
 
@@ -72,4 +74,12 @@ func TestStockCountRequiresVendorAndValidInput(t *testing.T) {
 			}
 		}
 	}
+}
+
+// AF-19: every admin route names the permission bundle it needs.
+func TestEveryAdminRouteNamesAPermission(t *testing.T) {
+	jwt := authjwttest.Manager()
+	r := NewRouter("test", zerolog.Nop(), jwt, &ItemHandler{}, &InternalHandler{}, &AdminHandler{}, adminaccesstest.Guard(AdminRoutes), serviceauth.SharedKey("fake-test-internal-key-not-a-real-secret"))
+	RegisterOperations(r, jwt, adminaccesstest.Guard(AdminRoutes), usecase.Maintenance{}, zerolog.Nop())
+	adminaccesstest.AssertCovered(t, r, AdminRoutes)
 }

@@ -19,6 +19,9 @@ type Config struct {
 	ResetEncryptionKey []byte
 	Origins            []string
 	TrustedProxies     []string
+	// ScopedAdminPermissions is FEATURE_ADMIN_SCOPED_PERMISSIONS_ENABLED
+	// (AF-19): on, an admin needs an explicit bundle for each admin route.
+	ScopedAdminPermissions bool
 }
 
 func Load() (Config, error) {
@@ -41,6 +44,13 @@ func Load() (Config, error) {
 	}
 	if c.Internal, err = baseconfig.LoadInternalServices(); err != nil {
 		return c, err
+	}
+	switch os.Getenv("FEATURE_ADMIN_SCOPED_PERMISSIONS_ENABLED") {
+	case "", "false":
+	case "true":
+		c.ScopedAdminPermissions = true
+	default:
+		return c, fmt.Errorf("FEATURE_ADMIN_SCOPED_PERMISSIONS_ENABLED must be true or false")
 	}
 	secure := c.Base.Env == "production" || c.Base.Env == "staging"
 	// Keys the HMAC that turns email and IP into rate-limit keys, so Redis

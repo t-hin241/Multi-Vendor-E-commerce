@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 
+	"shopee/backend/pkg/adminaccess"
 	"shopee/backend/pkg/adminaudit"
 	sessionconfig "shopee/backend/pkg/config"
 	"shopee/backend/pkg/eventbus"
@@ -101,7 +102,9 @@ func main() {
 	internalHandler := transport.NewInternalHandler(inventoryUseCase, log)
 	adminHandler := transport.NewAdminHandler(inventoryUseCase, log)
 
-	router := transport.NewRouter(cfg.Base.Env, log, jwtManager, itemHandler, internalHandler, adminHandler, internalServices.Verifier,
+	// AF-19: every admin route needs the bundle named in transport.AdminRoutes.
+	adminGuard := adminaccess.Guard(adminaccess.Client{URL: internalServices.IdentityURL, Key: internalServices.Key}, transport.AdminRoutes, log)
+	router := transport.NewRouter(cfg.Base.Env, log, jwtManager, itemHandler, internalHandler, adminHandler, adminGuard, internalServices.Verifier,
 		health.Checker{Name: "postgres", Ping: func(ctx context.Context) error { return dbPool.Ping(ctx) }},
 	)
 
@@ -116,9 +119,9 @@ func main() {
 		invalidateStock = adapter.BusStockInvalidator(bus.Bus)
 	}
 	maintenance := usecase.Maintenance{InvalidateStock: invalidateStock, Repository: repository.Maintenance{Pool: dbPool}, Reservations: reservationRepo, Orders: orderEvents, Identity: identityclient.Client{URL: internalServices.IdentityURL, Key: internalServices.Key}, Log: log, ExpiryEnabled: cfg.ExpiryEnabled}
-	transport.RegisterOperations(router, jwtManager, maintenance, log)
+	transport.RegisterOperations(router, jwtManager, adminGuard, maintenance, log)
 	go maintenance.Run(workerCtx)
-	adminaudit.Register(router.Group("/api/inventory/admin", middleware.RequireAuth(jwtManager), middleware.RequireRole("admin")), "/audit-events",
+	adminaudit.Register(router.Group("/api/inventory/admin", middleware.RequireAuth(jwtManager), middleware.RequireRole("admin"), adminGuard), "/audit-events",
 		adminaudit.Source{Name: "inventory", SQL: repository.AuditSearchSQL, DB: dbPool, Roles: identityclient.Client{URL: internalServices.IdentityURL, Key: internalServices.Key}}, log)
 
 	srv := &http.Server{
