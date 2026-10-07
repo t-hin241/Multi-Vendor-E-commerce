@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"shopee/backend/pkg/apperror"
+	"shopee/backend/pkg/shopaccess"
 	"shopee/backend/services/catalog/internal/domain"
 	"shopee/backend/services/catalog/internal/repository"
 )
@@ -104,7 +105,7 @@ func (uc *ProductUseCase) create(ctx context.Context, userID, vendorID, category
 	// A user may own several shops (1:N) — vendorID names which one this
 	// product belongs to, and must be confirmed to actually belong to the
 	// caller before anything is written.
-	vendorID, err = uc.vendors.GetApprovedVendorID(ctx, userID, vendorID)
+	vendorID, err = uc.vendors.GetApprovedVendorID(ctx, userID, vendorID, shopaccess.ProductsWrite)
 	if err != nil {
 		return nil, err
 	}
@@ -396,7 +397,7 @@ func (uc *ProductUseCase) canViewExactStock(ctx context.Context, vendorID, viewe
 	if viewerUserID == "" {
 		return false
 	}
-	_, err := uc.vendors.GetApprovedVendorID(ctx, viewerUserID, vendorID)
+	_, err := uc.vendors.GetApprovedVendorID(ctx, viewerUserID, vendorID, shopaccess.InventoryRead)
 	return err == nil
 }
 
@@ -578,7 +579,7 @@ func (uc *ProductUseCase) GetByIDForOwnerLookup(ctx context.Context, productID s
 }
 
 func (uc *ProductUseCase) ListMine(ctx context.Context, userID, vendorID string, limit, offset int) ([]*domain.Product, error) {
-	vendorID, err := uc.vendors.GetApprovedVendorID(ctx, userID, vendorID)
+	vendorID, err := uc.vendors.GetApprovedVendorID(ctx, userID, vendorID, shopaccess.ProductsRead)
 	if err != nil {
 		return nil, err
 	}
@@ -596,7 +597,7 @@ func (uc *ProductUseCase) ListMine(ctx context.Context, userID, vendorID string,
 // record for every variant that exists. Media and variants themselves stay
 // optional; description was already optional at Create.
 func (uc *ProductUseCase) submitForReview(ctx context.Context, userID, productID string) (*domain.Product, error) {
-	p, err := uc.ownedByUser(ctx, userID, productID)
+	p, err := uc.ownedByUser(ctx, userID, productID, shopaccess.ProductsWrite)
 	if err != nil {
 		return nil, err
 	}
@@ -640,7 +641,7 @@ func (uc *ProductUseCase) submitForReview(ctx context.Context, userID, productID
 }
 
 func (uc *ProductUseCase) setActive(ctx context.Context, userID, productID string, isActive bool) (*domain.Product, error) {
-	p, err := uc.ownedByUser(ctx, userID, productID)
+	p, err := uc.ownedByUser(ctx, userID, productID, shopaccess.ProductsWrite)
 	if err != nil {
 		return nil, err
 	}
@@ -718,7 +719,7 @@ func (uc *ProductUseCase) attachImage(ctx context.Context, userID string, owned 
 // vendor clear it and pick a different one before submitting for review.
 // A no-op (not an error) if there's nothing to delete.
 func (uc *ProductUseCase) deleteImage(ctx context.Context, userID, productID string) error {
-	p, err := uc.ownedByUser(ctx, userID, productID)
+	p, err := uc.ownedByUser(ctx, userID, productID, shopaccess.ProductsWrite)
 	if err != nil {
 		return err
 	}
@@ -743,7 +744,7 @@ func (uc *ProductUseCase) deleteImage(ctx context.Context, userID, productID str
 // main image, mirroring ListMediaForOwner, so their console can preview
 // what's currently uploaded right after replacing it.
 func (uc *ProductUseCase) ListImagesForOwner(ctx context.Context, userID, productID string) ([]*domain.ProductImage, error) {
-	p, err := uc.ownedByUser(ctx, userID, productID)
+	p, err := uc.ownedByUser(ctx, userID, productID, shopaccess.ProductsRead)
 	if err != nil {
 		return nil, err
 	}
@@ -794,7 +795,7 @@ func (uc *ProductUseCase) attachMedia(ctx context.Context, userID string, owned 
 // ListMediaForOwner serves the vendor's own view of a product's media
 // gallery so their console can show what's already been uploaded.
 func (uc *ProductUseCase) ListMediaForOwner(ctx context.Context, userID, productID string) ([]*domain.ProductMedia, error) {
-	p, err := uc.ownedByUser(ctx, userID, productID)
+	p, err := uc.ownedByUser(ctx, userID, productID, shopaccess.ProductsRead)
 	if err != nil {
 		return nil, err
 	}
@@ -954,10 +955,10 @@ func (uc *ProductUseCase) reject(ctx context.Context, productID, adminUserID, re
 }
 
 // ownedByUser derives the owning vendor from the product itself (rather
-// than asking the client which shop it means) and confirms userID actually
-// owns that shop — a product's vendor_id is fixed at creation time, so
+// than asking the client which shop it means) and confirms userID holds
+// permission on that shop — a product's vendor_id is fixed at creation time, so
 // there's nothing for the caller to disambiguate here.
-func (uc *ProductUseCase) ownedByUser(ctx context.Context, userID, productID string) (*domain.Product, error) {
+func (uc *ProductUseCase) ownedByUser(ctx context.Context, userID, productID, permission string) (*domain.Product, error) {
 	p, err := uc.products.FindByID(ctx, productID)
 	if err != nil {
 		if errors.Is(err, repository.ErrProductNotFound) {
@@ -966,7 +967,7 @@ func (uc *ProductUseCase) ownedByUser(ctx context.Context, userID, productID str
 		return nil, apperror.Internal(err)
 	}
 
-	if _, err := uc.vendors.GetApprovedVendorID(ctx, userID, p.VendorID); err != nil {
+	if _, err := uc.vendors.GetApprovedVendorID(ctx, userID, p.VendorID, permission); err != nil {
 		return nil, err
 	}
 	return p, nil
@@ -980,7 +981,7 @@ func (uc *ProductUseCase) ownedByUser(ctx context.Context, userID, productID str
 // exactly one submitted option.
 func (uc *ProductUseCase) createVariant(ctx context.Context, userID, productID, sku string, optionIDs []string) (*domain.ProductVariant, []domain.VariantOptionDetail, error) {
 	sku = strings.TrimSpace(sku)
-	p, err := uc.ownedByUser(ctx, userID, productID)
+	p, err := uc.ownedByUser(ctx, userID, productID, shopaccess.ProductsWrite)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -1074,7 +1075,7 @@ func matchVariantOptions(resolved []domain.ResolvedAttribute, optionIDs []string
 // (attribute/option names, not just ids), for the vendor console's
 // stock-management UI.
 func (uc *ProductUseCase) ListVariantsForOwner(ctx context.Context, userID, productID string) ([]*domain.ProductVariant, map[string][]domain.VariantOptionDetail, error) {
-	p, err := uc.ownedByUser(ctx, userID, productID)
+	p, err := uc.ownedByUser(ctx, userID, productID, shopaccess.ProductsRead)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -1337,7 +1338,7 @@ func (uc *ProductUseCase) Reject(ctx context.Context, productID, adminUserID, re
 // UploadImage and UploadMedia stage the object (see stageObject) before the
 // metadata transaction; only the attach step runs inside it.
 func (uc *ProductUseCase) UploadImage(ctx context.Context, userID, productID, contentType string, data []byte) (*domain.ProductImage, error) {
-	p, err := uc.ownedByUser(ctx, userID, productID)
+	p, err := uc.ownedByUser(ctx, userID, productID, shopaccess.ProductsWrite)
 	if err != nil {
 		return nil, err
 	}
@@ -1359,7 +1360,7 @@ func (uc *ProductUseCase) UploadImage(ctx context.Context, userID, productID, co
 }
 
 func (uc *ProductUseCase) UploadMedia(ctx context.Context, userID, productID, contentType string, data []byte) (*domain.ProductMedia, error) {
-	p, err := uc.ownedByUser(ctx, userID, productID)
+	p, err := uc.ownedByUser(ctx, userID, productID, shopaccess.ProductsWrite)
 	if err != nil {
 		return nil, err
 	}

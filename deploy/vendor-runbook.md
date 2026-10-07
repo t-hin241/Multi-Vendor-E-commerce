@@ -153,3 +153,7 @@ Luồng: admin tạo draft ở `/admin/policies` (nội dung cố định khi t�
 - Theo dõi: log `vendor_policy_preparing_overdue` (preparing quá 1 giờ), `vendor_policy_propagation_pending`, backlog `policy_outbox`.
 
 Bật: deploy Order (consumer + readiness) trước, rồi Vendor; publish chính sách đổi trả đầu tiên khớp `ORDER_RETURN_WINDOW_DAYS`; xác nhận Order đã nhận (bảng `policy_versions`); sau đó mới bật flag ở Order. Rollback: tắt flag; không chạy down `000010` khi đã có version publish (down tự từ chối).
+
+## Nhân viên và phân quyền theo shop (AF-17)
+
+Migration `000011_shop_staff`, contract `POST /internal/vendors/authorize` và các biến `FEATURE_SHOP_STAFF_ENABLED`, `SHOP_STAFF_INVITES_PAUSED`, `STAFF_INVITATION_FINGERPRINT_KEY`, `STAFF_INVITATION_ACCEPT_URL`: xem `deploy/shop-staff-runbook.md`. Deploy Vendor trước các service gọi `/authorize`; tắt cờ là quay về chỉ chủ shop.

@@ -70,7 +70,7 @@ type ObjectStore interface {
 // always name which one they're acting as — this only validates that name.
 type VendorGateway interface {
 	Approved(context.Context, []string) (map[string]int64, error)
-	GetApprovedVendorID(ctx context.Context, userID, vendorID string) (string, error)
+	GetApprovedVendorID(ctx context.Context, userID, vendorID, permission string) (string, error)
 }
 
 // VendorNameGateway resolves shop names for the storefront listing. A

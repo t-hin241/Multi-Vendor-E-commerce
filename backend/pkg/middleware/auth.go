@@ -106,3 +106,35 @@ func GetRole(c *gin.Context) string {
 	s, _ := v.(string)
 	return s
 }
+
+// ContextKeyAccountRole keeps the account's own role when a route makes
+// the caller act in another capacity (see SellerConsole).
+const ContextKeyAccountRole = "auth_account_role"
+
+// SellerConsole must run after RequireAuth on seller routes whose every
+// use case checks a shop permission with Vendor (AF-17). A shop member may
+// hold a buyer or a vendor account; on these routes either acts as
+// "vendor", so handlers keep one seller code path. Shop membership, not
+// this role, is what grants access.
+func SellerConsole() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		role := GetRole(c)
+		if role != "vendor" && role != "buyer" {
+			httpresponse.Error(c, 403, "forbidden", "You do not have permission to perform this action")
+			c.Abort()
+			return
+		}
+		c.Set(ContextKeyAccountRole, role)
+		c.Set(ContextKeyRole, "vendor")
+		c.Next()
+	}
+}
+
+// GetAccountRole is the account's own role, even on SellerConsole routes.
+func GetAccountRole(c *gin.Context) string {
+	if v, ok := c.Get(ContextKeyAccountRole); ok {
+		s, _ := v.(string)
+		return s
+	}
+	return GetRole(c)
+}

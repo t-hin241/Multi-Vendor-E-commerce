@@ -83,8 +83,11 @@ func TestRoutesNeedTheRightRoleAndAreRateLimited(t *testing.T) {
 			t.Errorf("%v as buyer: %d", route, code)
 		}
 	}
-	if code := send(router, "PUT", "/api/reviews/vendor/"+id+"/reply", buyer); code != http.StatusForbidden {
-		t.Errorf("a buyer cannot reply as a shop: %d", code)
+	// AF-17: a buyer account may be shop staff, so the shop permission
+	// (use case + Vendor) decides; an admin account never replies as a shop.
+	admin, _, _ := jwt.IssueAccessToken("44444444-4444-4444-4444-444444444444", "admin", time.Minute)
+	if code := send(router, "PUT", "/api/reviews/vendor/"+id+"/reply", admin); code != http.StatusForbidden {
+		t.Errorf("an admin cannot reply as a shop: %d", code)
 	}
 	if code := send(router, "POST", "/api/reviews", vendor); code != http.StatusForbidden {
 		t.Errorf("a shop cannot write a buyer review: %d", code)

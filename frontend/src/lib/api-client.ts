@@ -3320,3 +3320,142 @@ export function proposeShopPolicy(
 export function listMyShopPolicies(token: string, vendorId: string): Promise<ShopPolicy[]> {
   return request<ShopPolicy[]>(`/api/vendor/${vendorId}/policy-proposals`, { token });
 }
+
+// ---------- Shop staff (AF-17) ----------
+// Vendor owns shop memberships; the console lists the shops the signed-in
+// person may open from these endpoints, never from the token's role.
+
+export type ShopRole = "owner" | "staff";
+
+export type AccessibleShop = {
+  vendor_id: string;
+  shop_name: string;
+  status: VendorStatus;
+  logo_url?: string;
+  role: ShopRole;
+  capabilities: string[];
+  membership_version: number;
+};
+
+export type PermissionDefinition = { name: string; owner_only: boolean; available: boolean };
+
+export type ShopMember = {
+  vendor_id: string;
+  user_id: string;
+  email?: string;
+  role: ShopRole;
+  status: "active" | "revoked";
+  version: number;
+  permissions: string[];
+  created_at: string;
+  revoked_at?: string;
+};
+
+export type StaffInvitation = {
+  id: string;
+  email_hint: string;
+  permissions: string[];
+  status: "pending" | "accepted" | "revoked" | "superseded";
+  expired: boolean;
+  delivery_status: "queued" | "sent" | "parked" | "closed";
+  invited_by: string;
+  expires_at: string;
+  accepted_at?: string;
+  created_at: string;
+};
+
+// MemberShop is GET /api/vendor/:id for any member: the shop plus the
+// caller's role and capabilities in it.
+export type MemberShop = Vendor & {
+  role: ShopRole;
+  capabilities: string[];
+  membership_version: number;
+};
+
+export function listAccessibleShops(
+  token: string,
+): Promise<{ shops: AccessibleShop[]; staff_enabled: boolean }> {
+  return request("/api/vendor/accessible-shops", { token });
+}
+
+export function getMemberShop(token: string, vendorId: string): Promise<MemberShop> {
+  return request<MemberShop>(`/api/vendor/${vendorId}`, { token });
+}
+
+export function listStaffPermissions(
+  token: string,
+): Promise<{ permissions: PermissionDefinition[]; enabled: boolean }> {
+  return request("/api/vendor/staff-permissions", { token });
+}
+
+export function inviteStaff(
+  token: string,
+  vendorId: string,
+  email: string,
+  permissions: string[],
+): Promise<StaffInvitation> {
+  return request<StaffInvitation>(`/api/vendor/${vendorId}/staff-invitations`, {
+    method: "POST",
+    token,
+    json: { email, permissions },
+  });
+}
+
+export function listStaffInvitations(token: string, vendorId: string): Promise<StaffInvitation[]> {
+  return request<StaffInvitation[]>(`/api/vendor/${vendorId}/staff-invitations`, { token });
+}
+
+export function revokeStaffInvitation(
+  token: string,
+  vendorId: string,
+  invitationId: string,
+  reason?: string,
+): Promise<{ revoked: boolean }> {
+  return request(`/api/vendor/${vendorId}/staff-invitations/${invitationId}`, {
+    method: "DELETE",
+    token,
+    json: reason ? { reason } : {},
+  });
+}
+
+// The token travels in the body only (never a URL a log could keep).
+export function acceptStaffInvitation(token: string, invitationToken: string): Promise<ShopMember> {
+  return request<ShopMember>("/api/vendor/staff-invitations/accept", {
+    method: "POST",
+    token,
+    json: { token: invitationToken },
+  });
+}
+
+export function listShopMembers(token: string, vendorId: string): Promise<ShopMember[]> {
+  return request<ShopMember[]>(`/api/vendor/${vendorId}/members`, { token });
+}
+
+export function updateShopMember(
+  token: string,
+  vendorId: string,
+  userId: string,
+  permissions: string[],
+  expectedVersion: number,
+  reason?: string,
+): Promise<ShopMember> {
+  return request<ShopMember>(`/api/vendor/${vendorId}/members/${userId}`, {
+    method: "PATCH",
+    token,
+    json: { permissions, expected_version: expectedVersion, ...(reason ? { reason } : {}) },
+  });
+}
+
+export function removeShopMember(
+  token: string,
+  vendorId: string,
+  userId: string,
+  expectedVersion: number,
+  reason?: string,
+): Promise<{ removed: boolean }> {
+  return request(`/api/vendor/${vendorId}/members/${userId}`, {
+    method: "DELETE",
+    token,
+    json: { expected_version: expectedVersion, ...(reason ? { reason } : {}) },
+  });
+}

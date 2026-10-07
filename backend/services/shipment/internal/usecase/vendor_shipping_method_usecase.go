@@ -5,6 +5,7 @@ import (
 	"errors"
 
 	"shopee/backend/pkg/apperror"
+	"shopee/backend/pkg/shopaccess"
 	"shopee/backend/services/shipment/internal/domain"
 	"shopee/backend/services/shipment/internal/repository"
 )
@@ -24,11 +25,11 @@ func NewVendorShippingMethodUseCase(methods VendorShippingMethodRepositoryPort, 
 
 // Enable turns on one of the admin's active carriers for the named shop —
 // a user may own several (1:N), so vendorID is always given explicitly and
-// confirmed to be the caller's own. The very first method a shop enables
+// confirmed with Vendor; shipping settings stay with the owner in v1. The very first method a shop enables
 // automatically becomes its default — otherwise checkout would have
 // nothing to auto-select until the vendor remembers to set one explicitly.
 func (uc *VendorShippingMethodUseCase) Enable(ctx context.Context, userID, vendorID, carrierID string) (*domain.VendorShippingMethod, error) {
-	vendorID, err := uc.vendors.GetApprovedVendorID(ctx, userID, vendorID)
+	vendorID, err := uc.vendors.GetApprovedVendorID(ctx, userID, vendorID, shopaccess.ShopSettingsWrite)
 	if err != nil {
 		return nil, err
 	}
@@ -59,7 +60,7 @@ func (uc *VendorShippingMethodUseCase) Enable(ctx context.Context, userID, vendo
 }
 
 func (uc *VendorShippingMethodUseCase) ListMine(ctx context.Context, userID, vendorID string) ([]*domain.VendorShippingMethod, error) {
-	vendorID, err := uc.vendors.GetApprovedVendorID(ctx, userID, vendorID)
+	vendorID, err := uc.vendors.GetApprovedVendorID(ctx, userID, vendorID, shopaccess.OrdersRead)
 	if err != nil {
 		return nil, err
 	}
@@ -109,7 +110,8 @@ func (uc *VendorShippingMethodUseCase) ownedByUser(ctx context.Context, userID, 
 		}
 		return nil, apperror.Internal(err)
 	}
-	if _, err := uc.vendors.GetApprovedVendorID(ctx, userID, method.VendorID); err != nil {
+	// Shipping settings stay with the owner in v1 (shop.settings.write).
+	if _, err := uc.vendors.GetApprovedVendorID(ctx, userID, method.VendorID, shopaccess.ShopSettingsWrite); err != nil {
 		return nil, apperror.Forbidden("You do not have access to this shipping method")
 	}
 	return method, nil

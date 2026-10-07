@@ -80,7 +80,7 @@ func shipmentDB(t *testing.T) *pgxpool.Pool {
 
 type fakeVendors struct{ owners map[string]string } // user -> vendor
 
-func (f fakeVendors) GetApprovedVendorID(_ context.Context, userID, vendorID string) (string, error) {
+func (f fakeVendors) GetApprovedVendorID(_ context.Context, userID, vendorID, _ string) (string, error) {
 	if f.owners[userID] != vendorID {
 		return "", apperror.Forbidden("not your shop")
 	}

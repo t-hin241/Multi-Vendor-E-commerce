@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"shopee/backend/pkg/apperror"
+	"shopee/backend/pkg/shopaccess"
 	"shopee/backend/services/order/internal/domain"
 	"shopee/backend/services/order/internal/repository"
 )
@@ -417,9 +418,9 @@ func (uc *OrderUseCase) supportCaseFor(ctx context.Context, actor SupportActor, 
 			return nil, apperror.NotFound("Support case not found")
 		}
 	case "vendor":
-		if _, err := uc.Vendors.GetApprovedVendorID(ctx, actor.ID, c.VendorID); err != nil {
+		if _, err := uc.Vendors.GetApprovedVendorID(ctx, actor.ID, c.VendorID, shopaccess.SupportReply); err != nil {
 			var app *apperror.Error
-			if errors.As(err, &app) && app.Code != apperror.CodeInternal {
+			if errors.As(err, &app) && app.Code != apperror.CodeInternal && !shopaccess.IsUnavailable(err) {
 				return nil, apperror.NotFound("Support case not found")
 			}
 			return nil, asError(err)
@@ -438,7 +439,7 @@ func (uc *OrderUseCase) ListMySupportCases(ctx context.Context, buyerID, status,
 
 // ListVendorSupportCases lists cases on the caller's shop's orders.
 func (uc *OrderUseCase) ListVendorSupportCases(ctx context.Context, userID, vendorID, status, cursor string, limit int) (*SupportCasePage, error) {
-	vendorID, err := uc.Vendors.GetApprovedVendorID(ctx, userID, vendorID)
+	vendorID, err := uc.Vendors.GetApprovedVendorID(ctx, userID, vendorID, shopaccess.SupportReply)
 	if err != nil {
 		return nil, err
 	}

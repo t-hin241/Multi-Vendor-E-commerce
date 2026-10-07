@@ -37,7 +37,7 @@ type RestockRequestRepositoryPort interface {
 // VendorGateway lets the use case check vendor approval without owning any
 // vendor data itself.
 type VendorGateway interface {
-	GetApprovedVendorID(ctx context.Context, userID, vendorID string) (string, error)
+	GetApprovedVendorID(ctx context.Context, userID, vendorID, permission string) (string, error)
 }
 
 // CatalogGateway lets the use case verify product (or variant) ownership

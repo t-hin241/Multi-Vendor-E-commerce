@@ -44,7 +44,7 @@ func (o *orders) ListEligible(_ context.Context, buyerID, productID string) ([]a
 
 type shops struct{ owner map[string]string } // vendor -> user
 
-func (s shops) EnsureOwnedApproved(_ context.Context, userID, vendorID string) error {
+func (s shops) EnsureOwnedApproved(_ context.Context, userID, vendorID, _ string) error {
 	if s.owner[vendorID] != userID {
 		return apperror.Forbidden("You do not own this shop")
 	}

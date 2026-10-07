@@ -21,6 +21,7 @@ import (
 
 	"shopee/backend/pkg/apperror"
 	"shopee/backend/pkg/authjwt/authjwttest"
+	"shopee/backend/pkg/identityclient"
 	"shopee/backend/pkg/middleware"
 	"shopee/backend/pkg/serviceauth"
 	"shopee/backend/pkg/vendorsales"
@@ -93,6 +94,15 @@ func (a actors) RequireRole(ctx context.Context, id, role string) error {
 		return apperror.Forbidden("Wrong role")
 	}
 	return nil
+}
+
+// Account fakes Identity: emails are "<id>@example.test".
+func (a actors) Account(ctx context.Context, id string) (identityclient.Account, error) {
+	role, ok := a[id]
+	if !ok {
+		return identityclient.Account{}, apperror.Forbidden("No account")
+	}
+	return identityclient.Account{ID: id, Email: id + "@example.test", Role: role, Active: true}, nil
 }
 
 type fixture struct {
@@ -439,7 +449,7 @@ func TestIntegrationAPIAuthAndPayoutScopes(t *testing.T) {
 	manager := authjwttest.Manager()
 	gin.SetMode(gin.ReleaseMode)
 	log := zerolog.Nop()
-	router := transport.NewRouter("test", log, manager, transport.NewVendorHandler(f.uc, log), transport.NewVendorAddressHandler(f.addresses, log), transport.NewAdminHandler(f.uc, log), transport.NewInternalHandler(f.uc, log), transport.NewPolicyHandler(&usecase.PolicyUseCase{}, f.uc, log), serviceauth.SharedKey("test-internal-service-key"))
+	router := transport.NewRouter("test", log, manager, transport.NewVendorHandler(f.uc, log), transport.NewVendorAddressHandler(f.addresses, log), transport.NewAdminHandler(f.uc, log), transport.NewInternalHandler(f.uc, log), transport.NewPolicyHandler(&usecase.PolicyUseCase{}, f.uc, log), transport.NewStaffHandler(&usecase.StaffUseCase{Staff: repository.StaffRepository{Pool: f.db}, Vendors: f.vendors, Accounts: f.ops.Actors.(actors), Tx: f.ops.Tx}, log), serviceauth.SharedKey("test-internal-service-key"))
 	cipher, err := adapter.NewPayoutCipher(key)
 	if err != nil {
 		t.Fatal(err)

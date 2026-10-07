@@ -17,6 +17,7 @@ import (
 	"github.com/rs/zerolog"
 
 	"shopee/backend/pkg/apperror"
+	"shopee/backend/pkg/shopaccess"
 	"shopee/backend/services/review/internal/adapter"
 	"shopee/backend/services/review/internal/domain"
 	"shopee/backend/services/review/internal/repository"
@@ -283,15 +284,17 @@ func (u *ReviewUseCase) ListMine(ctx context.Context, buyerID string, limit, off
 	return u.page(ctx, items, err)
 }
 
-func (u *ReviewUseCase) ownedShop(ctx context.Context, userID, vendorID string) error {
+// ownedShop checks the caller may act for the shop with permission (AF-17:
+// the owner, or staff granted it).
+func (u *ReviewUseCase) ownedShop(ctx context.Context, userID, vendorID, permission string) error {
 	if err := validID(vendorID, "shop"); err != nil {
 		return err
 	}
-	return failure(u.Vendors.EnsureOwnedApproved(ctx, userID, vendorID))
+	return failure(u.Vendors.EnsureOwnedApproved(ctx, userID, vendorID, permission))
 }
 
 func (u *ReviewUseCase) ListVendor(ctx context.Context, userID, vendorID, productID string, rating int, replied *bool, limit, offset int) (*Page, error) {
-	if err := u.ownedShop(ctx, userID, vendorID); err != nil {
+	if err := u.ownedShop(ctx, userID, vendorID, shopaccess.ProductsRead); err != nil {
 		return nil, err
 	}
 	if productID != "" {
@@ -304,7 +307,7 @@ func (u *ReviewUseCase) ListVendor(ctx context.Context, userID, vendorID, produc
 }
 
 func (u *ReviewUseCase) VendorSummary(ctx context.Context, userID, vendorID string) (domain.Summary, error) {
-	if err := u.ownedShop(ctx, userID, vendorID); err != nil {
+	if err := u.ownedShop(ctx, userID, vendorID, shopaccess.ProductsRead); err != nil {
 		return domain.Summary{}, err
 	}
 	s, err := u.Repo.VendorSummary(ctx, vendorID, u.ShowUnverified)
@@ -353,7 +356,7 @@ func (u *ReviewUseCase) Reply(ctx context.Context, userID, vendorID, reviewID, m
 	if err := validID(reviewID, "review"); err != nil {
 		return nil, err
 	}
-	if err := u.ownedShop(ctx, userID, vendorID); err != nil {
+	if err := u.ownedShop(ctx, userID, vendorID, shopaccess.SupportReply); err != nil {
 		return nil, err
 	}
 	reply := &domain.Reply{ReviewID: reviewID, VendorID: vendorID, Message: message}
@@ -390,7 +393,7 @@ func (u *ReviewUseCase) Report(ctx context.Context, userID, vendorID, reviewID, 
 	if err != nil {
 		return nil, err
 	}
-	if err := u.ownedShop(ctx, userID, vendorID); err != nil {
+	if err := u.ownedShop(ctx, userID, vendorID, shopaccess.SupportReply); err != nil {
 		return nil, err
 	}
 	var x *domain.Report

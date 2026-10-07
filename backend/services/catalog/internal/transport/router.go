@@ -70,7 +70,9 @@ func NewRouter(
 	r.GET("/api/catalog/products/:id", middleware.OptionalAuth(jwtManager), storefrontHandler.GetBySlug)
 
 	// Vendor product management.
-	vendorGroup := r.Group("/api/catalog/products", requireAuth, middleware.RequireRole("vendor"))
+	// AF-17: shop members on a buyer or vendor account; each use case
+	// checks the shop permission with Vendor.
+	vendorGroup := r.Group("/api/catalog/products", requireAuth, middleware.SellerConsole())
 	{
 		vendorGroup.POST("", productHandler.Create)
 		vendorGroup.PATCH("/:id/content", productHandler.UpdateContent)

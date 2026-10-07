@@ -6,6 +6,7 @@ import {
   Package,
   Store,
   Truck,
+  Users,
 } from "lucide-react";
 
 export type VendorNavLink = {
@@ -23,5 +24,6 @@ export const VENDOR_NAV_LINKS: VendorNavLink[] = [
   { href: "/vendor/support", label: "Hỗ trợ đơn hàng", icon: LifeBuoy },
   { href: "/vendor/reviews", label: "Đánh giá", icon: MessageSquare },
   { href: "/vendor/shipping", label: "Vận chuyển", icon: Truck },
+  { href: "/vendor/staff", label: "Nhân viên", icon: Users },
   { href: "/vendor/shops", label: "Cửa hàng", icon: Store },
 ];

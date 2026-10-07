@@ -47,7 +47,9 @@ func NewRouter(
 
 	health.RegisterRoutes(r, checkers...)
 
-	vendorGroup := r.Group("/api/inventory", middleware.RequireAuth(jwtManager), middleware.RequireRole("vendor"))
+	// AF-17: shop members on a buyer or vendor account; each use case
+	// checks the shop permission with Vendor.
+	vendorGroup := r.Group("/api/inventory", middleware.RequireAuth(jwtManager), middleware.SellerConsole())
 	{
 		vendorGroup.POST("/items", itemHandler.Create)
 		vendorGroup.GET("/items/mine", itemHandler.ListMine)

@@ -10,10 +10,11 @@ import { ProductCreateForm } from "@/components/vendor/product-create-form";
 import { ProductRow } from "@/components/vendor/product-row";
 import * as api from "@/lib/api-client";
 import { useAuth } from "@/lib/auth-context";
-import { resolveActiveVendor } from "@/lib/vendor";
+import { useConsoleShops } from "@/lib/hooks/use-console-shops";
+import { can } from "@/lib/shop-access";
 
 export default function VendorProductsPage() {
-  const { callWithAuth, selectedVendorId } = useAuth();
+  const { callWithAuth } = useAuth();
   const queryClient = useQueryClient();
   const [error, setError] = useState<string | null>(null);
   const [isSubmittingReview, setIsSubmittingReview] = useState(false);
@@ -24,12 +25,9 @@ export default function VendorProductsPage() {
   // review, or if the vendor chooses to finish later.
   const [justCreatedProductId, setJustCreatedProductId] = useState<string | null>(null);
 
-  const vendorsQuery = useQuery({
-    queryKey: ["my-vendors"],
-    queryFn: () => callWithAuth((token) => api.listMyVendors(token)),
-  });
-  const vendors = vendorsQuery.data ?? [];
-  const vendor = resolveActiveVendor(vendors, selectedVendorId);
+  // AF-17: owned and staffed shops; the services check each action.
+  const { activeShop: vendor } = useConsoleShops();
+  const canWrite = can(vendor, "products.write");
   const page = pagination.vendorId === vendor?.id ? pagination.page : 0;
   const pageSize = 20;
 
@@ -113,6 +111,10 @@ export default function VendorProductsPage() {
         ) : (
           <p className="text-sm text-muted-foreground">Đang tải…</p>
         )
+      ) : !canWrite ? (
+        <p className="text-sm text-muted-foreground">
+          Bạn chỉ có quyền xem sản phẩm của cửa hàng này.
+        </p>
       ) : (
         <ProductCreateForm
           vendorId={vendor.id}

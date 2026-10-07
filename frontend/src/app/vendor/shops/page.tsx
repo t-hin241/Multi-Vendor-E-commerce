@@ -15,6 +15,7 @@ import { VendorStatusBadge } from "@/components/vendor/status-badges";
 import { ShopPolicyProposals } from "@/components/vendor/shop-policy-proposals";
 import * as api from "@/lib/api-client";
 import { useAuth } from "@/lib/auth-context";
+import { queryKeys } from "@/lib/query-keys";
 
 // My Shops: a vendor user may own several shops (1:N) -- this page lists
 // every one the caller owns (any status), lets them switch which shop
@@ -36,6 +37,7 @@ export default function VendorShopsPage() {
 
   async function refresh() {
     await queryClient.invalidateQueries({ queryKey: ["my-vendors"] });
+    await queryClient.invalidateQueries({ queryKey: queryKeys.accessibleShops() });
   }
 
   function startEdit(v: api.Vendor) {

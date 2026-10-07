@@ -9,24 +9,37 @@ import { Button } from "@/components/ui/button";
 import { VendorStatusBadge } from "@/components/vendor/status-badges";
 import * as api from "@/lib/api-client";
 import { useAuth } from "@/lib/auth-context";
-import { resolveActiveVendor } from "@/lib/vendor";
+import { useConsoleShops } from "@/lib/hooks/use-console-shops";
+import { queryKeys } from "@/lib/query-keys";
+import { can, isOwner } from "@/lib/shop-access";
 
 export default function VendorDashboardPage() {
-  const { callWithAuth, selectedVendorId } = useAuth();
+  const { callWithAuth, user } = useAuth();
 
-  // Same query key as the shop switcher in the console shell -- React Query
-  // dedupes it into one fetch, no prop drilling needed between them.
-  const vendorsQuery = useQuery({
-    queryKey: ["my-vendors"],
-    queryFn: () => callWithAuth((token) => api.listMyVendors(token)),
+  // Same query as the shop switcher in the console shell (AF-17: owned and
+  // staffed shops) -- React Query dedupes it into one fetch.
+  const { query: shopsQuery, activeShop } = useConsoleShops();
+  const shopQuery = useQuery({
+    queryKey: queryKeys.memberShop(activeShop?.id ?? ""),
+    queryFn: () => callWithAuth((token) => api.getMemberShop(token, activeShop!.id)),
+    enabled: Boolean(activeShop),
   });
 
-  if (vendorsQuery.isPending) {
+  if (shopsQuery.isPending || (activeShop && shopQuery.isPending)) {
     return <p className="text-sm text-muted-foreground">Đang tải…</p>;
   }
+  if (shopQuery.isError) {
+    return <p className="text-sm text-destructive">Chưa tải được cửa hàng. Vui lòng thử lại.</p>;
+  }
 
-  const vendors = vendorsQuery.data ?? [];
-  if (vendors.length === 0) {
+  if (!activeShop || !shopQuery.data) {
+    if (user?.role !== "vendor") {
+      return (
+        <p className="text-sm text-muted-foreground">
+          Bạn chưa là nhân viên của cửa hàng nào. Mở liên kết trong email mời để tham gia.
+        </p>
+      );
+    }
     return (
       <div>
         <h1 className="text-xl font-semibold">Chào mừng</h1>
@@ -38,7 +51,8 @@ export default function VendorDashboardPage() {
     );
   }
 
-  const vendor = resolveActiveVendor(vendors, selectedVendorId)!;
+  const vendor = shopQuery.data;
+  const owner = isOwner(activeShop);
 
   if (vendor.status !== "approved" && vendor.status !== "suspended") {
     return (
@@ -55,9 +69,11 @@ export default function VendorDashboardPage() {
             Đơn đăng ký của bạn đang chờ admin xét duyệt.
           </p>
         )}
-        <Link href="/vendor/shops" className="mt-4 inline-block text-sm text-primary underline">
-          Quản lý cửa hàng
-        </Link>
+        {owner && (
+          <Link href="/vendor/shops" className="mt-4 inline-block text-sm text-primary underline">
+            Quản lý cửa hàng
+          </Link>
+        )}
       </div>
     );
   }
@@ -65,8 +81,15 @@ export default function VendorDashboardPage() {
   return (
     <div className="space-y-4">
       <h1 className="text-xl font-semibold">{vendor.shop_name}</h1>
-      <ShopReadiness vendor={vendor} />
-      <FinanceDashboard key={vendor.id} vendorId={vendor.id} />
+      {owner && <ShopReadiness vendor={vendor} />}
+      {can(activeShop, "analytics.read") ? (
+        <FinanceDashboard key={vendor.id} vendorId={vendor.id} />
+      ) : (
+        <p className="text-sm text-muted-foreground">
+          Bạn không có quyền xem tổng quan bán hàng của cửa hàng này. Dùng menu bên trái để mở các
+          mục được phân quyền.
+        </p>
+      )}
     </div>
   );
 }

@@ -81,6 +81,11 @@ var rateRules = []rateRule{
 		return m == http.MethodPost && strings.HasPrefix(p, "/api/orders/") && strings.Contains(p, "/support-cases") &&
 			!strings.HasPrefix(ct, "multipart/")
 	}},
+	// Shop staff invitations (AF-17): sending and accepting are rare,
+	// a burst is guessing or spam.
+	{"staff", 20, func(m, p, _ string) bool {
+		return m == http.MethodPost && strings.HasPrefix(p, "/api/vendor/") && strings.Contains(p, "/staff-invitations")
+	}},
 	{"upload", 60, func(m, _, ct string) bool { return m == http.MethodPost && strings.HasPrefix(ct, "multipart/") }},
 	{"default", 1200, func(string, string, string) bool { return true }},
 }

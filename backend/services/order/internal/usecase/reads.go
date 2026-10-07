@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"shopee/backend/pkg/apperror"
+	"shopee/backend/pkg/shopaccess"
 	"shopee/backend/services/order/internal/domain"
 	"shopee/backend/services/order/internal/repository"
 )
@@ -112,7 +113,7 @@ func (uc *OrderUseCase) ListVendorMine(ctx context.Context, userID, vendorID, st
 	if err := validOrderStatus(status); err != nil {
 		return nil, nil, err
 	}
-	vendorID, err := uc.Vendors.GetApprovedVendorID(ctx, userID, vendorID)
+	vendorID, err := uc.Vendors.GetApprovedVendorID(ctx, userID, vendorID, shopaccess.OrdersRead)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -133,7 +134,7 @@ func (uc *OrderUseCase) ListVendorMine(ctx context.Context, userID, vendorID, st
 
 // GetVendorSummary aggregates only confirmed sales and confirmed refunds.
 func (uc *OrderUseCase) GetVendorSummary(ctx context.Context, userID, vendorID string) (*domain.VendorSummary, []*domain.TopProduct, error) {
-	vendorID, err := uc.Vendors.GetApprovedVendorID(ctx, userID, vendorID)
+	vendorID, err := uc.Vendors.GetApprovedVendorID(ctx, userID, vendorID, shopaccess.AnalyticsRead)
 	if err != nil {
 		return nil, nil, err
 	}

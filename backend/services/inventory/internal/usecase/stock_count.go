@@ -5,6 +5,7 @@ import (
 	"errors"
 
 	"shopee/backend/pkg/apperror"
+	"shopee/backend/pkg/shopaccess"
 	"shopee/backend/services/inventory/internal/domain"
 	"shopee/backend/services/inventory/internal/repository"
 )
@@ -27,7 +28,7 @@ func (uc *InventoryUseCase) RecordStockCount(ctx context.Context, userID, itemID
 		return nil, false, inventoryError(err)
 	}
 	// Ownership comes from the stored item, never from the request.
-	if _, err := uc.vendors.GetApprovedVendorID(ctx, userID, item.VendorID); err != nil {
+	if _, err := uc.vendors.GetApprovedVendorID(ctx, userID, item.VendorID, shopaccess.InventoryAdjust); err != nil {
 		return nil, false, err
 	}
 

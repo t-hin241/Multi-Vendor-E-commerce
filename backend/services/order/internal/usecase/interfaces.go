@@ -177,7 +177,7 @@ type CatalogGateway interface {
 // VendorGateway checks shop selling permission and vendor ownership.
 type VendorGateway interface {
 	Approved(context.Context, []string) (map[string]int64, error)
-	GetApprovedVendorID(ctx context.Context, userID, vendorID string) (string, error)
+	GetApprovedVendorID(ctx context.Context, userID, vendorID, permission string) (string, error)
 }
 
 // InventoryGateway is the reserve/release/commit contract, plus putting

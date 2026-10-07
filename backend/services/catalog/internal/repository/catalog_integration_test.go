@@ -89,7 +89,7 @@ type vendorStub struct{ owner, shop string }
 func (v vendorStub) Approved(context.Context, []string) (map[string]int64, error) {
 	return map[string]int64{v.shop: 1}, nil
 }
-func (v vendorStub) GetApprovedVendorID(_ context.Context, user, shop string) (string, error) {
+func (v vendorStub) GetApprovedVendorID(_ context.Context, user, shop, _ string) (string, error) {
 	if user != v.owner || shop != v.shop {
 		return "", apperror.Forbidden("Not owner")
 	}

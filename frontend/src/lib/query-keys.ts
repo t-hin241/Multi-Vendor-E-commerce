@@ -29,4 +29,10 @@ export const queryKeys = {
   supportCases: (scope: string, filters: Record<string, string | boolean | undefined>) =>
     ["support-cases", scope, filters] as const,
   supportCase: (scope: string, caseId: string) => ["support-case", scope, caseId] as const,
+  // AF-17: shops the signed-in person may open, with capabilities.
+  accessibleShops: () => ["accessible-shops"] as const,
+  memberShop: (vendorId: string) => ["member-shop", vendorId] as const,
+  shopMembers: (vendorId: string) => ["shop-members", vendorId] as const,
+  staffInvitations: (vendorId: string) => ["staff-invitations", vendorId] as const,
+  staffPermissions: () => ["staff-permissions"] as const,
 } as const;

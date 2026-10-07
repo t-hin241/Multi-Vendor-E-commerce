@@ -54,8 +54,10 @@ func TestShipmentRoutesAreProtected(t *testing.T) {
 		if code := send("POST", path, `{}`, nil); code != http.StatusUnauthorized {
 			t.Errorf("anonymous %s: %d", path, code)
 		}
-		if code := send("POST", path, `{}`, token("buyer")); code != http.StatusForbidden {
-			t.Errorf("a buyer must not act on %s: %d", path, code)
+		// AF-17: a buyer account may be shop staff (the use case asks
+		// Vendor); an admin account never acts for a shop here.
+		if code := send("POST", path, `{}`, token("admin")); code != http.StatusForbidden {
+			t.Errorf("an admin must not act on %s as a shop: %d", path, code)
 		}
 	}
 	adminPaths := []struct{ method, path string }{

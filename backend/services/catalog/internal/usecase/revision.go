@@ -2,14 +2,16 @@ package usecase
 
 import (
 	"context"
-	"shopee/backend/pkg/apperror"
-	"shopee/backend/services/catalog/internal/domain"
 	"strconv"
+
+	"shopee/backend/pkg/apperror"
+	"shopee/backend/pkg/shopaccess"
+	"shopee/backend/services/catalog/internal/domain"
 )
 
 func (uc *ProductUseCase) UpdateContent(ctx context.Context, userID, productID, name, description string, price, version int64, attributes []AttributeValueInput) (result *domain.Product, err error) {
 	err = uc.transact(ctx, func(ctx context.Context) error {
-		p, err := uc.ownedByUser(ctx, userID, productID)
+		p, err := uc.ownedByUser(ctx, userID, productID, shopaccess.ProductsWrite)
 		if err != nil {
 			return err
 		}
@@ -49,7 +51,7 @@ func (uc *ProductUseCase) UpdateContent(ctx context.Context, userID, productID, 
 }
 
 func (uc *ProductUseCase) GetForOwner(ctx context.Context, userID, productID string) (*domain.Product, []*domain.ProductAttributeValue, domain.Packaging, error) {
-	p, err := uc.ownedByUser(ctx, userID, productID)
+	p, err := uc.ownedByUser(ctx, userID, productID, shopaccess.ProductsRead)
 	if err != nil {
 		return nil, nil, domain.Packaging{}, err
 	}

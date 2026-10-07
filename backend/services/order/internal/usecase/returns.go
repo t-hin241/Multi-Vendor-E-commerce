@@ -5,6 +5,7 @@ import (
 	"errors"
 
 	"shopee/backend/pkg/apperror"
+	"shopee/backend/pkg/shopaccess"
 	"shopee/backend/services/order/internal/domain"
 	"shopee/backend/services/order/internal/repository"
 )
@@ -306,7 +307,10 @@ func (uc *OrderUseCase) authorizeVendorForReturn(ctx context.Context, userID, re
 	if err != nil {
 		return "", appError(err)
 	}
-	if _, err := uc.Vendors.GetApprovedVendorID(ctx, userID, vendorID); err != nil {
+	if _, err := uc.Vendors.GetApprovedVendorID(ctx, userID, vendorID, shopaccess.ReturnsHandle); err != nil {
+		if shopaccess.IsUnavailable(err) {
+			return "", err
+		}
 		return "", apperror.Forbidden("You do not have access to this return")
 	}
 	return rr.OrderID, nil
@@ -333,7 +337,7 @@ func (uc *OrderUseCase) ListMyReturns(ctx context.Context, buyerID string, limit
 
 // ListVendorReturns lists returns of items the caller's shop sold.
 func (uc *OrderUseCase) ListVendorReturns(ctx context.Context, userID, vendorID, status string, limit, offset int) ([]*domain.ReturnRequest, error) {
-	vendorID, err := uc.Vendors.GetApprovedVendorID(ctx, userID, vendorID)
+	vendorID, err := uc.Vendors.GetApprovedVendorID(ctx, userID, vendorID, shopaccess.ReturnsHandle)
 	if err != nil {
 		return nil, err
 	}

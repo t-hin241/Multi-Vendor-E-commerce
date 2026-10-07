@@ -61,7 +61,9 @@ func NewRouter(
 		sharedGroup.GET("/:id/events", shipmentHandler.ListEvents)
 	}
 
-	vendorGroup := r.Group("/api/shipments", requireAuth, middleware.RequireRole("vendor"))
+	// AF-17: shop members on a buyer or vendor account act as the shop
+	// here; each use case checks the shop permission with Vendor.
+	vendorGroup := r.Group("/api/shipments", requireAuth, middleware.SellerConsole())
 	{
 		vendorGroup.POST("", shipmentHandler.Create)
 		vendorGroup.GET("/by-vendor-order/:vendorOrderID", shipmentHandler.GetByVendorOrderID)
@@ -76,7 +78,7 @@ func NewRouter(
 		vendorGroup.POST("/:id/simulate-carrier-decision", shipmentHandler.SimulateCarrierDecision)
 	}
 
-	vendorMethodGroup := r.Group("/api/shipments/vendor/methods", requireAuth, middleware.RequireRole("vendor"))
+	vendorMethodGroup := r.Group("/api/shipments/vendor/methods", requireAuth, middleware.SellerConsole())
 	{
 		vendorMethodGroup.POST("", vendorMethodHandler.Enable)
 		vendorMethodGroup.GET("", vendorMethodHandler.ListMine)

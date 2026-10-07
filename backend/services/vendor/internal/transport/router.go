@@ -23,6 +23,7 @@ func NewRouter(
 	adminHandler *AdminHandler,
 	internalHandler *InternalHandler,
 	policyHandler *PolicyHandler,
+	staffHandler *StaffHandler,
 	internal *serviceauth.Verifier,
 	checkers ...health.Checker,
 ) *gin.Engine {
@@ -48,7 +49,20 @@ func NewRouter(
 		// Mine lists all of them so the frontend can offer a shop switcher.
 		vendorGroup.POST("/applications", middleware.RequireRole("vendor"), vendorHandler.Apply)
 		vendorGroup.GET("/mine", middleware.RequireRole("vendor"), vendorHandler.Mine)
-		vendorGroup.GET("/:vendorId", middleware.RequireRole("vendor"), vendorHandler.Get)
+		// AF-17: any active member (an owner, or staff on a buyer or vendor
+		// account) opens the shop; the membership decides, not the role.
+		member := middleware.RequireRole("vendor", "buyer")
+		vendorGroup.GET("/accessible-shops", member, staffHandler.AccessibleShops)
+		vendorGroup.GET("/staff-permissions", member, staffHandler.Permissions)
+		vendorGroup.POST("/staff-invitations/accept", member, staffHandler.Accept)
+		vendorGroup.GET("/:vendorId", member, staffHandler.Shop)
+		vendorGroup.POST("/:vendorId/staff-invitations", member, staffHandler.Invite)
+		vendorGroup.GET("/:vendorId/staff-invitations", member, staffHandler.ListInvitations)
+		vendorGroup.DELETE("/:vendorId/staff-invitations/:id", member, staffHandler.RevokeInvitation)
+		vendorGroup.GET("/:vendorId/members", member, staffHandler.ListMembers)
+		vendorGroup.GET("/:vendorId/members/:userID", member, staffHandler.GetMember)
+		vendorGroup.PATCH("/:vendorId/members/:userID", member, staffHandler.UpdateMember)
+		vendorGroup.DELETE("/:vendorId/members/:userID", member, staffHandler.RemoveMember)
 		vendorGroup.PATCH("/:vendorId", middleware.RequireRole("vendor"), vendorHandler.UpdateProfile)
 		vendorGroup.POST("/:vendorId/resubmit", middleware.RequireRole("vendor"), vendorHandler.Resubmit)
 		vendorGroup.POST("/:vendorId/logo", middleware.RequireRole("vendor"), vendorHandler.UploadLogo)
@@ -99,6 +113,9 @@ func NewRouter(
 	{
 		internalGroup.GET("", internal.Allow("catalog"), internalHandler.ListByIDs)
 		internalGroup.GET("/sale-status", internal.Allow("catalog", "order"), internalHandler.SaleStatus)
+		// AF-17 authorize contract; owned-by stays owner-only for callers
+		// not migrated yet, so they can never grant staff access.
+		internalGroup.POST("/authorize", internal.Allow("catalog", "inventory", "order", "review", "shipment", "payment"), staffHandler.Authorize)
 		internalGroup.GET("/:vendorId/owned-by/:userID", internal.Allow("catalog", "inventory", "order", "review", "shipment", "payment"), internalHandler.GetOwnedStatus)
 	}
 

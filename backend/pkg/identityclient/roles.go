@@ -50,3 +50,43 @@ func (c Client) RequireRole(ctx context.Context, userID, role string) error {
 	}
 	return nil
 }
+
+// Account is what Identity confirms about a user for a service decision.
+type Account struct {
+	ID, Email, Role string
+	Active          bool
+}
+
+// Account reads one account. A missing account is Forbidden; an
+// unreachable or unreadable Identity is an internal error (fail closed).
+func (c Client) Account(ctx context.Context, userID string) (Account, error) {
+	if userID == "" {
+		return Account{}, apperror.Forbidden("Authentication required")
+	}
+	req, err := http.NewRequestWithContext(ctx, "GET", c.URL+"/internal/users/"+url.PathEscape(userID), nil)
+	if err != nil {
+		return Account{}, apperror.Internal(fmt.Errorf("identity account request invalid"))
+	}
+	serviceauth.SetRequestHeaders(req, c.Key)
+	resp, err := telemetry.NewHTTPClient(2 * time.Second).Do(req)
+	if err != nil {
+		return Account{}, apperror.Internal(fmt.Errorf("identity account lookup unavailable"))
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == 404 {
+		return Account{}, apperror.Forbidden("Active account needed")
+	}
+	if resp.StatusCode != 200 {
+		return Account{}, apperror.Internal(fmt.Errorf("identity account lookup failed"))
+	}
+	var body struct {
+		Data struct {
+			ID, Email, Role string
+			Active          bool `json:"is_active"`
+		}
+	}
+	if json.NewDecoder(io.LimitReader(resp.Body, 16*1024)).Decode(&body) != nil || body.Data.ID != userID {
+		return Account{}, apperror.Internal(fmt.Errorf("invalid identity response"))
+	}
+	return Account{ID: body.Data.ID, Email: body.Data.Email, Role: body.Data.Role, Active: body.Data.Active}, nil
+}

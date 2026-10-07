@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"shopee/backend/pkg/apperror"
+	"shopee/backend/pkg/shopaccess"
 	"shopee/backend/services/order/internal/domain"
 	"shopee/backend/services/order/internal/repository"
 )
@@ -113,7 +114,10 @@ func (uc *OrderUseCase) UpdateVendorOrderStatus(ctx context.Context, userID, ven
 	if err != nil {
 		return nil, notFoundOrInternal(err, repository.ErrVendorOrderNotFound, "Order not found")
 	}
-	if _, err := uc.Vendors.GetApprovedVendorID(ctx, userID, vo.VendorID); err != nil {
+	if _, err := uc.Vendors.GetApprovedVendorID(ctx, userID, vo.VendorID, shopaccess.OrdersFulfill); err != nil {
+		if shopaccess.IsUnavailable(err) {
+			return nil, err
+		}
 		return nil, apperror.Forbidden("You do not have access to this order")
 	}
 	err = uc.withOrder(ctx, vo.OrderID, func(ctx context.Context) error {

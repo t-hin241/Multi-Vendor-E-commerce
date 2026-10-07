@@ -128,17 +128,19 @@ func (h *ShipmentHandler) Advance(c *gin.Context) {
 	h.respond(c, shipment, err)
 }
 
-// ListMine serves both roles on the same route (Gin allows only one
+// ListMine serves both views on the same route (Gin allows only one
 // handler per method+path, so the vendor and buyer views can't live in
-// separate route groups at the identical "/mine" path) — it dispatches on
-// the caller's own role rather than trusting anything the client sent.
+// separate route groups at the identical "/mine" path). Naming a shop
+// (vendor_id) asks for the shop's shipments, which Vendor must allow for
+// the caller (AF-17: staff may hold a buyer account); without it a buyer
+// gets their own purchases.
 func (h *ShipmentHandler) ListMine(c *gin.Context) {
 	limit := parseIntDefault(c.Query("limit"), 20, 1, 100)
 	offset := parseIntDefault(c.Query("offset"), 0, 0, 1_000_000)
 
 	var shipments []*domain.Shipment
 	var err error
-	if middleware.GetRole(c) == "buyer" {
+	if middleware.GetRole(c) == "buyer" && c.Query("vendor_id") == "" {
 		shipments, err = h.shipments.ListForBuyer(c.Request.Context(), middleware.GetUserID(c), limit, offset)
 	} else {
 		shipments, err = h.shipments.ListMine(c.Request.Context(), middleware.GetUserID(c), c.Query("vendor_id"), limit, offset)

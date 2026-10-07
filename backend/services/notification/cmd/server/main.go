@@ -149,6 +149,8 @@ func main() {
 
 	resetUseCase := &usecase.PasswordResetUseCase{Source: adapter.ResetSource{URL: cfg.IdentityServiceURL, Key: cfg.ResetDeliveryKey}, Sender: smtpsender.ResetSender{Host: cfg.SMTPHost, Port: cfg.SMTPPort, Username: cfg.SMTPUsername, Password: cfg.SMTPPassword, From: cfg.SMTPFrom, AllowPlaintext: cfg.SMTPAllowPlaintext}}
 	transport.RegisterPasswordReset(router, cfg.ResetDeliveryKey, resetUseCase, log)
+	transport.RegisterStaffInvitation(router, cfg.InternalVerifier, smtpsender.InvitationSender{Host: cfg.SMTPHost, Port: cfg.SMTPPort,
+		Username: cfg.SMTPUsername, Password: cfg.SMTPPassword, From: cfg.SMTPFrom, AllowPlaintext: cfg.SMTPAllowPlaintext}, log)
 	srv := &http.Server{
 		Addr:              ":" + cfg.Base.Port,
 		Handler:           router,

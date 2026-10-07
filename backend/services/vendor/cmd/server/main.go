@@ -115,14 +115,22 @@ func main() {
 	}
 	go adapter.DispatchPolicies(workerCtx, policyRepo, sendPolicy, policyUseCase, log)
 	addressUseCase := usecase.NewVendorAddressUseCase(addressRepo, vendorRepo, ops)
+	// AF-17: shop staff. Authorization reads memberships on every call;
+	// invitation emails go out from this worker.
+	staffUseCase := &usecase.StaffUseCase{Staff: repository.StaffRepository{Pool: dbPool}, Vendors: vendorRepo,
+		Accounts: identityclient.Client{URL: cfg.Internal.IdentityURL, Key: cfg.Internal.Key}, Tx: ops.Tx,
+		Mailer: adapter.NewStaffInvitationMailer(cfg.NotificationServiceURL, cfg.Internal.Key), Enabled: cfg.ShopStaff,
+		InvitesPaused: cfg.StaffInvitesPaused, FingerprintKey: cfg.StaffFingerprintKey, AcceptURL: cfg.StaffAcceptURL, Log: log}
+	go staffUseCase.RunInvitationDelivery(workerCtx)
 
 	vendorHandler := transport.NewVendorHandler(vendorUseCase, log)
 	addressHandler := transport.NewVendorAddressHandler(addressUseCase, log)
 	adminHandler := transport.NewAdminHandler(vendorUseCase, log)
 	internalHandler := transport.NewInternalHandler(vendorUseCase, log)
 	policyHandler := transport.NewPolicyHandler(policyUseCase, vendorUseCase, log)
+	staffHandler := transport.NewStaffHandler(staffUseCase, log)
 
-	router := transport.NewRouter(cfg.Base.Env, log, jwtManager, vendorHandler, addressHandler, adminHandler, internalHandler, policyHandler, cfg.Internal.Verifier,
+	router := transport.NewRouter(cfg.Base.Env, log, jwtManager, vendorHandler, addressHandler, adminHandler, internalHandler, policyHandler, staffHandler, cfg.Internal.Verifier,
 		health.Checker{Name: "postgres", Ping: func(ctx context.Context) error { return dbPool.Ping(ctx) }},
 		health.Checker{Name: "object_storage", Ping: objectStore.Ping},
 	)
@@ -134,8 +142,9 @@ func main() {
 	payoutUC := &usecase.PayoutUseCase{Accounts: repository.PayoutRepository{Pool: dbPool}, Vendors: vendorRepo, Audit: auditLogRepo, Ops: ops, Cipher: cipher}
 	(transport.PayoutHandler{UseCase: payoutUC, Log: log}).Register(router, middleware.RequireAuth(jwtManager), cfg.PayoutServiceKey, cfg.Internal.Verifier)
 
-	dashboard := usecase.Dashboard{Vendors: vendorUseCase, Orders: adapter.ReportClient{URL: cfg.OrderURL, Key: cfg.Internal.Key}, Payments: adapter.ReportClient{URL: cfg.PaymentURL, Key: cfg.Internal.Key}}
-	router.GET("/api/vendor/:vendorId/dashboard", middleware.RequireAuth(jwtManager), middleware.RequireRole("vendor"), transport.DashboardHandler(dashboard, log))
+	dashboard := usecase.Dashboard{Vendors: vendorUseCase, Orders: adapter.ReportClient{URL: cfg.OrderURL, Key: cfg.Internal.Key}, Payments: adapter.ReportClient{URL: cfg.PaymentURL, Key: cfg.Internal.Key},
+		Access: staffUseCase}
+	router.GET("/api/vendor/:vendorId/dashboard", middleware.RequireAuth(jwtManager), middleware.RequireRole("vendor", "buyer"), transport.DashboardHandler(dashboard, log))
 
 	adminaudit.Register(router.Group("/api/vendor/admin", middleware.RequireAuth(jwtManager), middleware.RequireRole("admin")), "/audit-events",
 		adminaudit.Source{Name: "vendor", SQL: repository.AuditSearchSQL, DB: dbPool, Roles: identityclient.Client{URL: cfg.Internal.IdentityURL, Key: cfg.Internal.Key}}, log)

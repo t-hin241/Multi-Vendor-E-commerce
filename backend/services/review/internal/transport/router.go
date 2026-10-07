@@ -57,7 +57,9 @@ func NewRouter(env string, log zerolog.Logger, jwt *authjwt.Manager, h *Handler,
 	buyer.POST("", rateLimit(limiter, log, "create", 20, time.Hour), h.Create)
 	buyer.POST("/:id/images", rateLimit(limiter, log, "image", 40, time.Hour), h.UploadImage)
 	buyer.GET("/mine", h.ListMine)
-	vendor := r.Group("/api/reviews/vendor", auth, middleware.RequireRole("vendor"))
+	// AF-17: shop members on a buyer or vendor account; the use case
+	// checks the shop permission with Vendor.
+	vendor := r.Group("/api/reviews/vendor", auth, middleware.SellerConsole())
 	vendor.GET("", h.ListVendor)
 	vendor.GET("/summary", h.VendorSummary)
 	vendor.PUT("/:id/reply", rateLimit(limiter, log, "reply", 60, time.Hour), h.Reply)

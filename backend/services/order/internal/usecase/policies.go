@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"shopee/backend/pkg/apperror"
+	"shopee/backend/pkg/shopaccess"
 	"shopee/backend/services/order/internal/domain"
 	"shopee/backend/services/order/internal/repository"
 )
@@ -150,7 +151,11 @@ func (uc *OrderUseCase) PolicySnapshot(ctx context.Context, actorID, role, order
 		}
 		own := map[string]*domain.VendorPolicySnapshot{}
 		for _, vo := range vos {
-			if _, err := uc.Vendors.GetApprovedVendorID(ctx, actorID, vo.VendorID); err == nil {
+			_, err := uc.Vendors.GetApprovedVendorID(ctx, actorID, vo.VendorID, shopaccess.OrdersRead)
+			if shopaccess.IsUnavailable(err) {
+				return nil, err
+			}
+			if err == nil {
 				own[vo.ID] = vendors[vo.ID]
 			}
 		}

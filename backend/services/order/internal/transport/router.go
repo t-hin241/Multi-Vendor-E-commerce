@@ -76,7 +76,9 @@ func NewRouter(
 		buyerGroup.PATCH("/addresses/:id/default", addressHandler.SetDefault)
 	}
 
-	vendorGroup := r.Group("/api/orders/vendor", requireAuth, middleware.RequireRole("vendor"))
+	// AF-17: shop members on a buyer or vendor account act as the shop
+	// here; each use case checks the shop permission with Vendor.
+	vendorGroup := r.Group("/api/orders/vendor", requireAuth, middleware.SellerConsole())
 	{
 		vendorGroup.GET("/return-requests", returnHandler.VendorList)
 		vendorGroup.POST("/return-requests/:id/confirm", returnHandler.ConfirmByVendor)

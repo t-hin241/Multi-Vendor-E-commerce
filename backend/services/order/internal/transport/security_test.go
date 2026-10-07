@@ -76,8 +76,10 @@ func TestRolesAndInputValidation(t *testing.T) {
 	if code := do(r, "POST", "/api/orders/admin/"+someID+"/refunds", `{}`, as(t, jwt, "buyer")); code != http.StatusForbidden {
 		t.Fatalf("a buyer must not request admin refunds: %d", code)
 	}
-	if code := do(r, "POST", "/api/orders/vendor/return-requests/"+someID+"/receive", `{}`, as(t, jwt, "buyer")); code != http.StatusForbidden {
-		t.Fatalf("a buyer must not receive returns: %d", code)
+	// AF-17: a buyer account may be shop staff, so on seller routes the
+	// shop permission (use case + Vendor) decides; an admin never acts here.
+	if code := do(r, "POST", "/api/orders/vendor/return-requests/"+someID+"/receive", `{}`, as(t, jwt, "admin")); code != http.StatusForbidden {
+		t.Fatalf("an admin must not receive returns as a shop: %d", code)
 	}
 	key := map[string]string{serviceauth.Header: "fake-test-service-key-not-a-real-secret"}
 	cases := []struct {
@@ -110,7 +112,7 @@ func TestSupportCaseRoutesCheckRolesAndInput(t *testing.T) {
 		{"POST", "/api/orders/" + someID + "/support-cases", "vendor"},
 		{"POST", "/api/orders/" + someID + "/support-cases", "admin"},
 		{"POST", "/api/orders/support-cases/" + someID + "/reopen", "vendor"},
-		{"POST", "/api/orders/vendor/support-cases/" + someID + "/messages", "buyer"},
+		{"POST", "/api/orders/vendor/support-cases/" + someID + "/messages", "admin"},
 		{"GET", "/api/orders/admin/support-cases", "buyer"},
 		{"GET", "/api/orders/admin/support-cases", "vendor"},
 		{"POST", "/api/orders/admin/support-cases/" + someID + "/assignments", "vendor"},

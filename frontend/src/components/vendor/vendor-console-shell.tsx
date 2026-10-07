@@ -1,6 +1,5 @@
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
 import { Menu, Plus } from "lucide-react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
@@ -16,16 +15,30 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
-import * as api from "@/lib/api-client";
+import { Badge } from "@/components/ui/badge";
 import { useAuth } from "@/lib/auth-context";
-import { resolveActiveVendor } from "@/lib/vendor";
+import { useConsoleShops, type ConsoleShop } from "@/lib/hooks/use-console-shops";
+import { can, canOpen } from "@/lib/shop-access";
 import { VENDOR_NAV_LINKS } from "@/lib/vendor-nav";
 import { cn } from "@/lib/utils";
 
-function NavList({ pathname, onNavigate }: { pathname: string; onNavigate?: () => void }) {
+function NavList({
+  pathname,
+  shop,
+  accountRole,
+  onNavigate,
+}: {
+  pathname: string;
+  shop: ConsoleShop | undefined;
+  accountRole: string | undefined;
+  onNavigate?: () => void;
+}) {
+  // AF-17: only the pages this person may use in the active shop. The
+  // services still check every request.
+  const links = VENDOR_NAV_LINKS.filter((link) => canOpen(link.href, shop, accountRole));
   return (
     <nav className="flex flex-col gap-1">
-      {VENDOR_NAV_LINKS.map((link) => {
+      {links.map((link) => {
         const isActive = pathname === link.href;
         return (
           <Button
@@ -50,24 +63,20 @@ function NavList({ pathname, onNavigate }: { pathname: string; onNavigate?: () =
 }
 
 export function VendorConsoleShell({ children }: { children: React.ReactNode }) {
-  const { user, isReady, callWithAuth, selectedVendorId, setSelectedVendorId } = useAuth();
+  const { user, isReady, selectedVendorId, setSelectedVendorId } = useAuth();
   const router = useRouter();
   const pathname = usePathname();
+  // AF-17: a shop's staff may hold a buyer account; which shops they may
+  // open comes from their memberships, not from the account role.
+  const consoleRole = user?.role === "vendor" || user?.role === "buyer";
 
   useEffect(() => {
-    if (isReady && (!user || user.role !== "vendor")) {
+    if (isReady && (!user || !consoleRole)) {
       router.replace("/login");
     }
-  }, [isReady, user, router]);
+  }, [isReady, user, consoleRole, router]);
 
-  const vendorsQuery = useQuery({
-    queryKey: ["my-vendors"],
-    queryFn: () => callWithAuth((token) => api.listMyVendors(token)),
-    enabled: Boolean(user && user.role === "vendor"),
-  });
-
-  const vendors = vendorsQuery.data ?? [];
-  const activeVendor = resolveActiveVendor(vendors, selectedVendorId);
+  const { query: shopsQuery, shops: vendors, activeShop: activeVendor } = useConsoleShops();
 
   // Persist the resolved fallback shop once vendors load, not just derive it
   // for display -- some vendor pages (orders, shipping) key their own
@@ -82,12 +91,12 @@ export function VendorConsoleShell({ children }: { children: React.ReactNode }) 
     }
   }, [selectedVendorId, activeVendor, setSelectedVendorId]);
 
-  if (!user || user.role !== "vendor") return null;
+  if (!user || !consoleRole) return null;
 
   return (
     <div className="mx-auto flex max-w-6xl flex-col gap-6 px-4 py-6 sm:px-6 md:flex-row md:items-start">
       <aside className="hidden shrink-0 md:sticky md:top-20 md:block md:w-56">
-        <NavList pathname={pathname} />
+        <NavList pathname={pathname} shop={activeVendor} accountRole={user.role} />
       </aside>
 
       <div className="min-w-0 flex-1">
@@ -108,17 +117,27 @@ export function VendorConsoleShell({ children }: { children: React.ReactNode }) 
                 <SheetTitle>Kênh người bán</SheetTitle>
               </SheetHeader>
               <div className="px-4">
-                <NavList pathname={pathname} />
+                <NavList pathname={pathname} shop={activeVendor} accountRole={user.role} />
               </div>
             </SheetContent>
           </Sheet>
 
-          {vendors.length === 0 ? (
+          {shopsQuery.isError ? (
+            <p className="text-sm text-destructive">
+              Chưa tải được danh sách cửa hàng. Vui lòng tải lại trang.
+            </p>
+          ) : vendors.length === 0 && shopsQuery.isPending ? (
+            <p className="text-sm text-muted-foreground">Đang tải…</p>
+          ) : vendors.length === 0 && user.role === "vendor" ? (
             <p className="text-sm text-muted-foreground">
               Bạn chưa có cửa hàng nào.{" "}
               <Link href="/vendor/shops" className="text-primary underline">
                 Đăng ký bán hàng
               </Link>
+            </p>
+          ) : vendors.length === 0 ? (
+            <p className="text-sm text-muted-foreground">
+              Bạn chưa là nhân viên của cửa hàng nào. Mở liên kết trong email mời để tham gia.
             </p>
           ) : (
             <>
@@ -139,8 +158,9 @@ export function VendorConsoleShell({ children }: { children: React.ReactNode }) 
                 <span className="text-sm font-medium">{activeVendor?.shop_name}</span>
               )}
               {activeVendor && <VendorStatusBadge status={activeVendor.status} />}
+              {activeVendor?.role === "staff" && <Badge variant="outline">Nhân viên</Badge>}
 
-              {activeVendor?.status === "approved" && (
+              {activeVendor?.status === "approved" && can(activeVendor, "products.write") && (
                 <Button size="sm" className="ml-auto" asChild>
                   <Link href="/vendor/products">
                     <Plus className="size-4" />

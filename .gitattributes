@@ -7,3 +7,10 @@
 backend/services/*/sqlc.yaml text eol=lf
 backend/services/*/internal/repository/queries/*.sql text eol=lf
 backend/services/*/internal/repository/*db/*.go text eol=lf
+# NATS config is mounted into a Linux container and parsed by
+# pkg/eventbus/natsconf_test.go, which expects LF.
+deploy/nats/nats.conf text eol=lf
+
+*.go   text eol=lf
+go.mod text eol=lf
+go.sum text eol=lf

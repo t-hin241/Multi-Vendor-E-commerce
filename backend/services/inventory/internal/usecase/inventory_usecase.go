@@ -8,6 +8,7 @@ import (
 	"errors"
 
 	"shopee/backend/pkg/apperror"
+	"shopee/backend/pkg/shopaccess"
 	"shopee/backend/services/inventory/internal/domain"
 	"shopee/backend/services/inventory/internal/repository"
 )
@@ -111,7 +112,7 @@ func (uc *InventoryUseCase) RequestRestock(ctx context.Context, userID string, p
 // requests — otherwise requesting a stock increase gives no visible
 // feedback once it leaves available_quantity untouched.
 func (uc *InventoryUseCase) ListMyRestockRequests(ctx context.Context, userID, vendorID string, limit, offset int) ([]*domain.RestockRequest, error) {
-	vendorID, err := uc.vendors.GetApprovedVendorID(ctx, userID, vendorID)
+	vendorID, err := uc.vendors.GetApprovedVendorID(ctx, userID, vendorID, shopaccess.InventoryRead)
 	if err != nil {
 		return nil, err
 	}
@@ -274,7 +275,7 @@ func (uc *InventoryUseCase) GetStockForVariants(ctx context.Context, variantIDs 
 }
 
 func (uc *InventoryUseCase) ListMine(ctx context.Context, userID, vendorID string, limit, offset int) ([]*domain.InventoryItem, error) {
-	vendorID, err := uc.vendors.GetApprovedVendorID(ctx, userID, vendorID)
+	vendorID, err := uc.vendors.GetApprovedVendorID(ctx, userID, vendorID, shopaccess.InventoryRead)
 	if err != nil {
 		return nil, err
 	}
@@ -363,7 +364,7 @@ func (uc *InventoryUseCase) RestockReturn(ctx context.Context, returnID, product
 // verifyItemOwnership resolves who owns the target of a stock operation —
 // the product/variant itself already names a fixed vendor id, so there's
 // nothing for the client to disambiguate here — and confirms that vendor is
-// both userID's own and approved. Exactly one of productID/variantID must
+// approved and userID may adjust its stock (inventory.adjust). Exactly one of productID/variantID must
 // be set. For a variant-scoped call, the owning vendor and the resolved
 // product id both come from GetVariantOwner — a client-supplied productID
 // is never consulted in that case, closing off a vendor passing a product
@@ -377,7 +378,7 @@ func (uc *InventoryUseCase) verifyItemOwnership(ctx context.Context, userID stri
 		if err != nil {
 			return "", "", err
 		}
-		if _, err := uc.vendors.GetApprovedVendorID(ctx, userID, ownerVendorID); err != nil {
+		if _, err := uc.vendors.GetApprovedVendorID(ctx, userID, ownerVendorID, shopaccess.InventoryAdjust); err != nil {
 			return "", "", err
 		}
 		return ownerVendorID, ownerProductID, nil
@@ -390,7 +391,7 @@ func (uc *InventoryUseCase) verifyItemOwnership(ctx context.Context, userID stri
 	if err != nil {
 		return "", "", err
 	}
-	if _, err := uc.vendors.GetApprovedVendorID(ctx, userID, ownerVendorID); err != nil {
+	if _, err := uc.vendors.GetApprovedVendorID(ctx, userID, ownerVendorID, shopaccess.InventoryAdjust); err != nil {
 		return "", "", err
 	}
 	return ownerVendorID, *productID, nil

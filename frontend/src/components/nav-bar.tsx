@@ -1,6 +1,6 @@
 "use client";
 
-import { Menu, LogOut, ShoppingCart, Package, MapPin, Shield, Search } from "lucide-react";
+import { Menu, LogOut, ShoppingCart, Package, MapPin, Shield, Search, Store } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
@@ -22,17 +22,24 @@ import { Separator } from "@/components/ui/separator";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { useAuth } from "@/lib/auth-context";
 import { useCart } from "@/lib/hooks/use-cart";
+import { useConsoleShops } from "@/lib/hooks/use-console-shops";
 import { VENDOR_NAV_LINKS, type VendorNavLink } from "@/lib/vendor-nav";
 
 type NavLink = VendorNavLink;
 
-function linksForRole(role: "buyer" | "vendor" | "admin" | undefined): NavLink[] {
+function linksForRole(
+  role: "buyer" | "vendor" | "admin" | undefined,
+  shopStaff = false,
+): NavLink[] {
   if (role === "buyer") {
-    return [
+    const links: NavLink[] = [
       { href: "/cart", label: "Giỏ hàng", icon: ShoppingCart },
       { href: "/orders", label: "Đơn hàng của tôi", icon: Package },
       { href: "/addresses", label: "Địa chỉ", icon: MapPin },
     ];
+    // AF-17: a buyer who is staff of a shop opens its seller console.
+    if (shopStaff) links.push({ href: "/vendor", label: "Kênh người bán", icon: Store });
+    return links;
   }
   if (role === "vendor") {
     return VENDOR_NAV_LINKS;
@@ -73,7 +80,8 @@ export function NavBar() {
     router.push(trimmed ? `/?q=${encodeURIComponent(trimmed)}` : "/");
   }
 
-  const roleLinks = linksForRole(user?.role);
+  const { shops } = useConsoleShops();
+  const roleLinks = linksForRole(user?.role, shops.length > 0);
   const cartCount = cartQuery.data?.item_count ?? 0;
 
   return (

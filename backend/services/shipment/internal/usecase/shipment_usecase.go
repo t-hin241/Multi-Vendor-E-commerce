@@ -13,6 +13,7 @@ import (
 	"github.com/rs/zerolog"
 
 	"shopee/backend/pkg/apperror"
+	"shopee/backend/pkg/shopaccess"
 	"shopee/backend/services/shipment/internal/carrier"
 	"shopee/backend/services/shipment/internal/domain"
 	"shopee/backend/services/shipment/internal/repository"
@@ -192,8 +193,11 @@ func (uc *ShipmentUseCase) CreateOrGet(ctx context.Context, userID, vendorOrderI
 	if err != nil {
 		return nil, err
 	}
-	vendorID, err := uc.Vendors.GetApprovedVendorID(ctx, userID, vo.VendorID)
+	vendorID, err := uc.Vendors.GetApprovedVendorID(ctx, userID, vo.VendorID, shopaccess.OrdersFulfill)
 	if err != nil {
+		if shopaccess.IsUnavailable(err) {
+			return nil, err
+		}
 		return nil, apperror.Forbidden("You do not have access to this order")
 	}
 	if notShippableStatuses[vo.Status] || !vo.Fulfillable {
@@ -211,7 +215,10 @@ func (uc *ShipmentUseCase) CreateOrGet(ctx context.Context, userID, vendorOrderI
 func (uc *ShipmentUseCase) authorize(ctx context.Context, actor Actor, s *domain.Shipment) error {
 	switch actor.Role {
 	case domain.ActorVendor:
-		if _, err := uc.Vendors.GetApprovedVendorID(ctx, actor.ID, s.VendorID); err != nil {
+		if _, err := uc.Vendors.GetApprovedVendorID(ctx, actor.ID, s.VendorID, shopaccess.OrdersFulfill); err != nil {
+			if shopaccess.IsUnavailable(err) {
+				return err
+			}
 			return apperror.Forbidden("You do not have access to this shipment")
 		}
 		return nil
@@ -654,7 +661,7 @@ func derefString(s *string) string {
 // ListMine lists a vendor's shipments; final ones without the buyer's
 // contact details.
 func (uc *ShipmentUseCase) ListMine(ctx context.Context, userID, vendorID string, limit, offset int) ([]*domain.Shipment, error) {
-	vendorID, err := uc.Vendors.GetApprovedVendorID(ctx, userID, vendorID)
+	vendorID, err := uc.Vendors.GetApprovedVendorID(ctx, userID, vendorID, shopaccess.OrdersRead)
 	if err != nil {
 		return nil, err
 	}
@@ -686,7 +693,10 @@ func (uc *ShipmentUseCase) GetByVendorOrderID(ctx context.Context, userID, vendo
 	if err != nil {
 		return nil, apperror.Internal(err)
 	}
-	if _, err := uc.Vendors.GetApprovedVendorID(ctx, userID, shipment.VendorID); err != nil {
+	if _, err := uc.Vendors.GetApprovedVendorID(ctx, userID, shipment.VendorID, shopaccess.OrdersRead); err != nil {
+		if shopaccess.IsUnavailable(err) {
+			return nil, err
+		}
 		return nil, apperror.Forbidden("You do not have access to this shipment")
 	}
 	return shipment.ForVendor(), nil
@@ -699,7 +709,10 @@ func (uc *ShipmentUseCase) ListEventsForShipment(ctx context.Context, userID, sh
 		return nil, err
 	}
 	if shipment.BuyerID != userID {
-		if _, err := uc.Vendors.GetApprovedVendorID(ctx, userID, shipment.VendorID); err != nil {
+		if _, err := uc.Vendors.GetApprovedVendorID(ctx, userID, shipment.VendorID, shopaccess.OrdersRead); err != nil {
+			if shopaccess.IsUnavailable(err) {
+				return nil, err
+			}
 			return nil, apperror.Forbidden("You do not have access to this shipment")
 		}
 	}

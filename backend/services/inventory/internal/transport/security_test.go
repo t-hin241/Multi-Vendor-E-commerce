@@ -53,10 +53,11 @@ func TestStockCountRequiresVendorAndValidInput(t *testing.T) {
 	if code := serve(item, body, ""); code != 401 {
 		t.Fatalf("anonymous stock count: %d", code)
 	}
-	for _, role := range []string{"buyer", "admin"} {
-		if code := serve(item, body, role); code != 403 {
-			t.Fatalf("%s must not record vendor stock counts: %d", role, code)
-		}
+	// AF-17: a buyer account may be shop staff, so only the shop
+	// permission (checked by the use case with Vendor) decides for it; an
+	// admin account never acts for a shop here.
+	if code := serve(item, body, "admin"); code != 403 {
+		t.Fatalf("admin must not record vendor stock counts: %d", code)
 	}
 	for _, tc := range []struct{ path, body string }{
 		{"/api/inventory/items/not-a-uuid/stock-counts", body},
@@ -65,8 +66,10 @@ func TestStockCountRequiresVendorAndValidInput(t *testing.T) {
 		{item, `{"count_id":"00000000-0000-0000-0000-000000000002","reason":"damaged"}`},
 		{item, `{"count_id":"00000000-0000-0000-0000-000000000002","counted_on_hand":1}`},
 	} {
-		if code := serve(tc.path, tc.body, "vendor"); code != 400 {
-			t.Errorf("%s %s: expected 400, got %d", tc.path, tc.body, code)
+		for _, role := range []string{"vendor", "buyer"} {
+			if code := serve(tc.path, tc.body, role); code != 400 {
+				t.Errorf("%s %s %s: expected 400, got %d", role, tc.path, tc.body, code)
+			}
 		}
 	}
 }
