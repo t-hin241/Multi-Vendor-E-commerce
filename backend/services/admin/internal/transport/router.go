@@ -48,6 +48,14 @@ func NewRouter(env string, log zerolog.Logger, jwt *authjwt.Manager, svc usecase
 	})
 	admin.GET("/dashboard", h.dashboard)
 	admin.GET("/audit", h.audit)
+	admin.GET("/work-items", func(c *gin.Context) {
+		out, err := h.svc.WorkItems(c.Request.Context(), middleware.GetUserID(c), c.GetHeader("Authorization"), c.Request.URL.Query())
+		if err != nil {
+			httpresponse.HandleError(c, h.log, err)
+			return
+		}
+		httpresponse.OK(c, http.StatusOK, out)
+	})
 	return r
 }
 

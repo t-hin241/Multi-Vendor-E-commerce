@@ -18,13 +18,25 @@ export type CheckoutAttempt = { fingerprint: string; key: string };
 // gets the same order back), while any change starts a new attempt.
 export function checkoutAttempt(
   previous: CheckoutAttempt | null,
-  input: { addressId: string; cartVersion?: number; expectedTotalAmount?: number },
+  input: {
+    addressId: string;
+    cartVersion?: number;
+    expectedTotalAmount?: number;
+    acceptedPolicyVersions?: Record<string, number>;
+  },
   newKey: () => string = newIdempotencyKey,
 ): CheckoutAttempt {
+  const policies = Object.entries(input.acceptedPolicyVersions ?? {})
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([kind, version]) => `${kind}=${version}`)
+    .join(",");
+  // Without policies the fingerprint keeps its earlier shape, so an
+  // attempt stored before policies existed is still recognized.
   const fingerprint = [
     input.addressId,
     input.cartVersion ?? "",
     input.expectedTotalAmount ?? "",
+    ...(policies ? [policies] : []),
   ].join("|");
   if (previous && previous.fingerprint === fingerprint) return previous;
   return { fingerprint, key: newKey() };
@@ -40,7 +52,12 @@ export function newIdempotencyKey(): string {
 }
 
 export type CheckoutErrorKind =
-  "cart_changed" | "total_changed" | "shipping_unavailable" | "in_progress" | "other";
+  | "cart_changed"
+  | "total_changed"
+  | "shipping_unavailable"
+  | "in_progress"
+  | "policy_changed"
+  | "other";
 
 export function checkoutErrorKind(err: unknown): CheckoutErrorKind {
   if (!(err instanceof ApiError)) return "other";
@@ -53,6 +70,8 @@ export function checkoutErrorKind(err: unknown): CheckoutErrorKind {
       return "shipping_unavailable";
     case "checkout_in_progress":
       return "in_progress";
+    case "policy_changed":
+      return "policy_changed";
     default:
       return "other";
   }

@@ -31,6 +31,9 @@ type Deps struct {
 	Effects         EffectRepositoryPort
 	Refunds         RefundRepositoryPort
 	Returns         ReturnRepositoryPort
+	Support         SupportCaseRepositoryPort
+	// Policies is the read model of published policies (AF-02).
+	Policies PolicyVersionPort
 
 	Cart          CartGateway
 	Catalog       CatalogGateway
@@ -48,9 +51,17 @@ type Deps struct {
 	// keeps the direct calls (EVENT_PUBLISHING=http, rollback only).
 	Events EventPublisher
 
-	ReturnPolicy domain.ReturnPolicy
-	Log          zerolog.Logger
-	Now          func() time.Time
+	// Attachments is the private evidence store; nil turns attachments off.
+	Attachments AttachmentStore
+
+	ReturnPolicy  domain.ReturnPolicy
+	SupportPolicy domain.SupportPolicy
+	SupportConfig SupportConfig
+	// VersionedPolicies is FEATURE_VERSIONED_POLICIES_ENABLED: new orders
+	// snapshot the policies in force; off keeps the legacy rules.
+	VersionedPolicies bool
+	Log               zerolog.Logger
+	Now               func() time.Time
 }
 
 type OrderUseCase struct {
@@ -64,6 +75,12 @@ func NewOrderUseCase(d Deps) *OrderUseCase {
 	if d.ReturnPolicy.WindowDays <= 0 {
 		d.ReturnPolicy = domain.ReturnPolicy{Version: "window-7d", WindowDays: 7}
 	}
+	if d.SupportPolicy.Version == "" {
+		d.SupportPolicy = domain.DefaultSupportPolicy()
+	}
+	if d.SupportConfig.AttachmentRetention <= 0 {
+		d.SupportConfig.AttachmentRetention = 180 * 24 * time.Hour
+	}
 	return &OrderUseCase{Deps: d}
 }
 
@@ -75,6 +92,9 @@ const (
 	notifyOrderCompleted = "order_completed"
 	notifyOrderCancelled = "order_cancelled"
 	notifyOrderRefunded  = "order_refunded"
+
+	notifySupportCaseOpened   = "support_case_opened"
+	notifySupportCaseResolved = "support_case_resolved"
 )
 
 // variantLabel joins a variant's option labels into one display string,

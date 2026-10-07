@@ -64,6 +64,13 @@ var tiles = []tileDef{
 	{"return_refunds_failed", "Money", "Return refunds that failed", "Retry the refund with a reason.", "/admin/returns",
 		[]counterRef{{"order", "return_refunds_failed"}}, false},
 
+	{"support_cases_unassigned", "Support", "Support cases nobody has picked up", "Assign the case to an admin.", "/admin/support",
+		[]counterRef{{"order", "support_cases_unassigned"}}, false},
+	{"support_cases_overdue", "Support", "Support cases past their deadline", "Answer the buyer or chase the shop.", "/admin/support",
+		[]counterRef{{"order", "support_cases_overdue"}}, false},
+	{"support_cases_waiting_money", "Support", "Support cases waiting for a refund or return", "Follow the linked refund or return.", "/admin/support",
+		[]counterRef{{"order", "support_cases_resolution_pending"}}, true},
+
 	{"holds_expired", "Stock", "Expired stock holds not released", "Expiry runs every minute; a growing number needs a look.", "/admin/requests",
 		[]counterRef{{"inventory", "overdue"}, {"inventory", "expiry_parked"}}, false},
 	{"stock_mismatches", "Stock", "Stock holds that disagree with Order", "Repair from the inventory operations list.", "/admin/requests",

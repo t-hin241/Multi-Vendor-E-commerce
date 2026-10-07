@@ -2,6 +2,7 @@ package transport
 
 import (
 	"encoding/json"
+	"sort"
 	"time"
 
 	"shopee/backend/services/order/internal/domain"
@@ -192,6 +193,8 @@ type checkoutRequest struct {
 	AddressID           string `json:"address_id" binding:"required,uuid"`
 	CartVersion         *int64 `json:"cart_version" binding:"omitempty,min=1"`
 	ExpectedTotalAmount *int64 `json:"expected_total_amount" binding:"omitempty,min=1"`
+	// AcceptedPolicyVersions: kind → version the buyer was shown (AF-02).
+	AcceptedPolicyVersions map[string]int64 `json:"accepted_policy_versions" binding:"omitempty,max=10"`
 }
 
 type previewRequest struct {
@@ -214,6 +217,10 @@ type previewResponse struct {
 	TotalAmount    *int64                  `json:"total_amount"`
 	Ready          bool                    `json:"ready"`
 	Vendors        []previewVendorResponse `json:"vendors"`
+	// PolicyVersions (kind → version) and Policies are what a checkout now
+	// is placed under; send policy_versions back as accepted_policy_versions.
+	PolicyVersions map[string]int64        `json:"policy_versions,omitempty"`
+	Policies       *policySnapshotResponse `json:"policies,omitempty"`
 }
 
 func toPreviewResponse(p *usecase.CheckoutPreview) previewResponse {
@@ -222,6 +229,10 @@ func toPreviewResponse(p *usecase.CheckoutPreview) previewResponse {
 	for _, v := range p.Vendors {
 		resp.Vendors = append(resp.Vendors, previewVendorResponse{VendorID: v.VendorID, SubtotalAmount: v.SubtotalAmount,
 			ShippingFeeAmount: v.ShippingFeeAmount, ShippingError: v.ShippingError, ItemCount: v.ItemCount})
+	}
+	if p.Policies != nil {
+		resp.PolicyVersions = p.Policies.VersionsByKind()
+		resp.Policies = toPolicySnapshotResponse(p.Policies)
 	}
 	return resp
 }
@@ -437,6 +448,8 @@ func toEffectResponse(e *domain.Effect) effectResponse {
 }
 
 type returnResponse struct {
+	ActionDueAt      *time.Time `json:"action_due_at"`
+	WaitingOn        string     `json:"waiting_on"`
 	ID               string     `json:"id"`
 	OrderID          string     `json:"order_id"`
 	OrderItemID      string     `json:"order_item_id"`
@@ -458,7 +471,7 @@ type returnResponse struct {
 }
 
 func toReturnResponse(r *domain.ReturnRequest) returnResponse {
-	return returnResponse{ID: r.ID, OrderID: r.OrderID, OrderItemID: r.OrderItemID, Reason: r.Reason, Status: string(r.Status),
+	return returnResponse{ActionDueAt: r.ActionDueAt, WaitingOn: r.WaitingOn, ID: r.ID, OrderID: r.OrderID, OrderItemID: r.OrderItemID, Reason: r.Reason, Status: string(r.Status),
 		Quantity: r.Quantity, RefundAmount: r.RefundAmount, PolicyVersion: r.PolicyVersion, ReturnWindowDays: r.ReturnWindowDays,
 		Evidence: r.Evidence, VendorNote: r.VendorNote, DecisionNote: r.DecisionNote, DecidedAt: r.DecidedAt,
 		ReceivedAt: r.ReceivedAt, InspectionNote: r.InspectionNote, Restock: r.Restock, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt}
@@ -486,5 +499,72 @@ func toReturnEventResponses(events []*domain.ReturnEvent) []returnEventResponse 
 	for _, e := range events {
 		out = append(out, returnEventResponse{Action: e.Action, ActorRole: e.ActorRole, FromStatus: e.FromStatus, ToStatus: e.ToStatus, Note: e.Note, CreatedAt: e.CreatedAt})
 	}
+	return out
+}
+
+type policyRefResponse struct {
+	Kind        string `json:"kind"`
+	PolicyID    string `json:"policy_id"`
+	Version     int64  `json:"version"`
+	ContentHash string `json:"content_hash"`
+}
+
+type policySnapshotResponse struct {
+	Source               string              `json:"source"`
+	Policies             []policyRefResponse `json:"policies"`
+	ReturnsWindowDays    int                 `json:"returns_window_days"`
+	ReturnShippingRefund string              `json:"return_shipping_refund"`
+	ReturnPolicyVersion  string              `json:"return_policy_version"`
+	TakenAt              time.Time           `json:"taken_at"`
+}
+
+func toPolicyRef(p domain.PolicyRef) policyRefResponse {
+	return policyRefResponse{Kind: p.Kind, PolicyID: p.PolicyID, Version: p.Version, ContentHash: p.ContentHash}
+}
+
+func toPolicySnapshotResponse(s *domain.OrderPolicySnapshot) *policySnapshotResponse {
+	if s == nil {
+		return nil
+	}
+	out := &policySnapshotResponse{Source: s.Source, Policies: make([]policyRefResponse, 0, len(s.Policies)), ReturnsWindowDays: s.ReturnsWindowDays,
+		ReturnShippingRefund: s.ReturnShippingRefund, ReturnPolicyVersion: s.ReturnPolicyVersion, TakenAt: s.TakenAt}
+	for _, p := range s.Policies {
+		out.Policies = append(out.Policies, toPolicyRef(p))
+	}
+	return out
+}
+
+type vendorPolicySnapshotResponse struct {
+	VendorOrderID        string             `json:"vendor_order_id"`
+	ShopPolicy           *policyRefResponse `json:"shop_policy,omitempty"`
+	ReturnsWindowDays    int                `json:"returns_window_days"`
+	ReturnShippingRefund string             `json:"return_shipping_refund"`
+	ReturnPolicyVersion  string             `json:"return_policy_version"`
+}
+
+type orderPolicyViewResponse struct {
+	OrderID      string                         `json:"order_id"`
+	Legacy       bool                           `json:"legacy"`
+	Order        *policySnapshotResponse        `json:"order,omitempty"`
+	VendorOrders []vendorPolicySnapshotResponse `json:"vendor_orders"`
+}
+
+func toOrderPolicyViewResponse(v *usecase.OrderPolicyView) orderPolicyViewResponse {
+	out := orderPolicyViewResponse{OrderID: v.OrderID, Legacy: v.Legacy, Order: toPolicySnapshotResponse(v.Order),
+		VendorOrders: []vendorPolicySnapshotResponse{}}
+	for id, s := range v.VendorOrders {
+		if s == nil {
+			out.VendorOrders = append(out.VendorOrders, vendorPolicySnapshotResponse{VendorOrderID: id})
+			continue
+		}
+		r := vendorPolicySnapshotResponse{VendorOrderID: id, ReturnsWindowDays: s.ReturnsWindowDays, ReturnShippingRefund: s.ReturnShippingRefund,
+			ReturnPolicyVersion: s.ReturnPolicyVersion}
+		if s.ShopPolicy != nil {
+			ref := toPolicyRef(*s.ShopPolicy)
+			r.ShopPolicy = &ref
+		}
+		out.VendorOrders = append(out.VendorOrders, r)
+	}
+	sort.Slice(out.VendorOrders, func(i, j int) bool { return out.VendorOrders[i].VendorOrderID < out.VendorOrders[j].VendorOrderID })
 	return out
 }

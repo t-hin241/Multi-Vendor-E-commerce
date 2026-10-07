@@ -36,7 +36,7 @@ const SECTIONS: { key: string; title: string; hint: string }[] = [
 // ShipmentOperations lists fulfillment problems and lets an admin record
 // what the carrier said. Every action needs a reason and is kept on the
 // shipment's timeline.
-export function ShipmentOperations() {
+export function ShipmentOperations({ focusID }: { focusID?: string }) {
   const { callWithAuth } = useAuth();
   const queryClient = useQueryClient();
   const ops = useQuery({
@@ -45,6 +45,17 @@ export function ShipmentOperations() {
     refetchInterval: 60_000,
   });
 
+  const focused = useQuery({
+    queryKey: ["shipment-operations", "focus", focusID],
+    enabled: !!focusID,
+    queryFn: () =>
+      callWithAuth((token) =>
+        api.request<api.Shipment>(
+          `/api/shipments/admin/shipments/${encodeURIComponent(focusID!)}`,
+          { token },
+        ),
+      ),
+  });
   async function act(fn: (token: string) => Promise<unknown>) {
     await callWithAuth(fn);
     await queryClient.invalidateQueries({ queryKey: ["shipment-operations"] });
@@ -128,6 +139,15 @@ export function ShipmentOperations() {
         title="Fulfillment operations"
         subtitle="Manual tracking mode: record what the carrier reports."
       />
+      {focused.error && <p role="alert">Không thể tải hồ sơ vận chuyển được yêu cầu.</p>}
+      {focused.data && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Hồ sơ từ thông báo</CardTitle>
+          </CardHeader>
+          <CardContent>{row(focused.data)}</CardContent>
+        </Card>
+      )}
       {ops.error && (
         <p className="text-sm text-destructive">Could not load fulfillment operations.</p>
       )}

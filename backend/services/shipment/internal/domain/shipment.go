@@ -67,6 +67,8 @@ func IsCancellable(status Status) bool {
 // snapshots taken at creation; only status, tracking and delivery facts
 // change afterwards, each with a version bump (compare-and-set).
 type Shipment struct {
+	ActionDueAt          *time.Time
+	WaitingOn            string
 	ID                   string
 	VendorOrderID        string
 	VendorID             string

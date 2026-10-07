@@ -23,4 +23,10 @@ export const queryKeys = {
   paymentIntent: (id: string) => ["payment-intent", id] as const,
   myShipments: () => ["my-shipments"] as const,
   shipmentEvents: (shipmentId: string) => ["shipment-events", shipmentId] as const,
+  supportCapability: () => ["support-capability"] as const,
+  // scope + viewer: a buyer, a shop and an admin see different fields.
+  supportCasesAll: () => ["support-cases"] as const,
+  supportCases: (scope: string, filters: Record<string, string | boolean | undefined>) =>
+    ["support-cases", scope, filters] as const,
+  supportCase: (scope: string, caseId: string) => ["support-case", scope, caseId] as const,
 } as const;

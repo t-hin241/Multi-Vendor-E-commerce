@@ -142,13 +142,18 @@ func (uc *OrderUseCase) settleVendorOrder(ctx context.Context, e *domain.Effect)
 		return &apperror.Error{Code: apperror.CodeConflict, Status: 409, Message: "vendor order has no commission snapshot; settle it manually"}
 	}
 	completed := vo.CompletedAt.UTC()
+	// Payable only after the return window the order was sold under.
+	policy, err := uc.returnPolicyFor(ctx, vo.ID)
+	if err != nil {
+		return err
+	}
 	if uc.Events != nil {
 		return uc.publish(ctx, e, func() (eventbus.Envelope, error) {
 			return events.VendorOrderSettleableEvent(e.ID, events.Settlement{
 				VendorOrderID: vo.ID, OrderID: vo.OrderID, VendorID: vo.VendorID, Currency: vo.Currency,
 				SubtotalAmount: vo.SubtotalAmount, ShippingAmount: vo.ShippingFeeAmount, CommissionAmount: vo.Commission.Amount,
 				CommissionRateBps: vo.Commission.RateBps, CommissionRuleVersion: vo.Commission.RuleVersion,
-				CompletedAt: completed, EligibleAt: completed.Add(time.Duration(uc.ReturnPolicy.WindowDays) * 24 * time.Hour),
+				CompletedAt: completed, EligibleAt: completed.Add(time.Duration(policy.WindowDays) * 24 * time.Hour),
 			})
 		})
 	}
@@ -156,7 +161,7 @@ func (uc *OrderUseCase) settleVendorOrder(ctx context.Context, e *domain.Effect)
 		VendorOrderID: vo.ID, OrderID: vo.OrderID, VendorID: vo.VendorID, Currency: vo.Currency,
 		SubtotalAmount: vo.SubtotalAmount, ShippingAmount: vo.ShippingFeeAmount, CommissionAmount: vo.Commission.Amount,
 		CommissionRateBps: vo.Commission.RateBps, CommissionRuleVersion: vo.Commission.RuleVersion,
-		CompletedAt: completed, EligibleAt: completed.Add(time.Duration(uc.ReturnPolicy.WindowDays) * 24 * time.Hour),
+		CompletedAt: completed, EligibleAt: completed.Add(time.Duration(policy.WindowDays) * 24 * time.Hour),
 	})
 }
 

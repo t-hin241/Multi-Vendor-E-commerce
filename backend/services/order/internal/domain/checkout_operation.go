@@ -3,6 +3,7 @@ package domain
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -48,6 +49,9 @@ type CheckoutRequest struct {
 	AddressID     string
 	CartVersion   *int64
 	ExpectedTotal *int64
+	// AcceptedPolicies, when given, are part of the request: accepting
+	// other versions under the same key is a different request.
+	AcceptedPolicies map[string]int64
 }
 
 // Hash fingerprints the request; any difference in address, reviewed cart
@@ -59,6 +63,16 @@ func (r CheckoutRequest) Hash() string {
 	}
 	if r.ExpectedTotal != nil {
 		parts = append(parts, "total="+strconv.FormatInt(*r.ExpectedTotal, 10))
+	}
+	if r.AcceptedPolicies != nil {
+		kinds := make([]string, 0, len(r.AcceptedPolicies))
+		for k := range r.AcceptedPolicies {
+			kinds = append(kinds, k)
+		}
+		sort.Strings(kinds)
+		for _, k := range kinds {
+			parts = append(parts, "policy."+k+"="+strconv.FormatInt(r.AcceptedPolicies[k], 10))
+		}
 	}
 	sum := sha256.Sum256([]byte(strings.Join(parts, "|")))
 	return hex.EncodeToString(sum[:])

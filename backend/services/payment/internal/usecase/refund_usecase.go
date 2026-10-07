@@ -60,6 +60,20 @@ func (uc *RefundUseCase) Request(ctx context.Context, req domain.RefundRequest) 
 	return refund, created, nil
 }
 
+func (uc *RefundUseCase) GetAdmin(ctx context.Context, adminID, id string) (*domain.Refund, error) {
+	if err := uc.requireAdmin(ctx, adminID); err != nil {
+		return nil, err
+	}
+	r, err := uc.refunds.FindByID(ctx, id)
+	if errors.Is(err, repository.ErrRefundNotFound) {
+		return nil, apperror.NotFound("Refund not found")
+	}
+	if err != nil {
+		return nil, apperror.Internal(err)
+	}
+	return r, nil
+}
+
 func (uc *RefundUseCase) List(ctx context.Context, adminID, status string, limit, offset int) ([]*domain.Refund, int, error) {
 	if err := uc.requireAdmin(ctx, adminID); err != nil {
 		return nil, 0, err

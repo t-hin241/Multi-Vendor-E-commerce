@@ -9,7 +9,8 @@ import (
 
 // OrderWorker drives Order's durable workflows: cart-consume tasks, side
 // effects of transitions (shipments, stock release, notifications, refunds,
-// return restock) and recovery of checkouts whose request died. It also
+// return restock), recovery of checkouts whose request died, closing
+// support cases past their reopen window and cleaning their evidence. It also
 // reports the backlogs once a minute for log-based alerting.
 type OrderWorker struct {
 	UseCase  *OrderUseCase
@@ -46,6 +47,12 @@ func (w OrderWorker) Run(ctx context.Context) {
 			w.report(ctx)
 			if _, err := uc.CheckoutOps.PurgeExpired(ctx, 500); err != nil && ctx.Err() == nil {
 				uc.Log.Error().Err(err).Msg("order_checkout_purge_failed")
+			}
+			if _, err := uc.CloseExpiredSupportCases(ctx, batch); err != nil && ctx.Err() == nil {
+				uc.Log.Error().Err(err).Msg("order_support_auto_close_failed")
+			}
+			if _, err := uc.CleanSupportAttachments(ctx, batch); err != nil && ctx.Err() == nil {
+				uc.Log.Error().Err(err).Msg("order_support_attachment_cleanup_failed")
 			}
 		}
 		select {

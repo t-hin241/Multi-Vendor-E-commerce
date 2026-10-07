@@ -37,7 +37,7 @@ func (h *OrderHandler) Checkout(c *gin.Context) {
 	}
 	order, replayed, err := h.orders.Checkout(c.Request.Context(), middleware.GetUserID(c), usecase.CheckoutInput{
 		AddressID: req.AddressID, CartVersion: req.CartVersion, ExpectedTotal: req.ExpectedTotalAmount,
-		IdempotencyKey: c.GetHeader("Idempotency-Key"),
+		IdempotencyKey: c.GetHeader("Idempotency-Key"), AcceptedPolicyVersions: req.AcceptedPolicyVersions,
 	})
 	if err != nil {
 		httpresponse.HandleError(c, h.log, err)
@@ -221,4 +221,18 @@ func validID(c *gin.Context, id string) bool {
 		return false
 	}
 	return true
+}
+
+// PolicySnapshot returns the policies an order was placed under; the role
+// from the token decides what the caller may see (AF-02).
+func (h *OrderHandler) PolicySnapshot(c *gin.Context) {
+	if !validID(c, c.Param("id")) {
+		return
+	}
+	view, err := h.orders.PolicySnapshot(c.Request.Context(), middleware.GetUserID(c), middleware.GetRole(c), c.Param("id"))
+	if err != nil {
+		httpresponse.HandleError(c, h.log, err)
+		return
+	}
+	httpresponse.OK(c, http.StatusOK, toOrderPolicyViewResponse(view))
 }

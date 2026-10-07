@@ -18,6 +18,7 @@ import (
 const (
 	VendorStatusChanged         = "vendor.status_changed"
 	VendorNotificationRequested = "vendor.notification_requested"
+	VendorPolicyPublished       = "vendor.policy_published"
 	ProductStatusChanged        = "catalog.product_status_changed"
 	ReservationExpired          = "inventory.reservation_expired"
 	StockChanged                = "inventory.stock_changed"
@@ -59,6 +60,27 @@ type NotificationRequest struct {
 // VendorNotification: a shop decision to tell its owner about.
 func VendorNotification(eventID, vendorID string, n NotificationRequest) (eventbus.Envelope, error) {
 	return eventbus.New(eventID, VendorNotificationRequested, V1, vendorID, 0, n)
+}
+
+// PolicyPublication: a marketplace or shop policy version was published
+// (Vendor → Order). It carries references only: the content hash and the
+// rule versions the owner services acknowledged, never the text. Order
+// keeps every version (they are immutable) and picks the active one by
+// effective_at at checkout.
+type PolicyPublication struct {
+	PolicyID string `json:"policy_id"`
+	// Scope is marketplace or shop; VendorID is set for a shop policy.
+	Scope       string            `json:"scope"`
+	VendorID    string            `json:"vendor_id,omitempty"`
+	Kind        string            `json:"kind"`
+	Version     int64             `json:"version"`
+	ContentHash string            `json:"content_hash"`
+	RuleRefs    map[string]string `json:"rule_refs,omitempty"`
+	EffectiveAt time.Time         `json:"effective_at"`
+}
+
+func PolicyPublishedEvent(eventID string, p PolicyPublication) (eventbus.Envelope, error) {
+	return eventbus.New(eventID, VendorPolicyPublished, V1, p.PolicyID, p.Version, p)
 }
 
 // OrderNotification: an order fact to tell the buyer about.

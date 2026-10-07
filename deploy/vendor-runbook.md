@@ -136,3 +136,20 @@ Smoke sau cutover:
 Trước production vẫn cần rehearsal toàn stack, backup/restore, giám sát/alert thật,
 TLS/private network và PAY-04 đối soát/chuyển tiền. Đợt Vendor này không tự tạo policy
 giữ tiền hoặc phát sinh giao dịch tiền thật.
+
+## Chính sách sàn và shop theo phiên bản (AF-02)
+
+Đặc tả: `docs/modular/add_features/02-marketplace-policies.md`. Migration `000010_policy_versions`; Order cần `000017_policy_snapshots` và consumer `order-policy-versions` (đã cấp trong `deploy/nats/nats.conf`).
+
+| Biến | Mặc định | Ý nghĩa |
+|---|---|---|
+| `FEATURE_VERSIONED_POLICIES_ENABLED` | `false` | Vendor: cho publish và hiển thị chính sách theo phiên bản; trang shop chỉ hiện chính sách shop đã duyệt. Đặt cùng giá trị ở Order |
+
+Luồng: admin tạo draft ở `/admin/policies` (nội dung cố định khi tạo) → Publish kèm lý do → Vendor hỏi Order `GET /internal/policy-rules/readiness` cho từng rule được dẫn (`order.returns_window=window-<N>d`, `order.return_shipping_refund=none`). Thiếu ACK thì version ở `preparing`, bản cũ vẫn hiệu lực, worker hỏi lại mỗi 30 giây. Đủ ACK thì `published`, ghi `policy_outbox` (event `vendor.policy_published`), thông báo chủ shop và audit (`policy_audit_logs`, xem trong tra cứu audit admin).
+
+- Version đã publish không sửa/xóa được (trigger). Sửa nội dung = draft mới. Không publish draft có `effective_at` trong quá khứ.
+- Rule của Payment/Shipment chưa có contract readiness nên chưa thể dẫn trong chính sách; nội dung không được hứa hoàn phí vận chuyển cho tới khi Order hỗ trợ.
+- Chính sách shop: chủ shop đề xuất, admin duyệt/từ chối (có lý do). Nội dung chứa cụm từ bớt quyền người mua ("không đổi trả", "không hoàn tiền", ...) bị từ chối ngay (422 `policy_reduces_protection`). Migration chuyển `policy_text` cũ thành đề xuất `legacy` chờ duyệt, không tự duyệt.
+- Theo dõi: log `vendor_policy_preparing_overdue` (preparing quá 1 giờ), `vendor_policy_propagation_pending`, backlog `policy_outbox`.
+
+Bật: deploy Order (consumer + readiness) trước, rồi Vendor; publish chính sách đổi trả đầu tiên khớp `ORDER_RETURN_WINDOW_DAYS`; xác nhận Order đã nhận (bảng `policy_versions`); sau đó mới bật flag ở Order. Rollback: tắt flag; không chạy down `000010` khi đã có version publish (down tự từ chối).

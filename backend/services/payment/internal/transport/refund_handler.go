@@ -110,6 +110,19 @@ func (h *RefundHandler) AdminList(c *gin.Context) {
 	httpresponse.OK(c, http.StatusOK, out)
 }
 
+func (h *RefundHandler) AdminGet(c *gin.Context) {
+	if _, err := uuid.Parse(c.Param("id")); err != nil {
+		httpresponse.Error(c, 400, "validation_error", "Invalid refund id")
+		return
+	}
+	r, err := h.refunds.GetAdmin(c.Request.Context(), middleware.GetUserID(c), c.Param("id"))
+	if err != nil {
+		httpresponse.HandleError(c, h.log, err)
+		return
+	}
+	httpresponse.OK(c, http.StatusOK, toRefundResponse(r))
+}
+
 func (h *RefundHandler) AdminResolve(c *gin.Context) {
 	if _, err := uuid.Parse(c.Param("id")); err != nil {
 		httpresponse.Error(c, http.StatusBadRequest, "validation_error", "Invalid refund id")

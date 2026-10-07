@@ -1,0 +1,2 @@
+-- Roll back by disabling FEATURE_CASE_SLA_ENABLED. Preserve deadlines, receipts and append-only audit.
+-- Intentionally non-destructive.

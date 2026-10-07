@@ -68,6 +68,9 @@ type publicVendorResponse struct {
 	LogoURL     *string `json:"logo_url,omitempty"`
 	BannerURL   *string `json:"banner_url,omitempty"`
 	PolicyText  string  `json:"policy_text,omitempty"`
+	// ShopPolicyVersion is the approved shop policy version shown, when
+	// versioned policies are on.
+	ShopPolicyVersion *int `json:"shop_policy_version,omitempty"`
 }
 
 func toPublicVendorResponse(v *domain.Vendor) publicVendorResponse {

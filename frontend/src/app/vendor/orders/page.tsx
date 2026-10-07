@@ -1,5 +1,7 @@
 "use client";
 
+import { ActionDeadline } from "@/components/support/action-deadline";
+
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Download } from "lucide-react";
 import Link from "next/link";
@@ -454,6 +456,7 @@ function VendorOrderActions({
         </form>
       )}
 
+      <ActionDeadline dueAt={shipment?.action_due_at} waitingOn={shipment?.waiting_on} />
       {shipment?.status === "shipped" && (
         <div className="flex flex-col gap-2">
           <p className="text-xs text-muted-foreground">

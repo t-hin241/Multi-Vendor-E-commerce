@@ -3,6 +3,8 @@ package repository
 import (
 	"context"
 	"errors"
+	"shopee/backend/pkg/casesla"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -23,14 +25,14 @@ func NewReturnRequestRepository(pool *pgxpool.Pool) *ReturnRequestRepository {
 const returnRequestColumns = `rr.id, rr.order_id, rr.order_item_id, rr.buyer_id, rr.reason, rr.status, rr.quantity, rr.refund_amount,
 	rr.policy_version, rr.return_window_days, rr.evidence, rr.vendor_note, rr.vendor_confirmed_by, rr.vendor_confirmed_at,
 	rr.decided_by, rr.decision_note, rr.decided_at, rr.received_by, rr.received_at, rr.inspection_note, rr.restock, rr.version,
-	rr.created_at, rr.updated_at`
+	rr.created_at, rr.updated_at, (SELECT due_at FROM case_sla_work_items w WHERE w.resource_type='return' AND w.resource_id=rr.id AND w.active), COALESCE((SELECT payload->>'waiting_on' FROM case_sla_work_items w WHERE w.resource_type='return' AND w.resource_id=rr.id AND w.active),'')`
 
 func scanReturnRequest(row pgx.Row) (*domain.ReturnRequest, error) {
 	var r domain.ReturnRequest
 	if err := row.Scan(&r.ID, &r.OrderID, &r.OrderItemID, &r.BuyerID, &r.Reason, &r.Status, &r.Quantity, &r.RefundAmount,
 		&r.PolicyVersion, &r.ReturnWindowDays, &r.Evidence, &r.VendorNote, &r.VendorConfirmedBy, &r.VendorConfirmedAt,
 		&r.DecidedBy, &r.DecisionNote, &r.DecidedAt, &r.ReceivedBy, &r.ReceivedAt, &r.InspectionNote, &r.Restock, &r.Version,
-		&r.CreatedAt, &r.UpdatedAt); err != nil {
+		&r.CreatedAt, &r.UpdatedAt, &r.ActionDueAt, &r.WaitingOn); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrReturnRequestNotFound
 		}
@@ -42,6 +44,9 @@ func scanReturnRequest(row pgx.Row) (*domain.ReturnRequest, error) {
 // Create inserts a request the use case already validated against the
 // policy. One request per order item.
 func (r *ReturnRequestRepository) Create(ctx context.Context, rr *domain.ReturnRequest) error {
+	if !InTransaction(ctx) {
+		return (Transactions{Pool: r.pool}).Run(ctx, func(ctx context.Context) error { return r.Create(ctx, rr) })
+	}
 	err := connection(ctx, r.pool).QueryRow(ctx, `
 		INSERT INTO return_requests (order_id, order_item_id, buyer_id, reason, quantity, refund_amount, policy_version, return_window_days, evidence)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
@@ -52,7 +57,10 @@ func (r *ReturnRequestRepository) Create(ctx context.Context, rr *domain.ReturnR
 	if errors.As(err, &pgErr) && pgErr.Code == "23505" {
 		return apperror.Conflict("This item already has an open return request")
 	}
-	return err
+	if err != nil {
+		return err
+	}
+	return r.syncSLA(ctx, rr)
 }
 
 // ReturnedQuantity sums the item's units in requests that were not
@@ -98,6 +106,9 @@ type ReturnUpdate struct {
 // Transition moves a request from one status to another (compare-and-set
 // on status and version) and sets the step's fields.
 func (r *ReturnRequestRepository) Transition(ctx context.Context, rr *domain.ReturnRequest, to domain.ReturnRequestStatus, u ReturnUpdate) error {
+	if !InTransaction(ctx) {
+		return (Transactions{Pool: r.pool}).Run(ctx, func(ctx context.Context) error { return r.Transition(ctx, rr, to, u) })
+	}
 	tag, err := connection(ctx, r.pool).Exec(ctx, `
 		UPDATE return_requests SET status = $4, version = version + 1, updated_at = now(),
 		    vendor_note = COALESCE($5, vendor_note),
@@ -120,7 +131,8 @@ func (r *ReturnRequestRepository) Transition(ctx context.Context, rr *domain.Ret
 	}
 	rr.Status = to
 	rr.Version++
-	return nil
+	rr.UpdatedAt = time.Now().UTC()
+	return r.syncSLA(ctx, rr)
 }
 
 // AddEvent appends one audit entry in the caller's transaction.
@@ -186,4 +198,18 @@ func (r *ReturnRequestRepository) list(ctx context.Context, q string, args ...an
 		out = append(out, item)
 	}
 	return out, rows.Err()
+}
+
+func (r *ReturnRequestRepository) syncSLA(ctx context.Context, rr *domain.ReturnRequest) error {
+	tx, _ := ctx.Value(transactionKey{}).(pgx.Tx)
+	i, err := casesla.Sync(ctx, tx, rr.SLAStage())
+	if i != nil && i.Active {
+		due := i.EffectiveDueAt()
+		rr.ActionDueAt = &due
+		rr.WaitingOn = i.WaitingOn
+	} else {
+		rr.ActionDueAt = nil
+		rr.WaitingOn = ""
+	}
+	return err
 }

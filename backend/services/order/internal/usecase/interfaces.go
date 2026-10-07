@@ -2,6 +2,7 @@ package usecase
 
 import (
 	"context"
+	"io"
 	"time"
 
 	"shopee/backend/pkg/apperror"
@@ -123,6 +124,38 @@ type ReturnRepositoryPort interface {
 	ListByOrder(ctx context.Context, orderID string) ([]*domain.ReturnRequest, error)
 	ListByStatus(ctx context.Context, status string, limit, offset int) ([]*domain.ReturnRequest, error)
 	ListForVendor(ctx context.Context, vendorID, status string, limit, offset int) ([]*domain.ReturnRequest, error)
+}
+
+// SupportCaseRepositoryPort stores support cases with their immutable
+// messages, timeline and evidence attachments.
+type SupportCaseRepositoryPort interface {
+	Create(ctx context.Context, c *domain.SupportCase) error
+	FindByID(ctx context.Context, id string) (*domain.SupportCase, error)
+	FindByIdempotencyKey(ctx context.Context, buyerID, key string) (*domain.SupportCase, error)
+	FindNotClosed(ctx context.Context, buyerID, vendorOrderID string, category domain.SupportCategory) (*domain.SupportCase, error)
+	Save(ctx context.Context, c *domain.SupportCase) error
+	List(ctx context.Context, f repository.SupportCaseFilter, after *repository.CaseCursor, limit int) ([]*domain.SupportCase, error)
+	ListPendingResolution(ctx context.Context, kind, ref string) ([]*domain.SupportCase, error)
+	ListResolvedBefore(ctx context.Context, t time.Time, limit int) ([]*domain.SupportCase, error)
+	AddMessage(ctx context.Context, m *domain.SupportMessage) error
+	FindMessageByKey(ctx context.Context, authorID, key string) (*domain.SupportMessage, error)
+	ListMessages(ctx context.Context, caseID string, includeInternal bool) ([]*domain.SupportMessage, error)
+	AddEvent(ctx context.Context, e *domain.SupportCaseEvent) error
+	ListEvents(ctx context.Context, caseID string) ([]*domain.SupportCaseEvent, error)
+	CreateAttachment(ctx context.Context, a *domain.CaseAttachment) error
+	FindAttachment(ctx context.Context, id string) (*domain.CaseAttachment, error)
+	AttachToMessage(ctx context.Context, ids []string, ownerID, caseID, messageID string) (int64, error)
+	ListOrphanAttachments(ctx context.Context, before time.Time, limit int) ([]*domain.CaseAttachment, error)
+	ListExpiredAttachments(ctx context.Context, closedBefore time.Time, limit int) ([]*domain.CaseAttachment, error)
+	MarkAttachmentDeleted(ctx context.Context, id, from string) (bool, error)
+}
+
+// AttachmentStore keeps support evidence in a private bucket; objects are
+// read back only through Order after an access check.
+type AttachmentStore interface {
+	Put(ctx context.Context, key string, data []byte, contentType string) error
+	Open(ctx context.Context, key string) (io.ReadCloser, error)
+	Delete(ctx context.Context, key string) error
 }
 
 // CartGateway is Cart's internal checkout contract: read the cart for a

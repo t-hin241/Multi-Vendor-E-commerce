@@ -26,6 +26,9 @@ type checkoutFixture struct {
 	effects         *fakeEffectRepository
 	refunds         *fakeRefundRepository
 	returns         *fakeReturnRepository
+	support         *fakeSupportRepository
+	policies        *fakePolicyVersions
+	store           *fakeAttachmentStore
 	cart            *fakeCartGateway
 	catalog         *fakeCatalogGateway
 	vendors         *fakeVendorGateway
@@ -44,13 +47,14 @@ func newCheckoutFixture() *checkoutFixture {
 		vendorOrders: newFakeVendorOrderRepository(), buyerAddresses: newFakeBuyerAddressRepository(),
 		commissionRules: newFakeCommissionRuleRepository(1000), consumptions: newFakeCartConsumptionRepository(),
 		checkoutOps: newFakeCheckoutOpRepository(), payments: newFakePaymentRecordRepository(), effects: &fakeEffectRepository{},
-		refunds: newFakeRefundRepository(), returns: newFakeReturnRepository(), cart: newFakeCartGateway(),
+		refunds: newFakeRefundRepository(), returns: newFakeReturnRepository(), support: newFakeSupportRepository(),
+		store: newFakeAttachmentStore(), policies: newFakePolicyVersions(), cart: newFakeCartGateway(),
 		catalog: newFakeCatalogGateway(), vendors: newFakeVendorGateway(), inventory: newFakeInventoryGateway(),
 		shipments: newFakeShipmentGateway(20000), notifications: &fakeNotificationGateway{}, payment: &fakePaymentGateway{},
 		identity: fakeIdentityGateway{denied: map[string]bool{}}, audit: &fakeAudit{}, now: time.Now(),
 	}
 	f.orders = newFakeOrderRepository(f.vendorOrders)
-	f.orders.consumptions, f.orders.checkoutOps = f.consumptions, f.checkoutOps
+	f.orders.consumptions, f.orders.checkoutOps, f.orders.policies = f.consumptions, f.checkoutOps, f.policies
 	f.returns.vendorsOf = func(itemID string) (string, string) {
 		for _, items := range f.vendorOrders.items {
 			for _, item := range items {
@@ -65,10 +69,11 @@ func newCheckoutFixture() *checkoutFixture {
 	f.uc = usecase.NewOrderUseCase(usecase.Deps{
 		Orders: f.orders, VendorOrders: f.vendorOrders, BuyerAddresses: f.buyerAddresses, CommissionRules: f.commissionRules,
 		CartConsumption: f.consumptions, CheckoutOps: f.checkoutOps, Payments: f.payments, Effects: f.effects,
-		Refunds: f.refunds, Returns: f.returns, Cart: f.cart, Catalog: f.catalog, Vendors: f.vendors, Inventory: f.inventory,
+		Refunds: f.refunds, Returns: f.returns, Support: f.support, Attachments: f.store, Policies: f.policies, Cart: f.cart, Catalog: f.catalog, Vendors: f.vendors, Inventory: f.inventory,
 		Shipments: f.shipments, Notifications: f.notifications, Payment: f.payment, Identity: f.identity, Audit: f.audit, Tx: inlineTx{},
 		ReturnPolicy: domain.ReturnPolicy{Version: "window-7d", WindowDays: 7}, Log: zerolog.Nop(),
-		Now: func() time.Time { return f.now },
+		SupportConfig: usecase.SupportConfig{Enabled: true},
+		Now:           func() time.Time { return f.now },
 	})
 	address := &domain.BuyerAddress{BuyerID: "buyer-1", RecipientName: "Nguyen A", Phone: "0900000000", Province: "HN", District: "D1", Ward: "W1", StreetAddress: "123 St"}
 	_ = f.buyerAddresses.Create(context.Background(), address)

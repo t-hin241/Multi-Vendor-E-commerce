@@ -1095,6 +1095,8 @@ export type ReturnStatus =
   | "refund_failed";
 
 export type ReturnRequest = {
+  action_due_at?: string | null;
+  waiting_on?: string;
   id: string;
   order_id: string;
   order_item_id: string;
@@ -1272,6 +1274,11 @@ export type CheckoutPreview = {
   total_amount: number | null;
   ready: boolean;
   vendors: CheckoutPreviewVendor[];
+  // Marketplace policy versions a checkout now is placed under (AF-02);
+  // absent while versioned policies are off. Send policy_versions back as
+  // acceptedPolicyVersions.
+  policy_versions?: Record<string, number>;
+  policies?: PolicySnapshot;
 };
 
 // previewCheckout prices the cart for an address with a shipping quote per
@@ -1293,6 +1300,9 @@ export type CheckoutInput = {
   // Same key for every retry of one attempt: a retry returns the same
   // order instead of creating a second one.
   idempotencyKey: string;
+  // The policy versions the buyer was shown; 409 policy_changed if a new
+  // version came into force meanwhile.
+  acceptedPolicyVersions?: Record<string, number>;
 };
 
 export function checkout(token: string, input: CheckoutInput): Promise<Order> {
@@ -1304,6 +1314,7 @@ export function checkout(token: string, input: CheckoutInput): Promise<Order> {
       address_id: input.addressId,
       cart_version: input.cartVersion,
       expected_total_amount: input.expectedTotalAmount,
+      accepted_policy_versions: input.acceptedPolicyVersions,
     },
   });
 }
@@ -1947,6 +1958,8 @@ export type ShipmentStatus =
   | "returned";
 
 export type Shipment = {
+  action_due_at?: string | null;
+  waiting_on?: string;
   id: string;
   vendor_order_id: string;
   status: ShipmentStatus;
@@ -2834,4 +2847,476 @@ export function resolveParkedEvent(
     `${prefix}/events/${encodeURIComponent(consumer)}/${encodeURIComponent(eventId)}/${action}`,
     { method: "POST", token, json: { reason } },
   );
+}
+
+// ---------- Support cases (AF-01, Order) ----------
+// One case per buyer, vendor order and topic while it is not closed. The
+// case never moves money: an admin links a refund or return and the case
+// follows its outcome. Buyers and vendors only ever receive public messages.
+
+export type SupportScope = "buyer" | "vendor" | "admin";
+
+export type SupportCategory =
+  "not_received" | "missing_items" | "wrong_items" | "damaged" | "payment_issue" | "other";
+
+export type SupportCaseStatus =
+  | "open"
+  | "in_progress"
+  | "waiting_buyer"
+  | "waiting_vendor"
+  | "resolution_pending"
+  | "resolved"
+  | "closed";
+
+export type SupportResolutionKind = "no_action" | "refund" | "return";
+
+export type SupportCase = {
+  id: string;
+  order_id: string;
+  vendor_order_id: string;
+  vendor_id: string;
+  buyer_id?: string;
+  category: SupportCategory;
+  status: SupportCaseStatus;
+  assignee_id?: string;
+  policy_version: string;
+  due_at: string | null;
+  action_due_at?: string | null;
+  waiting_on?: string;
+  financial_hold: boolean;
+  resolution_kind: SupportResolutionKind | null;
+  resolution_ref: string | null;
+  resolution_note: string | null;
+  resolved_at: string | null;
+  closed_at: string | null;
+  related_case_id?: string;
+  version: number;
+  created_at: string;
+  updated_at: string;
+};
+
+export type SupportAttachment = { id: string; content_type: string; size_bytes: number };
+
+export type SupportMessage = {
+  id: string;
+  author_id?: string;
+  author_role: "buyer" | "vendor" | "admin";
+  visibility: "public" | "internal";
+  text: string;
+  attachments: SupportAttachment[];
+  created_at: string;
+};
+
+export type SupportCaseEvent = {
+  id: string;
+  actor_id?: string;
+  actor_role: "buyer" | "vendor" | "admin" | "system";
+  action: string;
+  from_status: string | null;
+  to_status: string;
+  note?: string;
+  created_at: string;
+};
+
+export type SupportCaseDetail = SupportCase & {
+  messages: SupportMessage[];
+  events: SupportCaseEvent[];
+};
+
+export type SupportCasePage = { items: SupportCase[]; next_cursor: string };
+
+export type SupportCapability = {
+  enabled: boolean;
+  attachments_enabled: boolean;
+  max_attachments: number;
+  max_attachment_bytes: number;
+  max_message_chars: number;
+  reopen_window_days: number;
+  poll_interval_seconds: number;
+  pilot_only: boolean;
+};
+
+const SUPPORT_PREFIX: Record<SupportScope, string> = {
+  buyer: "/api/orders",
+  vendor: "/api/orders/vendor",
+  admin: "/api/orders/admin",
+};
+
+export function getSupportCapability(
+  token: string,
+  scope: SupportScope = "buyer",
+): Promise<SupportCapability> {
+  return request<SupportCapability>(`${SUPPORT_PREFIX[scope]}/support-cases/capability`, { token });
+}
+
+export function createSupportCase(
+  token: string,
+  orderId: string,
+  input: {
+    vendorOrderId: string;
+    category: SupportCategory;
+    message: string;
+    attachmentIds: string[];
+    relatedCaseId?: string;
+  },
+  idempotencyKey: string,
+): Promise<SupportCase> {
+  return request<SupportCase>(`/api/orders/${orderId}/support-cases`, {
+    method: "POST",
+    token,
+    headers: { "Idempotency-Key": idempotencyKey },
+    json: {
+      vendor_order_id: input.vendorOrderId,
+      category: input.category,
+      message: input.message,
+      attachment_ids: input.attachmentIds,
+      related_case_id: input.relatedCaseId || undefined,
+    },
+  });
+}
+
+export function listSupportCases(
+  token: string,
+  scope: SupportScope,
+  params: {
+    status?: string;
+    cursor?: string;
+    limit?: number;
+    vendorId?: string;
+    assignee?: string;
+    unassigned?: boolean;
+    overdue?: boolean;
+  } = {},
+): Promise<SupportCasePage> {
+  return request<SupportCasePage>(`${SUPPORT_PREFIX[scope]}/support-cases`, {
+    token,
+    query: {
+      status: params.status,
+      cursor: params.cursor,
+      limit: params.limit,
+      vendor_id: params.vendorId,
+      assignee: params.assignee,
+      unassigned: params.unassigned ? "true" : undefined,
+      overdue: params.overdue ? "true" : undefined,
+    },
+  });
+}
+
+export function getSupportCase(
+  token: string,
+  scope: SupportScope,
+  caseId: string,
+): Promise<SupportCaseDetail> {
+  return request<SupportCaseDetail>(`${SUPPORT_PREFIX[scope]}/support-cases/${caseId}`, { token });
+}
+
+export function postSupportMessage(
+  token: string,
+  scope: SupportScope,
+  caseId: string,
+  input: { text: string; attachmentIds: string[]; visibility?: "public" | "internal" },
+  idempotencyKey: string,
+): Promise<SupportMessage> {
+  return request<SupportMessage>(`${SUPPORT_PREFIX[scope]}/support-cases/${caseId}/messages`, {
+    method: "POST",
+    token,
+    headers: { "Idempotency-Key": idempotencyKey },
+    json: { text: input.text, attachment_ids: input.attachmentIds, visibility: input.visibility },
+  });
+}
+
+export function uploadSupportAttachment(
+  token: string,
+  scope: SupportScope,
+  file: File,
+): Promise<SupportAttachment> {
+  const form = new FormData();
+  form.append("file", file);
+  return request<SupportAttachment>(`${SUPPORT_PREFIX[scope]}/support-attachments`, {
+    method: "POST",
+    token,
+    form,
+  });
+}
+
+// fetchSupportAttachment reads a private evidence image with the caller's
+// token (an <img src> cannot send it); the caller shows it from a blob URL.
+export async function fetchSupportAttachment(
+  token: string,
+  scope: SupportScope,
+  caseId: string,
+  attachmentId: string,
+): Promise<Blob> {
+  const res = await fetch(
+    `${API_BASE_URL}${SUPPORT_PREFIX[scope]}/support-cases/${caseId}/attachments/${attachmentId}`,
+    { headers: { Authorization: `Bearer ${token}` }, credentials: "include", cache: "no-store" },
+  );
+  if (!res.ok) {
+    throw new ApiError(res.status, "attachment_unavailable", "Không tải được ảnh.");
+  }
+  return res.blob();
+}
+
+export function reopenSupportCase(
+  token: string,
+  caseId: string,
+  message: string,
+): Promise<SupportCase> {
+  return request<SupportCase>(`/api/orders/support-cases/${caseId}/reopen`, {
+    method: "POST",
+    token,
+    json: { message },
+  });
+}
+
+export function confirmSupportCase(token: string, caseId: string): Promise<SupportCase> {
+  return request<SupportCase>(`/api/orders/support-cases/${caseId}/confirm`, {
+    method: "POST",
+    token,
+  });
+}
+
+export function assignSupportCase(
+  token: string,
+  caseId: string,
+  assigneeId: string,
+  expectedVersion: number,
+  reason: string,
+): Promise<SupportCase> {
+  return request<SupportCase>(`/api/orders/admin/support-cases/${caseId}/assignments`, {
+    method: "POST",
+    token,
+    json: { assignee_id: assigneeId, expected_version: expectedVersion, reason },
+  });
+}
+
+export function changeSupportCaseStatus(
+  token: string,
+  caseId: string,
+  input: { status: "in_progress" | "waiting_buyer" | "waiting_vendor"; note?: string },
+  expectedVersion: number,
+): Promise<SupportCase> {
+  return request<SupportCase>(`/api/orders/admin/support-cases/${caseId}/status`, {
+    method: "POST",
+    token,
+    json: { status: input.status, note: input.note, expected_version: expectedVersion },
+  });
+}
+
+export function resolveSupportCase(
+  token: string,
+  caseId: string,
+  input: { kind: SupportResolutionKind; linkedOperationId?: string; reason: string },
+  expectedVersion: number,
+): Promise<SupportCase> {
+  return request<SupportCase>(`/api/orders/admin/support-cases/${caseId}/resolutions`, {
+    method: "POST",
+    token,
+    json: {
+      resolution_kind: input.kind,
+      linked_operation_id: input.linkedOperationId || undefined,
+      reason: input.reason,
+      expected_version: expectedVersion,
+    },
+  });
+}
+
+export function closeSupportCase(
+  token: string,
+  caseId: string,
+  reason: string,
+  expectedVersion: number,
+): Promise<SupportCase> {
+  return request<SupportCase>(`/api/orders/admin/support-cases/${caseId}/close`, {
+    method: "POST",
+    token,
+    json: { reason, expected_version: expectedVersion },
+  });
+}
+
+// ---------- Policies (AF-02) ----------
+// Vendor owns the text; Order snapshots the versions in force on each new
+// order. Published versions never change, so a version link stays valid.
+
+export type PolicyKind = "returns" | "shipping" | "terms" | "privacy";
+
+export type PolicyRuleReadiness = { ready: boolean; rule_hash?: string; reason?: string };
+
+export type MarketplacePolicy = {
+  id: string;
+  kind: PolicyKind;
+  version: number;
+  title: string;
+  summary: string;
+  content: string;
+  contact: string;
+  rule_refs: Record<string, string>;
+  effective_at: string;
+  content_hash: string;
+  published_at?: string;
+  // Admin view only.
+  status?: "draft" | "preparing" | "published" | "withdrawn";
+  readiness?: Record<string, PolicyRuleReadiness>;
+  publication_reason?: string;
+  row_version?: number;
+  created_at?: string;
+};
+
+export type ShopPolicy = {
+  id: string;
+  vendor_id: string;
+  version: number;
+  content: string;
+  content_hash: string;
+  status: "proposed" | "approved" | "rejected";
+  source: "vendor" | "legacy";
+  decision_reason?: string;
+  decided_at?: string;
+  created_at: string;
+};
+
+export type PolicyRef = { kind: string; policy_id: string; version: number; content_hash: string };
+
+export type PolicySnapshot = {
+  source: "published" | "config";
+  policies: PolicyRef[];
+  returns_window_days: number;
+  return_shipping_refund: string;
+  return_policy_version: string;
+  taken_at: string;
+};
+
+export type OrderPolicyView = {
+  order_id: string;
+  legacy: boolean;
+  order?: PolicySnapshot;
+  vendor_orders: {
+    vendor_order_id: string;
+    shop_policy?: PolicyRef;
+    returns_window_days: number;
+    return_shipping_refund: string;
+    return_policy_version: string;
+  }[];
+};
+
+export function listPublicPolicies(): Promise<MarketplacePolicy[]> {
+  return request<MarketplacePolicy[]>("/api/vendor/public/policies");
+}
+
+export function getPublicPolicy(kind: PolicyKind): Promise<MarketplacePolicy> {
+  return request<MarketplacePolicy>("/api/vendor/public/policies", { query: { kind } });
+}
+
+export function getPolicyHistory(kind: PolicyKind): Promise<MarketplacePolicy[]> {
+  return request<MarketplacePolicy[]>(`/api/vendor/public/policies/${kind}/versions`);
+}
+
+export function getPolicyVersion(kind: PolicyKind, version: number): Promise<MarketplacePolicy> {
+  return request<MarketplacePolicy>(`/api/vendor/public/policies/${kind}/versions/${version}`);
+}
+
+const ORDER_SCOPE_PREFIX = {
+  buyer: "/api/orders",
+  vendor: "/api/orders/vendor",
+  admin: "/api/orders/admin",
+} as const;
+
+export function getOrderPolicySnapshot(
+  token: string,
+  scope: keyof typeof ORDER_SCOPE_PREFIX,
+  orderId: string,
+): Promise<OrderPolicyView> {
+  return request<OrderPolicyView>(`${ORDER_SCOPE_PREFIX[scope]}/${orderId}/policy-snapshot`, {
+    token,
+  });
+}
+
+export function listAdminPolicies(
+  token: string,
+  params: { kind?: string; status?: string } = {},
+): Promise<MarketplacePolicy[]> {
+  return request<MarketplacePolicy[]>("/api/vendor/admin/policy-versions", {
+    token,
+    query: params,
+  });
+}
+
+export type PolicyDraftInput = {
+  kind: PolicyKind;
+  title: string;
+  summary: string;
+  content: string;
+  contact: string;
+  rule_refs: Record<string, string>;
+  effective_at: string;
+};
+
+export function createPolicyDraft(
+  token: string,
+  input: PolicyDraftInput,
+): Promise<MarketplacePolicy> {
+  return request<MarketplacePolicy>("/api/vendor/admin/policy-versions", {
+    method: "POST",
+    token,
+    json: input,
+  });
+}
+
+export function publishPolicy(
+  token: string,
+  policyId: string,
+  expectedVersion: number,
+  reason: string,
+): Promise<MarketplacePolicy> {
+  return request<MarketplacePolicy>(`/api/vendor/admin/policy-versions/${policyId}/publications`, {
+    method: "POST",
+    token,
+    json: { expected_version: expectedVersion, reason },
+  });
+}
+
+export function withdrawPolicy(
+  token: string,
+  policyId: string,
+  expectedVersion: number,
+  reason: string,
+): Promise<MarketplacePolicy> {
+  return request<MarketplacePolicy>(`/api/vendor/admin/policy-versions/${policyId}/withdrawal`, {
+    method: "POST",
+    token,
+    json: { expected_version: expectedVersion, reason },
+  });
+}
+
+export function listShopPolicyProposals(token: string, status = "proposed"): Promise<ShopPolicy[]> {
+  return request<ShopPolicy[]>("/api/vendor/admin/policy-proposals", { token, query: { status } });
+}
+
+export function decideShopPolicy(
+  token: string,
+  proposalId: string,
+  approve: boolean,
+  reason: string,
+): Promise<ShopPolicy> {
+  return request<ShopPolicy>(`/api/vendor/admin/policy-proposals/${proposalId}/decisions`, {
+    method: "POST",
+    token,
+    json: { approve, reason },
+  });
+}
+
+export function proposeShopPolicy(
+  token: string,
+  vendorId: string,
+  content: string,
+): Promise<ShopPolicy> {
+  return request<ShopPolicy>(`/api/vendor/${vendorId}/policy-proposals`, {
+    method: "POST",
+    token,
+    json: { content },
+  });
+}
+
+export function listMyShopPolicies(token: string, vendorId: string): Promise<ShopPolicy[]> {
+  return request<ShopPolicy[]>(`/api/vendor/${vendorId}/policy-proposals`, { token });
 }

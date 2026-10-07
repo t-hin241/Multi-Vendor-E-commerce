@@ -105,14 +105,24 @@ func main() {
 	go adapter.DispatchStatus(workerCtx, outbox, sendStatus, log)
 	go adapter.DispatchNotices(workerCtx, notices, sendNotice, log)
 	vendorUseCase := usecase.NewVendorUseCase(vendorRepo, auditLogRepo, objectStore, log, ops)
+	policyRepo := repository.PolicyRepository{Pool: dbPool}
+	policyUseCase := &usecase.PolicyUseCase{Policies: policyRepo, Vendors: vendorRepo, Audit: auditLogRepo, Notices: notices,
+		Rules: adapter.NewRuleReadinessClient(map[string]string{"order": cfg.OrderURL}, cfg.Internal.Key), Ops: ops,
+		Enabled: cfg.VersionedPolicies, Log: log}
+	sendPolicy := adapter.BusPolicySender(bus.Bus)
+	if !bus.Publish {
+		sendPolicy = adapter.HTTPPolicySender(cfg.OrderURL, cfg.Internal.Key)
+	}
+	go adapter.DispatchPolicies(workerCtx, policyRepo, sendPolicy, policyUseCase, log)
 	addressUseCase := usecase.NewVendorAddressUseCase(addressRepo, vendorRepo, ops)
 
 	vendorHandler := transport.NewVendorHandler(vendorUseCase, log)
 	addressHandler := transport.NewVendorAddressHandler(addressUseCase, log)
 	adminHandler := transport.NewAdminHandler(vendorUseCase, log)
 	internalHandler := transport.NewInternalHandler(vendorUseCase, log)
+	policyHandler := transport.NewPolicyHandler(policyUseCase, vendorUseCase, log)
 
-	router := transport.NewRouter(cfg.Base.Env, log, jwtManager, vendorHandler, addressHandler, adminHandler, internalHandler, cfg.Internal.Verifier,
+	router := transport.NewRouter(cfg.Base.Env, log, jwtManager, vendorHandler, addressHandler, adminHandler, internalHandler, policyHandler, cfg.Internal.Verifier,
 		health.Checker{Name: "postgres", Ping: func(ctx context.Context) error { return dbPool.Ping(ctx) }},
 		health.Checker{Name: "object_storage", Ping: objectStore.Ping},
 	)

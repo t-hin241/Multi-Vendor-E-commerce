@@ -27,6 +27,7 @@ type fakeOrderRepository struct {
 	vendorOrders *fakeVendorOrderRepository
 	consumptions *fakeCartConsumptionRepository
 	checkoutOps  *fakeCheckoutOpRepository
+	policies     *fakePolicyVersions
 	createErr    error
 }
 
@@ -83,6 +84,9 @@ func (f *fakeOrderRepository) CreateFromPlan(_ context.Context, plan *domain.Pla
 	}
 	if plan.CheckoutOperationID != "" && f.checkoutOps != nil {
 		f.checkoutOps.link(plan.CheckoutOperationID, order.ID)
+	}
+	if f.policies != nil && plan.OrderPolicy != nil {
+		f.policies.storeSnapshot(order.ID, plan.OrderPolicy, vendorOrderIDs, plan.VendorPolicies)
 	}
 	return &order, nil
 }

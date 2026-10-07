@@ -25,6 +25,10 @@ type Plan struct {
 	// CheckoutOperationID, when set, is linked to the order in the same
 	// transaction, so a crash right after the insert is recoverable.
 	CheckoutOperationID string
+	// OrderPolicy and VendorPolicies (aligned with VendorOrders) are the
+	// policy snapshot (AF-02); nil keeps the legacy rules.
+	OrderPolicy    *OrderPolicySnapshot
+	VendorPolicies []*VendorPolicySnapshot
 }
 
 // ShippingQuote is Shipment's fee for one vendor's package, snapshotted onto

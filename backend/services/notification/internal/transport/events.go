@@ -19,6 +19,16 @@ import (
 func NotificationRequestedHandler(uc *usecase.NotificationUseCase) eventbus.Handler {
 	return func(ctx context.Context, _ pgx.Tx, env eventbus.Envelope) error {
 		var n events.NotificationRequest
+		switch env.Type {
+		case events.OrderWorkItemReminder, events.OrderWorkItemOverdue, events.PaymentWorkItemReminder, events.PaymentWorkItemOverdue, events.ShipmentWorkItemReminder, events.ShipmentWorkItemOverdue:
+			var notice events.WorkItemNotice
+			if err := env.Decode(&notice); err != nil {
+				return err
+			}
+			n = events.NotificationRequest{UserID: notice.UserID, Type: "sla_" + notice.ResourceType, ReferenceID: notice.ResourceID}
+			_, _, err := uc.Accept(ctx, domain.Request{EventID: env.EventID, Source: env.Producer, UserID: n.UserID, Type: domain.Type(n.Type), ReferenceID: n.ReferenceID, CorrelationID: env.CorrelationID})
+			return err
+		}
 		if err := env.Decode(&n); err != nil {
 			return err
 		}

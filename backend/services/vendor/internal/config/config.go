@@ -21,6 +21,8 @@ type Config struct {
 	CatalogURL, OrderURL, PaymentURL string
 	NotificationServiceURL           string
 	ObjectStorage                    objectstorage.Config
+	// VersionedPolicies is FEATURE_VERSIONED_POLICIES_ENABLED (AF-02).
+	VersionedPolicies bool
 }
 
 func Load() (Config, error) {
@@ -58,8 +60,15 @@ func Load() (Config, error) {
 	if payoutServiceKey == internal.Key {
 		return Config{}, fmt.Errorf("payout scope key must differ from internal service key")
 	}
+	versioned := false
+	if raw := os.Getenv("FEATURE_VERSIONED_POLICIES_ENABLED"); raw != "" {
+		if versioned, err = strconv.ParseBool(raw); err != nil {
+			return Config{}, fmt.Errorf("config: FEATURE_VERSIONED_POLICIES_ENABLED must be true or false")
+		}
+	}
 	return Config{
-		PaymentURL: envDefault("PAYMENT_SERVICE_URL", "http://payment:8087"), PayoutKey: payoutKey, PayoutServiceKey: payoutServiceKey, Internal: internal, CatalogURL: envDefault("CATALOG_SERVICE_URL", "http://catalog:8083"), OrderURL: envDefault("ORDER_SERVICE_URL", "http://order:8086"),
+		VersionedPolicies: versioned,
+		PaymentURL:        envDefault("PAYMENT_SERVICE_URL", "http://payment:8087"), PayoutKey: payoutKey, PayoutServiceKey: payoutServiceKey, Internal: internal, CatalogURL: envDefault("CATALOG_SERVICE_URL", "http://catalog:8083"), OrderURL: envDefault("ORDER_SERVICE_URL", "http://order:8086"),
 		Base:                   base,
 		NotificationServiceURL: notificationServiceURL,
 		ObjectStorage:          objectStorageCfg,

@@ -41,16 +41,23 @@ const REFUND_STATUS_OPTIONS = ["open", "succeeded", "failed", ""] as const;
 // refund Order requested; an operator returns the money through the
 // provider or bank, then records the reference here. Only that marks the
 // refund succeeded and lets Order show it to the buyer.
-export function RefundOperations() {
+export function RefundOperations({ focusID }: { focusID?: string }) {
   const { callWithAuth } = useAuth();
   const queryClient = useQueryClient();
   const [status, setStatus] = useState("open");
 
   const refundsQuery = useQuery({
-    queryKey: ["payment-refunds", status],
+    queryKey: ["payment-refunds", status, focusID],
     queryFn: () =>
       callWithAuth((token) =>
-        api.listPaymentRefunds(token, { status: status || undefined, limit: 50 }),
+        focusID
+          ? api
+              .request<api.PaymentRefund>(
+                `/api/payments/admin/refunds/${encodeURIComponent(focusID)}`,
+                { token },
+              )
+              .then((item) => [item])
+          : api.listPaymentRefunds(token, { status: status || undefined, limit: 50 }),
       ),
   });
   const exceptionsQuery = useQuery({

@@ -75,6 +75,12 @@ var rateRules = []rateRule{
 	{"auth", 30, func(m, p, _ string) bool { return m == http.MethodPost && strings.HasPrefix(p, "/api/auth/") }},
 	{"checkout", 20, func(m, p, _ string) bool { return m == http.MethodPost && strings.HasPrefix(p, "/api/orders/checkout") }},
 	{"webhook", 600, func(_, p, _ string) bool { return strings.HasPrefix(p, "/api/webhooks") }},
+	// Support cases and their messages (AF-01): people type them, so a
+	// flood is abuse; attachments fall under the upload rule below.
+	{"support", 60, func(m, p, ct string) bool {
+		return m == http.MethodPost && strings.HasPrefix(p, "/api/orders/") && strings.Contains(p, "/support-cases") &&
+			!strings.HasPrefix(ct, "multipart/")
+	}},
 	{"upload", 60, func(m, _, ct string) bool { return m == http.MethodPost && strings.HasPrefix(ct, "multipart/") }},
 	{"default", 1200, func(string, string, string) bool { return true }},
 }

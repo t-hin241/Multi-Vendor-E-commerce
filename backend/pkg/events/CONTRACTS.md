@@ -21,6 +21,7 @@ Domain events between services travel on NATS JetStream, stream `SHOPEE_EVENTS`,
 |---|---|---|---|---|
 | `vendor.status_changed` | Vendor (`vendor_outbox`) | Catalog `catalog-vendor-status`, Order `order-vendor-status` | `vendor_id`, `status`, `version` | Keep highest version; older ignored |
 | `vendor.notification_requested` | Vendor (`vendor_notification_outbox`) | Notification `notification-requests` | `user_id`, `type`, `reference_id` | One notification per event (dedup key) |
+| `vendor.policy_published` | Vendor (`policy_outbox`) | Order `order-policy-versions` | `policy_id`, `scope` (marketplace/shop), `vendor_id`, `kind`, `version`, `content_hash`, `rule_refs`, `effective_at` | Versions are immutable: store once per `policy_id`; the active one is picked by `effective_at` at checkout |
 | `catalog.product_status_changed` | Catalog (`product_status_outbox`) | Order `order-product-status` | `product_id`, `version`, `is_visible` | Keep highest version |
 | `inventory.reservation_expired` | Inventory (`inventory_outbox`) | Order `order-reservation-expiry` | `id`, `order_id`, `type` | Order cancels an unpaid order whose hold expired |
 | `inventory.stock_changed` | Inventory (`inventory_stock_outbox`) | Catalog `catalog-stock-cache` | `variant_ids` (1–100) | Drop cached stock; idempotent (new id per publish) |
@@ -56,3 +57,15 @@ Every connection logs in as its service (`EVENTBUS_PASSWORD`, the service's inte
 ## Rollback
 
 `EVENT_PUBLISHING=http` makes producers call the consumers' internal HTTP routes again (kept, service-authenticated). Consumers keep reading the stream, so events already published are still applied.
+
+## AF-07: case deadline notices
+
+`order.work_item_reminder`, `order.work_item_overdue`, and the corresponding
+`payment.*` / `shipment.*` types use schema version 1 (`events.WorkItemNotice`).
+Payload: resource type/id, SLA policy version, deadline version, stage, UTC
+due time, reminder kind and recipient user ID. No evidence, message text, PII,
+or signed links. The owner persists one event ID per recipient in its outbox;
+the receipt key is `(work_item_id,deadline_version,reminder_kind)`. Notification
+accepts these through its existing `notification-requests` durable and dedup key.
+They never cause money, stock or resource-lifecycle transitions. Correlation ID
+is the owner work item ID. See `deploy/case-sla-runbook.md` for staged rollout.

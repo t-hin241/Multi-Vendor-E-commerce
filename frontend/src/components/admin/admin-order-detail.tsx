@@ -22,6 +22,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { OrderPolicyCard } from "@/components/policies/order-policy-card";
 import * as api from "@/lib/api-client";
 import { useAuth } from "@/lib/auth-context";
 import { formatMoney } from "@/lib/format";
@@ -62,6 +63,8 @@ export function AdminOrderDetail({ orderId }: { orderId: string }) {
           </Button>
         }
       />
+
+      <OrderPolicyCard orderId={order.id} scope="admin" title="Policies at checkout (snapshot)" />
 
       <Card>
         <CardContent className="grid gap-2 text-sm sm:grid-cols-2">

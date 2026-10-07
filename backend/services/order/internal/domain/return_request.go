@@ -24,6 +24,8 @@ const (
 )
 
 type ReturnRequest struct {
+	ActionDueAt       *time.Time
+	WaitingOn         string
 	ID                string
 	OrderID           string
 	OrderItemID       string

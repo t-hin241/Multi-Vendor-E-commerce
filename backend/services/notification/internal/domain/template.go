@@ -16,6 +16,10 @@ type Template struct {
 }
 
 var templates = map[Type]Template{
+	"sla_support":      {"v1", "Hồ sơ hỗ trợ #%s cần được xử lý", "Hồ sơ đến hạn hoặc đã quá hạn. Mở /admin/support/%s để kiểm tra và xử lý theo quyền của bạn."},
+	"sla_return":       {"v1", "Yêu cầu trả hàng #%s cần được xử lý", "Yêu cầu đến hạn hoặc đã quá hạn. Mở /admin/returns?return_id=%s để kiểm tra. Thông báo này không phê duyệt hoàn tiền."},
+	"sla_refund":       {"v1", "Yêu cầu hoàn tiền #%s cần được xử lý", "Yêu cầu đến hạn hoặc đã quá hạn. Mở /admin/refunds?refund_id=%s để kiểm tra. Thông báo này không xác nhận tiền đã được hoàn."},
+	"sla_interception": {"v1", "Yêu cầu dừng giao #%s cần được xử lý", "Yêu cầu đến hạn hoặc đã quá hạn. Mở /admin/fulfillment?shipment_id=%s để kiểm tra và liên hệ đơn vị vận chuyển."},
 	TypeOrderPaid: {"v1", "Đơn hàng #%s đã được thanh toán",
 		"Chúng tôi đã nhận được thanh toán cho đơn hàng #%s. Người bán sẽ chuẩn bị hàng cho bạn."},
 	TypeOrderShipped: {"v1", "Đơn hàng #%s đã được giao cho đơn vị vận chuyển",
@@ -30,6 +34,16 @@ var templates = map[Type]Template{
 		"Cửa hàng (mã %s) đã được duyệt. Bạn có thể đăng sản phẩm để bán."},
 	TypeVendorRejected: {"v1", "Đăng ký cửa hàng chưa được duyệt",
 		"Đăng ký cửa hàng (mã %s) chưa được duyệt. Xem lý do trong trang quản lý cửa hàng và gửi lại sau khi chỉnh sửa."},
+	TypeSupportCaseOpened: {"v1", "Đã nhận yêu cầu hỗ trợ cho đơn hàng #%s",
+		"Chúng tôi đã nhận yêu cầu hỗ trợ của bạn cho đơn hàng #%s. Bạn có thể theo dõi phản hồi trong trang chi tiết đơn hàng."},
+	TypeSupportCaseResolved: {"v1", "Yêu cầu hỗ trợ cho đơn hàng #%s đã có kết luận",
+		"Yêu cầu hỗ trợ cho đơn hàng #%s đã có kết luận. Xem chi tiết trong trang đơn hàng; nếu chưa đồng ý, bạn có thể mở lại trong 7 ngày."},
+	TypeMarketplacePolicyUpdated: {"v1", "Chính sách sàn có phiên bản mới (cửa hàng %s)",
+		"Sàn đã công bố phiên bản chính sách mới áp dụng cho cửa hàng (mã %s). Đơn đã đặt giữ chính sách cũ; xem nội dung tại trang Chính sách."},
+	TypeShopPolicyApproved: {"v1", "Chính sách cửa hàng %s đã được duyệt",
+		"Chính sách bổ sung của cửa hàng (mã %s) đã được duyệt và hiển thị cho người mua."},
+	TypeShopPolicyRejected: {"v1", "Chính sách cửa hàng %s chưa được duyệt",
+		"Chính sách bổ sung của cửa hàng (mã %s) chưa được duyệt. Xem lý do trong trang quản lý cửa hàng và gửi lại sau khi chỉnh sửa."},
 }
 
 // Render builds the subject and plain-text body. name comes from Identity
@@ -52,7 +66,11 @@ func Render(n *Notification, name string) (subject, body string, err error) {
 	}, name)); name != "" {
 		greeting = "Xin chào " + name + ","
 	}
-	return fmt.Sprintf(t.Subject, ref), greeting + "\n\n" + fmt.Sprintf(t.Body, ref) + "\n\nĐây là email tự động, vui lòng không trả lời.\n", nil
+	bodyRef := ref
+	if strings.HasPrefix(string(n.Type), "sla_") {
+		bodyRef = n.ReferenceID
+	}
+	return fmt.Sprintf(t.Subject, ref), greeting + "\n\n" + fmt.Sprintf(t.Body, bodyRef) + "\n\nĐây là email tự động, vui lòng không trả lời.\n", nil
 }
 
 // KnownType reports whether t has a template.

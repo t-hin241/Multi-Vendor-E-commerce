@@ -19,6 +19,23 @@ import (
 // Order's event consumers (PLT-03). Each applies the event through the
 // same use case as the internal HTTP route, in the inbox transaction.
 
+// PolicyPublishedHandler: Vendor published a policy version (AF-02); it
+// joins Order's read model, used by the next checkouts.
+func PolicyPublishedHandler(orders *usecase.OrderUseCase) eventbus.Handler {
+	return func(ctx context.Context, tx pgx.Tx, env eventbus.Envelope) error {
+		var p events.PolicyPublication
+		if err := env.Decode(&p); err != nil {
+			return err
+		}
+		return orders.ApplyPolicyPublished(repository.WithTx(ctx, tx), policyVersionOf(p))
+	}
+}
+
+func policyVersionOf(p events.PolicyPublication) domain.PolicyVersion {
+	return domain.PolicyVersion{PolicyID: p.PolicyID, Scope: p.Scope, VendorID: p.VendorID, Kind: p.Kind, Version: p.Version,
+		ContentHash: p.ContentHash, RuleRefs: p.RuleRefs, EffectiveAt: p.EffectiveAt}
+}
+
 // ReservationExpiredHandler: Inventory's hold for an order expired.
 func ReservationExpiredHandler(orders *usecase.OrderUseCase) eventbus.Handler {
 	return func(ctx context.Context, tx pgx.Tx, env eventbus.Envelope) error {

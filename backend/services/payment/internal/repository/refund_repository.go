@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"shopee/backend/pkg/casesla"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -75,7 +76,8 @@ func (r *RefundRepository) Request(ctx context.Context, req domain.RefundRequest
 			return err
 		}
 		created = true
-		return nil
+		_, err = casesla.Sync(ctx, tx, refund.SLAStage())
+		return err
 	})
 	return refund, created, err
 }
@@ -170,6 +172,9 @@ func (r *RefundRepository) Resolve(ctx context.Context, id string, resolve func(
 			UPDATE payment_refunds SET status = $2, evidence_reference = $3, note = $4, failure_reason = $5,
 				resolved_by = $6, resolved_at = $7, updated_at = now()
 			WHERE id = $1`, refund.ID, refund.Status, refund.EvidenceReference, refund.Note, refund.FailureReason, refund.ResolvedBy, refund.ResolvedAt); err != nil {
+			return err
+		}
+		if _, err = casesla.Sync(ctx, tx, refund.SLAStage()); err != nil {
 			return err
 		}
 		if refund.OrderRefundID != nil {

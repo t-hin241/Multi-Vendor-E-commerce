@@ -12,6 +12,7 @@ import {
 } from "@/components/cart/cart-notices";
 import { CheckoutQuote } from "@/components/cart/checkout-quote";
 import { PageShell } from "@/components/page-shell";
+import { CheckoutPolicyNotice } from "@/components/policies/checkout-policy-notice";
 import { EmptyState, ErrorState, LoadingState } from "@/components/states/query-state";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -238,6 +239,7 @@ export default function CheckoutPage() {
                 </Button>
               </div>
             )}
+            {quote?.policies && <CheckoutPolicyNotice snapshot={quote.policies} />}
             <Button
               className="w-full"
               size="lg"
@@ -253,7 +255,12 @@ export default function CheckoutPage() {
                 const confirmed = quote.total_amount;
                 setChangedFrom(null);
                 checkout.mutate(
-                  { addressId, cartVersion: quote.cart_version, expectedTotalAmount: confirmed },
+                  {
+                    addressId,
+                    cartVersion: quote.cart_version,
+                    expectedTotalAmount: confirmed,
+                    acceptedPolicyVersions: quote.policy_versions,
+                  },
                   {
                     onError: (err) => {
                       if (checkoutErrorKind(err) === "total_changed") setChangedFrom(confirmed);

@@ -56,6 +56,11 @@ func TestEventContracts(t *testing.T) {
 	env, err = VendorNotification("notice-1", vendor, NotificationRequest{UserID: "u-1", Type: "vendor_approved", ReferenceID: vendor})
 	pin(t, env, err, VendorNotificationRequested, vendor, `{"user_id":"u-1","type":"vendor_approved","reference_id":"`+vendor+`"}`)
 
+	env, err = PolicyPublishedEvent("policy-row-1", PolicyPublication{PolicyID: product, Scope: "marketplace", Kind: "returns", Version: 2,
+		ContentHash: "abc", RuleRefs: map[string]string{"order.returns_window": "window-7d"}, EffectiveAt: at})
+	pin(t, env, err, VendorPolicyPublished, product, `{"policy_id":"`+product+`","scope":"marketplace","kind":"returns","version":2,`+
+		`"content_hash":"abc","rule_refs":{"order.returns_window":"window-7d"},"effective_at":"2026-10-02T08:00:00Z"}`)
+
 	env, err = OrderNotification("effect-1", order, NotificationRequest{UserID: "u-1", Type: "order_paid", ReferenceID: order})
 	pin(t, env, err, OrderNotificationRequested, order, `{"user_id":"u-1","type":"order_paid","reference_id":"`+order+`"}`)
 

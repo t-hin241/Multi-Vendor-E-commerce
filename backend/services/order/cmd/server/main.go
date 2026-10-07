@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"shopee/backend/pkg/casesla"
+	"time"
 
 	"shopee/backend/pkg/adminaudit"
 	"shopee/backend/pkg/middleware"
@@ -16,6 +18,7 @@ import (
 	"shopee/backend/pkg/health"
 	"shopee/backend/pkg/identityclient"
 	"shopee/backend/pkg/logger"
+	"shopee/backend/pkg/platform/objectstorage"
 	"shopee/backend/pkg/platform/postgres"
 	"shopee/backend/pkg/productsales"
 	"shopee/backend/pkg/shutdown"
@@ -45,6 +48,11 @@ func main() {
 		os.Exit(1)
 	}
 
+	slaConfig, err := sessionconfig.LoadCaseSLA()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "case SLA configuration invalid:", err)
+		os.Exit(1)
+	}
 	log := logger.New(serviceName, cfg.Base.Env, cfg.Base.LogLevel)
 
 	telemetryCfg, err := sessionconfig.LoadTelemetry()
@@ -106,32 +114,57 @@ func main() {
 	notificationClient := adapter.NewHTTPNotificationClient(cfg.NotificationServiceURL, internalServices.Key)
 	paymentClient := adapter.NewHTTPPaymentClient(cfg.PaymentServiceURL, internalServices.Key)
 
+	checkers := []health.Checker{{Name: "postgres", Ping: func(ctx context.Context) error { return dbPool.Ping(ctx) }}}
+	// AF-01: evidence images live in a private bucket; without one, support
+	// cases work without attachments.
+	var attachments usecase.AttachmentStore
+	if cfg.Support.Attachments != nil {
+		storeCtx, cancelStore := context.WithTimeout(ctx, 10*time.Second)
+		privateStore, err := objectstorage.NewPrivateClient(storeCtx, *cfg.Support.Attachments)
+		cancelStore()
+		if err != nil {
+			log.Fatal().Err(err).Msg("support attachment storage failed")
+		}
+		attachments = privateStore
+		checkers = append(checkers, health.Checker{Name: "support_attachments", Ping: privateStore.Ping})
+	}
+	pilotVendors := map[string]bool{}
+	for _, id := range cfg.Support.PilotVendorIDs {
+		pilotVendors[id] = true
+	}
+
 	vendorOrderRepo := repository.NewVendorOrderRepository(dbPool)
 	orderUseCase := usecase.NewOrderUseCase(usecase.Deps{
-		Events:          eventPublisher,
-		Orders:          repository.NewOrderRepository(dbPool),
-		VendorOrders:    vendorOrderRepo,
-		BuyerAddresses:  repository.NewBuyerAddressRepository(dbPool),
-		CommissionRules: repository.NewCommissionRuleRepository(dbPool),
-		CartConsumption: repository.NewCartConsumptionRepository(dbPool),
-		CheckoutOps:     repository.NewCheckoutOperationRepository(dbPool),
-		Payments:        repository.NewPaymentRecordRepository(dbPool),
-		Effects:         repository.NewEffectRepository(dbPool),
-		Refunds:         repository.NewRefundRepository(dbPool),
-		Returns:         repository.NewReturnRequestRepository(dbPool),
-		Cart:            cartClient,
-		Catalog:         catalogClient,
-		Vendors:         vendorClient,
-		Inventory:       inventoryClient,
-		Shipments:       shipmentClient,
-		Notifications:   notificationClient,
-		Payment:         paymentClient,
-		Identity:        identityclient.Client{URL: internalServices.IdentityURL, Key: internalServices.Key},
-		Audit:           repository.NewAuditRepository(dbPool),
-		Tx:              repository.Transactions{Pool: dbPool},
-		Operations:      repository.Operations{Pool: dbPool},
-		ReturnPolicy:    domain.ReturnPolicy{Version: cfg.ReturnPolicyVersion(), WindowDays: cfg.ReturnWindowDays},
-		Log:             log,
+		Events:            eventPublisher,
+		Orders:            repository.NewOrderRepository(dbPool),
+		VendorOrders:      vendorOrderRepo,
+		BuyerAddresses:    repository.NewBuyerAddressRepository(dbPool),
+		CommissionRules:   repository.NewCommissionRuleRepository(dbPool),
+		CartConsumption:   repository.NewCartConsumptionRepository(dbPool),
+		CheckoutOps:       repository.NewCheckoutOperationRepository(dbPool),
+		Payments:          repository.NewPaymentRecordRepository(dbPool),
+		Effects:           repository.NewEffectRepository(dbPool),
+		Refunds:           repository.NewRefundRepository(dbPool),
+		Returns:           repository.NewReturnRequestRepository(dbPool),
+		Support:           repository.NewSupportCaseRepository(dbPool),
+		Policies:          repository.NewPolicyVersionRepository(dbPool),
+		Attachments:       attachments,
+		Cart:              cartClient,
+		Catalog:           catalogClient,
+		Vendors:           vendorClient,
+		Inventory:         inventoryClient,
+		Shipments:         shipmentClient,
+		Notifications:     notificationClient,
+		Payment:           paymentClient,
+		Identity:          identityclient.Client{URL: internalServices.IdentityURL, Key: internalServices.Key},
+		Audit:             repository.NewAuditRepository(dbPool),
+		Tx:                repository.Transactions{Pool: dbPool},
+		Operations:        repository.Operations{Pool: dbPool},
+		ReturnPolicy:      domain.ReturnPolicy{Version: cfg.ReturnPolicyVersion(), WindowDays: cfg.ReturnWindowDays},
+		VersionedPolicies: cfg.VersionedPolicies,
+		SupportConfig: usecase.SupportConfig{Enabled: cfg.Support.Enabled, PilotVendorIDs: pilotVendors,
+			AttachmentRetention: time.Duration(cfg.Support.AttachmentRetentionDays) * 24 * time.Hour},
+		Log: log,
 	})
 	workerCtx, stopWorker := context.WithCancel(ctx)
 	defer stopWorker()
@@ -141,9 +174,9 @@ func main() {
 	adminHandler := transport.NewAdminHandler(orderUseCase, log)
 	internalHandler := transport.NewInternalHandler(orderUseCase, log)
 	returnHandler := transport.NewReturnHandler(orderUseCase, log)
+	supportHandler := transport.NewSupportHandler(orderUseCase, log)
 	router := transport.NewRouter(cfg.Base.Env, log, jwtManager, orderHandler, addressHandler, adminHandler, internalHandler, returnHandler,
-		internalServices.Verifier,
-		health.Checker{Name: "postgres", Ping: func(ctx context.Context) error { return dbPool.Ping(ctx) }},
+		supportHandler, internalServices.Verifier, checkers...,
 	)
 
 	salesStore := vendorsales.Store{Pool: dbPool}
@@ -161,14 +194,19 @@ func main() {
 		eventbus.Subscription{Durable: "order-shipment-facts", Types: []string{events.ShipmentChanged}, Handle: transport.ShipmentChangedHandler(orderUseCase)},
 		eventbus.Subscription{Durable: "order-payment-outcomes", Types: []string{events.PaymentOutcome}, Handle: transport.PaymentOutcomeHandler(orderUseCase)},
 		eventbus.Subscription{Durable: "order-refund-outcomes", Types: []string{events.RefundOutcome}, Handle: transport.RefundOutcomeHandler(orderUseCase)},
+		eventbus.Subscription{Durable: "order-policy-versions", Types: []string{events.VendorPolicyPublished}, Handle: transport.PolicyPublishedHandler(orderUseCase)},
 	)
 
 	router.GET("/internal/vendor-reports/:vendorId", internalServices.Verifier.Allow("vendor"), vendorreport.Handler(vendorreport.Service{Repository: vendorOrderRepo}, log))
 
 	adminGroup := router.Group("/api/orders/admin", middleware.RequireAuth(jwtManager), middleware.RequireRole("admin"))
+	slaRoles := identityclient.Client{URL: internalServices.IdentityURL, Key: internalServices.Key}
+	slaStore := repository.NewCaseSLAStore(dbPool)
+	casesla.Register(adminGroup, casesla.Service{Repo: slaStore, Roles: slaRoles}, log)
+	go (casesla.Worker{Store: slaStore, Owner: "order", Config: slaConfig, Roles: slaRoles, Publisher: bus.Bus, Log: log}).Run(workerCtx)
 	bus.RegisterAdmin(adminGroup, identityclient.Client{URL: internalServices.IdentityURL, Key: internalServices.Key})
 	adminaudit.Register(adminGroup, "/audit-events",
-		adminaudit.Source{Name: "order", SQL: repository.AuditSearchSQL + " UNION ALL " + eventbus.InboxAuditSearchSQL, DB: dbPool, Roles: identityclient.Client{URL: internalServices.IdentityURL, Key: internalServices.Key}}, log)
+		adminaudit.Source{Name: "order", SQL: repository.AuditSearchSQL + " UNION ALL " + eventbus.InboxAuditSearchSQL + " UNION ALL " + casesla.AuditSearchSQL, DB: dbPool, Roles: identityclient.Client{URL: internalServices.IdentityURL, Key: internalServices.Key}}, log)
 	srv := &http.Server{
 		Addr:              ":" + cfg.Base.Port,
 		Handler:           router,

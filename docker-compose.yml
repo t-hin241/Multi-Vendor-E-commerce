@@ -314,6 +314,8 @@ services:
       OBJECT_STORAGE_USE_SSL: "false"
       OBJECT_STORAGE_BUCKET: vendor-branding
       OBJECT_STORAGE_PUBLIC_BASE_URL: ${OBJECT_STORAGE_PUBLIC_BASE_URL:-http://localhost:9000}
+      # AF-02: publish versioned marketplace/shop policies.
+      FEATURE_VERSIONED_POLICIES_ENABLED: ${FEATURE_VERSIONED_POLICIES_ENABLED:-false}
     ports:
       - "${INTERNAL_BIND_ADDRESS:-127.0.0.1}:8082:8082"
 
@@ -428,10 +430,16 @@ services:
         condition: service_started
       notification:
         condition: service_started
+      minio:
+        condition: service_healthy
     build:
       context: ./backend
       dockerfile: services/order/Dockerfile
     environment:
+      FEATURE_CASE_SLA_ENABLED: ${ORDER_FEATURE_CASE_SLA_ENABLED:-false}
+      SLA_POLL_INTERVAL: ${SLA_POLL_INTERVAL:-60s}
+      SLA_ON_CALL_ADMIN_IDS: ${SLA_ON_CALL_ADMIN_IDS:-}
+      SLA_ESCALATION_ADMIN_IDS: ${SLA_ESCALATION_ADMIN_IDS:-}
       <<: *service-env-defaults
       INTERNAL_SERVICE_NAME: order
       DB_MAX_CONNS: "10"
@@ -449,6 +457,19 @@ services:
       # durable effects retried until Payment is up.
       PAYMENT_SERVICE_URL: http://payment:8087
       ORDER_RETURN_WINDOW_DAYS: ${ORDER_RETURN_WINDOW_DAYS:-7}
+      # AF-01 support cases: off by default; off only stops new cases.
+      FEATURE_ORDER_SUPPORT_ENABLED: ${FEATURE_ORDER_SUPPORT_ENABLED:-false}
+      FEATURE_ORDER_SUPPORT_PILOT_VENDOR_IDS: ${FEATURE_ORDER_SUPPORT_PILOT_VENDOR_IDS:-}
+      SUPPORT_ATTACHMENT_RETENTION_DAYS: ${SUPPORT_ATTACHMENT_RETENTION_DAYS:-180}
+      # Private evidence bucket: no bucket policy, read only through Order.
+      SUPPORT_ATTACHMENT_STORAGE_ENDPOINT: minio:9000
+      SUPPORT_ATTACHMENT_STORAGE_ACCESS_KEY: ${MINIO_ROOT_USER:?set MINIO_ROOT_USER in .env}
+      SUPPORT_ATTACHMENT_STORAGE_SECRET_KEY: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD in .env}
+      SUPPORT_ATTACHMENT_STORAGE_USE_SSL: "false"
+      SUPPORT_ATTACHMENT_BUCKET: support-evidence
+      # AF-02: snapshot published policies on new orders; turn on together
+      # with Vendor's flag, after Order consumes vendor.policy_published.
+      FEATURE_VERSIONED_POLICIES_ENABLED: ${FEATURE_VERSIONED_POLICIES_ENABLED:-false}
     ports:
       - "${INTERNAL_BIND_ADDRESS:-127.0.0.1}:8086:8086"
 
@@ -467,6 +488,10 @@ services:
       context: ./backend
       dockerfile: services/payment/Dockerfile
     environment:
+      FEATURE_CASE_SLA_ENABLED: ${PAYMENT_FEATURE_CASE_SLA_ENABLED:-false}
+      SLA_POLL_INTERVAL: ${SLA_POLL_INTERVAL:-60s}
+      SLA_ON_CALL_ADMIN_IDS: ${SLA_ON_CALL_ADMIN_IDS:-}
+      SLA_ESCALATION_ADMIN_IDS: ${SLA_ESCALATION_ADMIN_IDS:-}
       <<: *service-env-defaults
       INTERNAL_SERVICE_NAME: payment
       REDIS_URL: redis://payment:${PAYMENT_REDIS_PASSWORD}@redis:6379/0
@@ -504,6 +529,10 @@ services:
       context: ./backend
       dockerfile: services/shipment/Dockerfile
     environment:
+      FEATURE_CASE_SLA_ENABLED: ${SHIPMENT_FEATURE_CASE_SLA_ENABLED:-false}
+      SLA_POLL_INTERVAL: ${SLA_POLL_INTERVAL:-60s}
+      SLA_ON_CALL_ADMIN_IDS: ${SLA_ON_CALL_ADMIN_IDS:-}
+      SLA_ESCALATION_ADMIN_IDS: ${SLA_ESCALATION_ADMIN_IDS:-}
       <<: *service-env-defaults
       INTERNAL_SERVICE_NAME: shipment
       DB_MAX_CONNS: "4"

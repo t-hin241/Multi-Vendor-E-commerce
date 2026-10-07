@@ -44,3 +44,6 @@ fetching_data/
 
 # Load test output (deploy/loadtest)
 deploy/loadtest/results/
+
+# Repository-local toolchain/test scratch
+.tmp/

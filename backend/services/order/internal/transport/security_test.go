@@ -18,7 +18,7 @@ const someID = "00000000-0000-0000-0000-000000000001"
 
 func testRouter() (http.Handler, *authjwt.Manager) {
 	jwt := authjwttest.Manager()
-	return NewRouter("test", zerolog.Nop(), jwt, &OrderHandler{}, &BuyerAddressHandler{}, &AdminHandler{}, &InternalHandler{}, &ReturnHandler{},
+	return NewRouter("test", zerolog.Nop(), jwt, &OrderHandler{}, &BuyerAddressHandler{}, &AdminHandler{}, &InternalHandler{}, &ReturnHandler{}, &SupportHandler{},
 		serviceauth.SharedKey("fake-test-service-key-not-a-real-secret")), jwt
 }
 
@@ -56,6 +56,8 @@ func TestEveryInternalOrderRouteRequiresTheServiceKey(t *testing.T) {
 		{"POST", "/internal/refund-events"},
 		{"POST", "/internal/settlements/holds"},
 		{"POST", "/internal/shipment-events"},
+		{"GET", "/internal/policy-rules/readiness?key=order.returns_window&value=window-7d"},
+		{"POST", "/internal/policy-published"},
 	}
 	for _, rt := range routes {
 		for _, headers := range []map[string]string{nil, {serviceauth.Header: "wrong"}, as(t, jwt, "admin")} {
@@ -97,5 +99,68 @@ func TestRolesAndInputValidation(t *testing.T) {
 		if code := do(r, tc.method, tc.path, tc.body, tc.headers); code != http.StatusBadRequest {
 			t.Errorf("%s %s %s: expected 400, got %d", tc.method, tc.path, tc.body, code)
 		}
+	}
+}
+
+func TestSupportCaseRoutesCheckRolesAndInput(t *testing.T) {
+	r, jwt := testRouter()
+	forbidden := []struct {
+		method, path, role string
+	}{
+		{"POST", "/api/orders/" + someID + "/support-cases", "vendor"},
+		{"POST", "/api/orders/" + someID + "/support-cases", "admin"},
+		{"POST", "/api/orders/support-cases/" + someID + "/reopen", "vendor"},
+		{"POST", "/api/orders/vendor/support-cases/" + someID + "/messages", "buyer"},
+		{"GET", "/api/orders/admin/support-cases", "buyer"},
+		{"GET", "/api/orders/admin/support-cases", "vendor"},
+		{"POST", "/api/orders/admin/support-cases/" + someID + "/assignments", "vendor"},
+		{"POST", "/api/orders/admin/support-cases/" + someID + "/resolutions", "buyer"},
+		{"POST", "/api/orders/admin/support-cases/" + someID + "/messages", "buyer"},
+		{"GET", "/api/orders/admin/support-cases/" + someID + "/attachments/" + someID, "vendor"},
+	}
+	for _, tc := range forbidden {
+		if code := do(r, tc.method, tc.path, `{}`, as(t, jwt, tc.role)); code != http.StatusForbidden {
+			t.Errorf("%s %s as %s: expected 403, got %d", tc.method, tc.path, tc.role, code)
+		}
+	}
+	if code := do(r, "GET", "/api/orders/support-cases", "", nil); code != http.StatusUnauthorized {
+		t.Fatalf("anonymous case list: %d", code)
+	}
+	invalid := []struct {
+		method, path, body, role string
+	}{
+		{"POST", "/api/orders/" + someID + "/support-cases", `{"vendor_order_id":"x","category":"other","message":"m"}`, "buyer"},
+		{"POST", "/api/orders/" + someID + "/support-cases", `{"vendor_order_id":"` + someID + `","category":"other"}`, "buyer"},
+		{"POST", "/api/orders/" + someID + "/support-cases", `{"vendor_order_id":"` + someID + `","category":"other","message":"m","attachment_ids":["a","b","c","d","e","f"]}`, "buyer"},
+		{"GET", "/api/orders/support-cases/not-a-uuid", "", "buyer"},
+		{"POST", "/api/orders/admin/support-cases/" + someID + "/assignments", `{"assignee_id":"` + someID + `"}`, "admin"},
+		{"POST", "/api/orders/admin/support-cases/" + someID + "/resolutions", `{"resolution_kind":"refund","reason":"r","expected_version":1,"linked_operation_id":"x"}`, "admin"},
+		{"GET", "/api/orders/admin/support-cases?assignee=someone", "", "admin"},
+		{"POST", "/api/orders/support-attachments", "", "buyer"},
+	}
+	for _, tc := range invalid {
+		if code := do(r, tc.method, tc.path, tc.body, as(t, jwt, tc.role)); code != http.StatusBadRequest {
+			t.Errorf("%s %s %s: expected 400, got %d", tc.method, tc.path, tc.body, code)
+		}
+	}
+}
+
+func TestPolicyRoutesCheckRolesAndInput(t *testing.T) {
+	r, jwt := testRouter()
+	if code := do(r, "GET", "/api/orders/"+someID+"/policy-snapshot", "", nil); code != http.StatusUnauthorized {
+		t.Fatalf("anonymous snapshot read: %d", code)
+	}
+	if code := do(r, "GET", "/api/orders/not-a-uuid/policy-snapshot", "", as(t, jwt, "buyer")); code != http.StatusBadRequest {
+		t.Fatalf("invalid id: %d", code)
+	}
+	key := map[string]string{serviceauth.Header: "fake-test-service-key-not-a-real-secret"}
+	if code := do(r, "GET", "/internal/policy-rules/readiness?key=order.returns_window", "", key); code != http.StatusBadRequest {
+		t.Fatalf("readiness needs key and value: %d", code)
+	}
+	if code := do(r, "POST", "/internal/policy-published", `{"policy_id":1}`, key); code != http.StatusBadRequest {
+		t.Fatalf("malformed publication: %d", code)
+	}
+	if code := do(r, "POST", "/api/orders/checkout", `{"address_id":"`+someID+`","accepted_policy_versions":{"returns":"one"}}`, as(t, jwt, "buyer")); code != http.StatusBadRequest {
+		t.Fatalf("accepted versions must be numbers: %d", code)
 	}
 }

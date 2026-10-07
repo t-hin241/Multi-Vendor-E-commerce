@@ -3,6 +3,7 @@
 import Link from "next/link";
 
 import { useCategories } from "@/lib/hooks/use-categories";
+import { POLICY_KINDS } from "@/lib/policies";
 
 export function Footer() {
   const categoriesQuery = useCategories();
@@ -41,9 +42,20 @@ export function Footer() {
             <Link href="/orders" className="hover:text-foreground">
               Đơn hàng của tôi
             </Link>
+            <Link href="/support" className="hover:text-foreground">
+              Yêu cầu hỗ trợ
+            </Link>
             <Link href="/register" className="hover:text-foreground">
               Bán hàng cùng chúng tôi
             </Link>
+          </nav>
+          <p className="mt-4 font-medium text-foreground">Chính sách</p>
+          <nav className="mt-2 flex flex-col gap-1.5">
+            {POLICY_KINDS.map((p) => (
+              <Link key={p.kind} href={`/policies/${p.kind}`} className="hover:text-foreground">
+                {p.label}
+              </Link>
+            ))}
           </nav>
         </div>
       </div>

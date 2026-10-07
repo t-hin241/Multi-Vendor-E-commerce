@@ -21,6 +21,9 @@ type CheckoutInput struct {
 	CartVersion    *int64
 	ExpectedTotal  *int64
 	IdempotencyKey string
+	// AcceptedPolicyVersions are the marketplace policy versions (by kind)
+	// the buyer was shown; when given they must still be the ones in force.
+	AcceptedPolicyVersions map[string]int64
 }
 
 // Checkout places an order exactly once per (buyer, idempotency key):
@@ -46,7 +49,8 @@ func (uc *OrderUseCase) Checkout(ctx context.Context, buyerID string, in Checkou
 	} else if err := domain.ValidateIdempotencyKey(key); err != nil {
 		return nil, false, err
 	}
-	hash := domain.CheckoutRequest{AddressID: in.AddressID, CartVersion: in.CartVersion, ExpectedTotal: in.ExpectedTotal}.Hash()
+	hash := domain.CheckoutRequest{AddressID: in.AddressID, CartVersion: in.CartVersion, ExpectedTotal: in.ExpectedTotal,
+		AcceptedPolicies: in.AcceptedPolicyVersions}.Hash()
 
 	op, started, err := uc.CheckoutOps.Begin(ctx, buyerID, key, hash, domain.CheckoutKeyTTL)
 	if err != nil {
@@ -130,6 +134,11 @@ func (uc *OrderUseCase) runCheckout(ctx context.Context, buyerID string, op *dom
 	}
 	if in.ExpectedTotal != nil && *in.ExpectedTotal != plan.Order.TotalAmount {
 		return nil, domain.CheckoutTotalChanged()
+	}
+	if uc.policiesOn() {
+		if err := uc.snapshotPolicies(ctx, plan, in.AcceptedPolicyVersions, uc.Now()); err != nil {
+			return nil, err
+		}
 	}
 
 	plan.ProductVersions = priced.productVersions
@@ -388,6 +397,9 @@ type CheckoutPreview struct {
 	TotalAmount    *int64
 	Vendors        []PreviewVendor
 	Ready          bool
+	// Policies are the marketplace versions (and return rules) a checkout
+	// now would be placed under; nil while versioned policies are off.
+	Policies *domain.OrderPolicySnapshot
 }
 
 type PreviewVendor struct {
@@ -430,6 +442,11 @@ func (uc *OrderUseCase) Preview(ctx context.Context, buyerID, addressID string) 
 		counts[l.VendorID] += l.Quantity
 	}
 	preview := &CheckoutPreview{CartVersion: snapshot.CartVersion, Currency: plan.Order.Currency, SubtotalAmount: plan.Order.SubtotalAmount}
+	if uc.policiesOn() {
+		if preview.Policies, err = uc.currentPolicies(ctx, uc.Now()); err != nil {
+			return nil, err
+		}
+	}
 	for _, vo := range plan.VendorOrders {
 		v := PreviewVendor{VendorID: vo.VendorID, SubtotalAmount: vo.SubtotalAmount, ItemCount: counts[vo.VendorID]}
 		if q, ok := quotes[vo.VendorID]; ok {

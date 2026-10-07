@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"shopee/backend/pkg/casesla"
 
 	"shopee/backend/pkg/adminaudit"
 	"shopee/backend/pkg/middleware"
@@ -43,6 +44,11 @@ func main() {
 		os.Exit(1)
 	}
 
+	slaConfig, err := sessionconfig.LoadCaseSLA()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "case SLA configuration invalid:", err)
+		os.Exit(1)
+	}
 	log := logger.New(serviceName, cfg.Base.Env, cfg.Base.LogLevel)
 
 	telemetryCfg, err := sessionconfig.LoadTelemetry()
@@ -165,9 +171,13 @@ func main() {
 	go (usecase.Worker{Shipments: shipmentUseCase, Retention: cfg.AddressRetention, Log: log}).Run(workerCtx)
 
 	adminGroup := router.Group("/api/shipments/admin", middleware.RequireAuth(jwtManager), middleware.RequireRole("admin"))
+	slaRoles := identityclient.Client{URL: internalServices.IdentityURL, Key: internalServices.Key}
+	slaStore := casesla.Store{Pool: dbPool}
+	casesla.Register(adminGroup, casesla.Service{Repo: slaStore, Roles: slaRoles}, log)
+	go (casesla.Worker{Store: slaStore, Owner: "shipment", Config: slaConfig, Roles: slaRoles, Publisher: bus.Bus, Log: log}).Run(workerCtx)
 	bus.RegisterAdmin(adminGroup, identityclient.Client{URL: internalServices.IdentityURL, Key: internalServices.Key})
 	adminaudit.Register(adminGroup, "/audit-events",
-		adminaudit.Source{Name: "shipment", SQL: repository.AuditSearchSQL + " UNION ALL " + eventbus.InboxAuditSearchSQL, DB: dbPool, Roles: identityclient.Client{URL: internalServices.IdentityURL, Key: internalServices.Key}}, log)
+		adminaudit.Source{Name: "shipment", SQL: repository.AuditSearchSQL + " UNION ALL " + eventbus.InboxAuditSearchSQL + " UNION ALL " + casesla.AuditSearchSQL, DB: dbPool, Roles: identityclient.Client{URL: internalServices.IdentityURL, Key: internalServices.Key}}, log)
 	srv := &http.Server{
 		Addr:              ":" + cfg.Base.Port,
 		Handler:           router,

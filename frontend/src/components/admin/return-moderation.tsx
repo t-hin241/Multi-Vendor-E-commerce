@@ -43,17 +43,24 @@ const RETURN_STATUS_OPTIONS = [
 // ReturnModeration is admin's decision queue for returns. Approving lets
 // the buyer send the goods back; the refund only starts once the goods are
 // received, and every step is recorded in the return's history.
-export function ReturnModeration() {
+export function ReturnModeration({ focusID }: { focusID?: string }) {
   const { callWithAuth } = useAuth();
   const queryClient = useQueryClient();
   const [status, setStatus] = useState("vendor_confirmed");
   const [historyFor, setHistoryFor] = useState<string | null>(null);
 
   const returnsQuery = useQuery({
-    queryKey: ["admin-returns", status],
+    queryKey: ["admin-returns", status, focusID],
     queryFn: () =>
       callWithAuth((token) =>
-        api.listAdminReturns(token, { status: status || undefined, limit: 50 }),
+        focusID
+          ? api
+              .request<api.ReturnRequest>(
+                `/api/orders/admin/return-requests/${encodeURIComponent(focusID)}`,
+                { token },
+              )
+              .then((item) => [item])
+          : api.listAdminReturns(token, { status: status || undefined, limit: 50 }),
       ),
   });
   const historyQuery = useQuery({

@@ -34,7 +34,12 @@ export function useCheckout() {
   const queryClient = useQueryClient();
   const router = useRouter();
   return useMutation({
-    mutationFn: (vars: { addressId: string; cartVersion: number; expectedTotalAmount: number }) => {
+    mutationFn: (vars: {
+      addressId: string;
+      cartVersion: number;
+      expectedTotalAmount: number;
+      acceptedPolicyVersions?: Record<string, number>;
+    }) => {
       if (!user) throw new api.ApiError(401, "unauthorized", "You must be signed in.");
       const { key } = nextAttempt(user.id, vars);
       return callWithAuth((token) => api.checkout(token, { ...vars, idempotencyKey: key }));
@@ -65,6 +70,12 @@ export function useCheckout() {
         case "shipping_unavailable":
           refresh();
           toast.error(describeApiError(err, "Chưa hỗ trợ giao hàng đến địa chỉ này."));
+          return;
+        case "policy_changed":
+          refresh();
+          toast.warning(
+            "Chính sách của sàn vừa có phiên bản mới. Vui lòng xem lại chính sách rồi đặt hàng lại.",
+          );
           return;
         case "in_progress":
           // Same key: pressing again later returns the order being created.

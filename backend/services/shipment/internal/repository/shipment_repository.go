@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"errors"
+	"shopee/backend/pkg/casesla"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -21,7 +22,7 @@ const shipmentColumns = `id, vendor_order_id, vendor_id, buyer_id, status, versi
 	recipient_name, phone, province, district, ward, street_address,
 	shipped_at, delivered_at, returned_at, cancelled_at, tracking_updated_at, failed_attempts, last_attempt_reason,
 	intercept_provider_ref, intercept_requested_at, intercept_resolved_at, address_redacted_at,
-	created_at, updated_at`
+	created_at, updated_at, (SELECT due_at FROM case_sla_work_items w WHERE w.resource_type='interception' AND w.resource_id=shipments.id AND w.active), COALESCE((SELECT payload->>'waiting_on' FROM case_sla_work_items w WHERE w.resource_type='interception' AND w.resource_id=shipments.id AND w.active),'')`
 
 type ShipmentRepository struct {
 	pool *pgxpool.Pool
@@ -39,7 +40,7 @@ func scanShipment(row pgx.Row) (*domain.Shipment, error) {
 		&s.RecipientName, &s.Phone, &s.Province, &s.District, &s.Ward, &s.StreetAddress,
 		&s.ShippedAt, &s.DeliveredAt, &s.ReturnedAt, &s.CancelledAt, &s.TrackingUpdatedAt, &s.FailedAttempts, &s.LastAttemptReason,
 		&s.InterceptProviderRef, &s.InterceptRequestedAt, &s.InterceptResolvedAt, &s.AddressRedactedAt,
-		&s.CreatedAt, &s.UpdatedAt,
+		&s.CreatedAt, &s.UpdatedAt, &s.ActionDueAt, &s.WaitingOn,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrShipmentNotFound
@@ -127,6 +128,9 @@ type Change struct {
 // Transition moves a shipment from one status to another only if it is
 // still in from at version (compare-and-set); otherwise ErrStaleState.
 func (r *ShipmentRepository) Transition(ctx context.Context, s *domain.Shipment, to domain.Status, c Change) error {
+	if _, ok := ctx.Value(txKey{}).(pgx.Tx); !ok {
+		return (Transactions{Pool: r.pool}).Run(ctx, func(ctx context.Context) error { return r.Transition(ctx, s, to, c) })
+	}
 	trackingChanged := c.TrackingNumber != nil
 	err := connection(ctx, r.pool).QueryRow(ctx, `
 		UPDATE shipments SET status = $3, version = version + 1,
@@ -151,7 +155,20 @@ func (r *ShipmentRepository) Transition(ctx context.Context, s *domain.Shipment,
 		return err
 	}
 	s.Status = to
-	return nil
+	if c.InterceptAt != nil {
+		s.InterceptRequestedAt = c.InterceptAt
+	}
+	tx, _ := ctx.Value(txKey{}).(pgx.Tx)
+	i, err := casesla.Sync(ctx, tx, s.SLAStage())
+	if i != nil && i.Active {
+		due := i.EffectiveDueAt()
+		s.ActionDueAt = &due
+		s.WaitingOn = i.WaitingOn
+	} else {
+		s.ActionDueAt = nil
+		s.WaitingOn = ""
+	}
+	return err
 }
 
 // UpdateTracking corrects the tracking number of a package in transit.

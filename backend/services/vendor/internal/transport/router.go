@@ -22,6 +22,7 @@ func NewRouter(
 	addressHandler *VendorAddressHandler,
 	adminHandler *AdminHandler,
 	internalHandler *InternalHandler,
+	policyHandler *PolicyHandler,
 	internal *serviceauth.Verifier,
 	checkers ...health.Checker,
 ) *gin.Engine {
@@ -59,6 +60,9 @@ func NewRouter(
 		vendorGroup.DELETE("/:vendorId/addresses/:id", middleware.RequireRole("vendor"), addressHandler.Delete)
 		vendorGroup.PATCH("/:vendorId/addresses/:id/default", middleware.RequireRole("vendor"), addressHandler.SetDefault)
 
+		vendorGroup.POST("/:vendorId/policy-proposals", middleware.RequireRole("vendor"), policyHandler.Propose)
+		vendorGroup.GET("/:vendorId/policy-proposals", middleware.RequireRole("vendor"), policyHandler.ListMine)
+
 		adminGroup := vendorGroup.Group("/admin", middleware.RequireRole("admin"))
 		{
 			adminGroup.GET("/operations", adminHandler.Operations)
@@ -69,6 +73,13 @@ func NewRouter(
 			adminGroup.POST("/applications/:id/replay", adminHandler.Replay)
 			adminGroup.PATCH("/applications/:id/approve", adminHandler.Approve)
 			adminGroup.PATCH("/applications/:id/reject", adminHandler.Reject)
+
+			adminGroup.GET("/policy-versions", policyHandler.AdminList)
+			adminGroup.POST("/policy-versions", policyHandler.CreateDraft)
+			adminGroup.POST("/policy-versions/:id/publications", policyHandler.Publish)
+			adminGroup.POST("/policy-versions/:id/withdrawal", policyHandler.Withdraw)
+			adminGroup.GET("/policy-proposals", policyHandler.AdminProposals)
+			adminGroup.POST("/policy-proposals/:id/decisions", policyHandler.Decide)
 		}
 	}
 
@@ -77,7 +88,12 @@ func NewRouter(
 	// static-prefix group to /api/vendor/admin above, at the same tree
 	// level as the /:vendorId wildcard inside vendorGroup — a shape this
 	// router already relies on working correctly.
-	r.GET("/api/vendor/public/:vendorId", vendorHandler.GetPublic)
+	r.GET("/api/vendor/public/:vendorId", policyHandler.PublicShop)
+	// AF-02: marketplace policies in force, their history and any published
+	// version (links kept on orders stay readable).
+	r.GET("/api/vendor/public/policies", policyHandler.Public)
+	r.GET("/api/vendor/public/policies/:kind/versions", policyHandler.History)
+	r.GET("/api/vendor/public/policies/:kind/versions/:version", policyHandler.Version)
 
 	internalGroup := r.Group("/internal/vendors")
 	{

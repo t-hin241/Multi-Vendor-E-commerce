@@ -109,3 +109,36 @@ Không chạy migration down khi đã có dữ liệu của luồng mới. Down 
   - Side effect, checkout operation và yêu cầu hoàn tiền đang dở dừng lại, rồi tiếp tục khi Order mới lên lại.
 - Payment về bản cũ: yêu cầu hoàn tiền mới từ Order bị 404 và tác vụ `request_refund` bị park. Replay sau khi Payment mới lên lại.
 - Frontend về bản cũ: checkout vẫn chạy nhưng không có idempotency key hay xác nhận tổng. Admin cũ không còn nút chuyển "refunded" hợp lệ.
+
+## Hỗ trợ và khiếu nại theo đơn (AF-01)
+
+Đặc tả: [01-order-support-cases](../docs/modular/add_features/01-order-support-cases.md). Order sở hữu case, message, timeline và ảnh bằng chứng; migration `000016_support_cases`. Không có secret mới ngoài khóa MinIO/S3 đã có.
+
+| Biến | Mặc định | Ý nghĩa |
+|---|---|---|
+| `FEATURE_ORDER_SUPPORT_ENABLED` | `false` | Nhận case mới. Tắt chỉ chặn case mới; case cũ vẫn đọc, trả lời, giải quyết được |
+| `FEATURE_ORDER_SUPPORT_PILOT_VENDOR_IDS` | rỗng | Danh sách vendor id (phẩy) được nhận case mới khi pilot; rỗng = mọi shop |
+| `SUPPORT_ATTACHMENT_RETENTION_DAYS` | `180` | Số ngày giữ ảnh sau khi case đóng |
+| `SUPPORT_ATTACHMENT_STORAGE_ENDPOINT`, `_ACCESS_KEY`, `_SECRET_KEY`, `_USE_SSL`, `SUPPORT_ATTACHMENT_BUCKET` | compose: `minio:9000`, bucket `support-evidence` | Bucket riêng tư cho ảnh. Order từ chối khởi động nếu bucket có bucket policy (tránh trỏ nhầm bucket media public). Bỏ trống endpoint = chạy không có ảnh |
+
+Vận hành:
+
+- Trước khi bật: có người trực hàng chờ `/admin/support` và email liên hệ thật; bật cho nhóm shop pilot bằng `FEATURE_ORDER_SUPPORT_PILOT_VENDOR_IDS`.
+- Dashboard admin có ô `support_cases_unassigned`, `support_cases_overdue`, `support_cases_resolution_pending` (nguồn `/api/orders/admin/operations`).
+- Case thuộc nhóm ảnh hưởng tiền (mọi category trừ `other`) giữ payout của vendor order cho đến khi case `closed` (lý do `support_case_open` trong `/internal/settlements/holds`). Case `resolved` tự đóng sau 7 ngày bởi worker của Order, nên hold không kéo dài vô hạn.
+- Kết luận cần tiền/hàng: admin tạo refund tranh chấp ở trang đơn (hoặc buyer tạo return), rồi liên kết vào case. Case chỉ `resolved` khi Payment xác nhận refund / return đã `refunded`; refund thất bại đưa case về `in_progress`.
+- Log cần theo dõi: `order_support_resolution_failed`, `order_support_attachment_put_failed`, `order_support_attachment_delete_failed` (object mồ côi trong bucket riêng tư, xóa tay theo `attachment_id`), `order_support_auto_close_failed`.
+- Upload chưa gắn vào tin nhắn bị xóa sau 24 giờ; ảnh của case đã đóng bị xóa sau thời hạn giữ. Hàng `case_attachments` giữ lại làm tombstone.
+
+Rollback: đặt `FEATURE_ORDER_SUPPORT_ENABLED=false`. Không chạy down `000016` khi đã có case: down tự từ chối để không mất hồ sơ khiếu nại và hold payout. Order bản cũ bỏ qua bảng mới; khi đó payout của vendor order có case mở **không** còn bị giữ, nên chỉ rollback image khi không còn case ảnh hưởng tiền đang mở.
+
+## Snapshot chính sách khi đặt đơn (AF-02)
+
+Migration `000017_policy_snapshots`: read model `policy_versions` (từ `vendor.policy_published`, consumer `order-policy-versions`, HTTP dự phòng `POST /internal/policy-published`) và cột `policy_snapshot` trên `orders`/`vendor_orders`.
+
+- `FEATURE_VERSIONED_POLICIES_ENABLED=true`: mỗi đơn mới lưu phiên bản chính sách đang hiệu lực (theo `effective_at` so với thời điểm đặt, UTC) và rule đổi trả. Preview trả `policy_versions`; checkout nhận `accepted_policy_versions`, khác phiên bản đang hiệu lực thì 409 `policy_changed`. Chưa có chính sách đổi trả publish thì snapshot ghi rõ rule từ `ORDER_RETURN_WINDOW_DAYS` (`source=config`).
+- Yêu cầu trả hàng và ngày đủ điều kiện payout (`eligible_at`) dùng cửa sổ trong snapshot của vendor order; đơn không có snapshot (đặt trước khi bật) giữ rule cũ từ config. Không backfill.
+- `GET /api/orders/:id/policy-snapshot` (buyer chủ đơn, vendor của gói hàng qua `/api/orders/vendor/:id/policy-snapshot`, admin).
+- Theo dõi tỉ lệ 409 `policy_changed` ở checkout (tăng ngay sau khi một phiên bản có hiệu lực là bình thường).
+
+Rollback: tắt flag (đơn mới quay về rule config; đơn đã có snapshot giữ nguyên). Không chạy down `000017` khi đã có snapshot.

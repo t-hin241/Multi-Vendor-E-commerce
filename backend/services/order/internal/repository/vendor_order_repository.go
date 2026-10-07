@@ -282,8 +282,10 @@ func (r *VendorOrderRepository) QuantitySoldByProductIDs(ctx context.Context, pr
 	return out, rows.Err()
 }
 
-// HeldForSettlement names which of ids have a return request or a refund
-// still open; Payment must not pay those vendor orders out yet.
+// HeldForSettlement names which of ids have a return request, a refund or
+// a support case that may affect money still open; Payment must not pay
+// those vendor orders out yet. A support case holds until it is closed
+// (a resolved case can still be reopened).
 func (r *VendorOrderRepository) HeldForSettlement(ctx context.Context, ids []string) (map[string]string, error) {
 	out := map[string]string{}
 	if len(ids) == 0 {
@@ -294,7 +296,10 @@ func (r *VendorOrderRepository) HeldForSettlement(ctx context.Context, ids []str
 		WHERE oi.vendor_order_id::text = ANY($1) AND rr.status NOT IN ('rejected', 'refunded')
 		UNION ALL
 		SELECT vendor_order_id::text, 'refund_open' FROM order_refunds
-		WHERE vendor_order_id::text = ANY($1) AND status IN ('requested', 'submitted')`, ids)
+		WHERE vendor_order_id::text = ANY($1) AND status IN ('requested', 'submitted')
+		UNION ALL
+		SELECT vendor_order_id::text, 'support_case_open' FROM support_cases
+		WHERE vendor_order_id::text = ANY($1) AND financial_hold AND status <> 'closed'`, ids)
 	if err != nil {
 		return nil, err
 	}

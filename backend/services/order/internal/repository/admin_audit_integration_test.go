@@ -99,7 +99,7 @@ func TestOperationCountsRun(t *testing.T) {
 	pool := orderDB(t)
 	pendingOrder(t, pool)
 	counts, err := (repository.Operations{Pool: pool}).Counts(t.Context())
-	if err != nil || len(counts) != 5 || counts["awaiting_shipment"] != 0 {
+	if err != nil || len(counts) != 8 || counts["awaiting_shipment"] != 0 || counts["support_cases_unassigned"] != 0 {
 		t.Fatalf("unexpected counts %v %v", counts, err)
 	}
 }

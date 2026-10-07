@@ -10,6 +10,7 @@ import (
 	"github.com/rs/zerolog"
 
 	"shopee/backend/pkg/apperror"
+	"shopee/backend/pkg/events"
 	"shopee/backend/pkg/httpresponse"
 	"shopee/backend/services/order/internal/domain"
 	"shopee/backend/services/order/internal/usecase"
@@ -310,6 +311,33 @@ func (h *InternalHandler) InventoryEvent(c *gin.Context) {
 		return
 	}
 	if err := h.orders.ReservationExpired(c.Request.Context(), event.OrderID); err != nil {
+		httpresponse.HandleError(c, h.log, err)
+		return
+	}
+	httpresponse.OK(c, http.StatusOK, gin.H{"received": true})
+}
+
+// PolicyRuleReadiness tells Vendor whether Order enforces a rule version
+// a policy cites (AF-02). It never says ready for a rule it does not run.
+func (h *InternalHandler) PolicyRuleReadiness(c *gin.Context) {
+	key, value := c.Query("key"), c.Query("value")
+	if key == "" || value == "" || len(key) > 100 || len(value) > 100 {
+		httpresponse.Error(c, http.StatusBadRequest, "validation_error", "key and value are required")
+		return
+	}
+	ready, hash, reason := h.orders.PolicyRuleReadiness(key, value)
+	httpresponse.OK(c, http.StatusOK, gin.H{"ready": ready, "rule_hash": hash, "reason": reason})
+}
+
+// PolicyPublished receives a publication over HTTP (Vendor in
+// EVENT_PUBLISHING=http, rollback only); same use case as the event.
+func (h *InternalHandler) PolicyPublished(c *gin.Context) {
+	var p events.PolicyPublication
+	if err := c.ShouldBindJSON(&p); err != nil {
+		httpresponse.Error(c, http.StatusBadRequest, "validation_error", "Invalid policy publication")
+		return
+	}
+	if err := h.orders.ApplyPolicyPublished(c.Request.Context(), policyVersionOf(p)); err != nil {
 		httpresponse.HandleError(c, h.log, err)
 		return
 	}

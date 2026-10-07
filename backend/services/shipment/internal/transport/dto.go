@@ -23,6 +23,8 @@ type simulateCarrierDecisionRequest struct {
 }
 
 type shipmentResponse struct {
+	ActionDueAt          *time.Time `json:"action_due_at"`
+	WaitingOn            string     `json:"waiting_on"`
 	ID                   string     `json:"id"`
 	VendorOrderID        string     `json:"vendor_order_id"`
 	Status               string     `json:"status"`
@@ -52,7 +54,7 @@ type shipmentResponse struct {
 }
 
 func toShipmentResponse(s *domain.Shipment) shipmentResponse {
-	return shipmentResponse{
+	return shipmentResponse{ActionDueAt: s.ActionDueAt, WaitingOn: s.WaitingOn,
 		ID: s.ID, VendorOrderID: s.VendorOrderID, Status: string(s.Status),
 		CarrierID: s.CarrierID, TrackingNumber: s.TrackingNumber,
 		ZoneName: s.ZoneName, FeeAmount: s.FeeAmount, PackageWeightGrams: s.PackageWeightGrams,

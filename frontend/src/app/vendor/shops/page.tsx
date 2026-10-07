@@ -12,6 +12,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { VendorStatusBadge } from "@/components/vendor/status-badges";
+import { ShopPolicyProposals } from "@/components/vendor/shop-policy-proposals";
 import * as api from "@/lib/api-client";
 import { useAuth } from "@/lib/auth-context";
 
@@ -121,12 +122,12 @@ export default function VendorShopsPage() {
                         placeholder="Mô tả"
                       />
                       <Label className="flex flex-col items-start gap-1.5 text-sm">
-                        Chính sách đổi trả / vận chuyển
+                        Ghi chú chính sách (bản cũ, không cần duyệt)
                         <Textarea
                           value={editForm.policyText}
                           onChange={(e) => setEditForm({ ...editForm, policyText: e.target.value })}
                           rows={3}
-                          placeholder="Hiển thị trên trang cửa hàng công khai"
+                          placeholder="Khi sàn bật chính sách theo phiên bản, trang cửa hàng chỉ hiển thị chính sách đã duyệt"
                         />
                       </Label>
                       <div className="flex gap-2">
@@ -183,6 +184,7 @@ export default function VendorShopsPage() {
                   )}
                   <ShopReadiness vendor={v} />
                   <VendorBrandingUploader vendor={v} onChanged={refresh} />
+                  {!isEditing && <ShopPolicyProposals vendorId={v.id} />}
                 </CardContent>
               </Card>
             </li>

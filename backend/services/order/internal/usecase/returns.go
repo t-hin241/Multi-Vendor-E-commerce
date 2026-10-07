@@ -2,6 +2,7 @@ package usecase
 
 import (
 	"context"
+	"errors"
 
 	"shopee/backend/pkg/apperror"
 	"shopee/backend/services/order/internal/domain"
@@ -46,7 +47,11 @@ func (uc *OrderUseCase) CreateReturn(ctx context.Context, buyerID string, in Ret
 		if err != nil {
 			return err
 		}
-		amount, err := domain.ValidateNewReturn(uc.ReturnPolicy, domain.ReturnEligibility{
+		policy, err := uc.returnPolicyFor(ctx, vo.ID)
+		if err != nil {
+			return err
+		}
+		amount, err := domain.ValidateNewReturn(policy, domain.ReturnEligibility{
 			VendorOrderStatus: vo.Status, CompletedAt: vo.CompletedAt, ItemQuantity: item.Quantity, ItemPrice: item.PriceAmount, AlreadyReturned: returned, Now: uc.Now(),
 		}, in.Quantity, in.Reason, evidence)
 		if err != nil {
@@ -54,7 +59,7 @@ func (uc *OrderUseCase) CreateReturn(ctx context.Context, buyerID string, in Ret
 		}
 		reason, _ := domain.ValidateNote(in.Reason, 2000, true, "Reason")
 		rr = &domain.ReturnRequest{OrderID: order.ID, OrderItemID: item.ID, BuyerID: buyerID, Reason: *reason, Quantity: in.Quantity,
-			RefundAmount: amount, PolicyVersion: uc.ReturnPolicy.Version, ReturnWindowDays: ptr(uc.ReturnPolicy.WindowDays), Evidence: evidence}
+			RefundAmount: amount, PolicyVersion: policy.Version, ReturnWindowDays: ptr(policy.WindowDays), Evidence: evidence}
 		if err := uc.Returns.Create(ctx, rr); err != nil {
 			return err
 		}
@@ -260,6 +265,17 @@ func (uc *OrderUseCase) stepReturn(ctx context.Context, rr *domain.ReturnRequest
 		FromStatus: &fromStatus, ToStatus: string(to), Note: note}); err != nil {
 		return err
 	}
+	// A support case resolved by this return follows its outcome.
+	var err error
+	switch to {
+	case domain.ReturnRefunded:
+		err = uc.syncSupportResolution(ctx, domain.ResolutionReturn, rr.ID, true, nil)
+	case domain.ReturnRejected, domain.ReturnRefundFailed:
+		err = uc.syncSupportResolution(ctx, domain.ResolutionReturn, rr.ID, false, ptr("Return "+string(to)))
+	}
+	if err != nil {
+		return err
+	}
 	if role != "admin" || actor == nil {
 		return nil
 	}
@@ -329,6 +345,20 @@ func (uc *OrderUseCase) ListVendorReturns(ctx context.Context, userID, vendorID,
 }
 
 // ListReturns lists return requests for admin, optionally by status.
+func (uc *OrderUseCase) GetAdminReturn(ctx context.Context, adminID, id string) (*domain.ReturnRequest, error) {
+	if err := uc.requireAdmin(ctx, adminID); err != nil {
+		return nil, err
+	}
+	r, err := uc.Returns.FindByID(ctx, id)
+	if errors.Is(err, repository.ErrReturnRequestNotFound) {
+		return nil, apperror.NotFound("Return request not found")
+	}
+	if err != nil {
+		return nil, apperror.Internal(err)
+	}
+	return r, nil
+}
+
 func (uc *OrderUseCase) ListReturns(ctx context.Context, status string, limit, offset int) ([]*domain.ReturnRequest, error) {
 	if err := validReturnStatus(status); err != nil {
 		return nil, err

@@ -1,4 +1,12 @@
-import { ClipboardList, LayoutDashboard, MessageSquare, Package, Store, Truck } from "lucide-react";
+import {
+  ClipboardList,
+  LayoutDashboard,
+  LifeBuoy,
+  MessageSquare,
+  Package,
+  Store,
+  Truck,
+} from "lucide-react";
 
 export type VendorNavLink = {
   href: string;
@@ -12,6 +20,7 @@ export const VENDOR_NAV_LINKS: VendorNavLink[] = [
   { href: "/vendor", label: "Tổng quan", icon: LayoutDashboard },
   { href: "/vendor/products", label: "Sản phẩm", icon: Package },
   { href: "/vendor/orders", label: "Đơn hàng", icon: ClipboardList },
+  { href: "/vendor/support", label: "Hỗ trợ đơn hàng", icon: LifeBuoy },
   { href: "/vendor/reviews", label: "Đánh giá", icon: MessageSquare },
   { href: "/vendor/shipping", label: "Vận chuyển", icon: Truck },
   { href: "/vendor/shops", label: "Cửa hàng", icon: Store },

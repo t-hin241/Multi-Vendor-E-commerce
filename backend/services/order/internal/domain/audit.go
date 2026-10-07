@@ -7,6 +7,7 @@ const (
 	AuditReturn         = "return_request"
 	AuditEffect         = "effect"
 	AuditCommissionRule = "commission_rule"
+	AuditSupportCase    = "support_case"
 )
 
 // AdminAction is one admin decision recorded in the same transaction as

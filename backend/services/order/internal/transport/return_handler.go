@@ -124,6 +124,18 @@ func (h *ReturnHandler) AdminList(c *gin.Context) {
 	httpresponse.OK(c, http.StatusOK, toReturnResponses(items))
 }
 
+func (h *ReturnHandler) AdminGet(c *gin.Context) {
+	if !validID(c, c.Param("id")) {
+		return
+	}
+	r, err := h.orders.GetAdminReturn(c.Request.Context(), middleware.GetUserID(c), c.Param("id"))
+	if err != nil {
+		httpresponse.HandleError(c, h.log, err)
+		return
+	}
+	httpresponse.OK(c, http.StatusOK, toReturnResponse(r))
+}
+
 func (h *ReturnHandler) Decide(c *gin.Context) {
 	if !validID(c, c.Param("id")) {
 		return

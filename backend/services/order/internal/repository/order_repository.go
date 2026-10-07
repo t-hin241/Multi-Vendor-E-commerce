@@ -72,17 +72,21 @@ func (r *OrderRepository) CreateFromPlan(ctx context.Context, plan *domain.Plan)
 			return err
 		}
 
+		orderPolicyJSON, err := nullableJSON(plan.OrderPolicy)
+		if err != nil {
+			return err
+		}
 		order := plan.Order
 		if order.CheckoutState == "" {
 			order.CheckoutState = domain.CheckoutReady
 		}
 		if err := tx.QueryRow(ctx, `
 			INSERT INTO orders (buyer_id, status, checkout_state, subtotal_amount, shipping_amount, total_amount, currency,
-			                    recipient_name, phone, province, district, ward, street_address)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+			                    recipient_name, phone, province, district, ward, street_address, policy_snapshot)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
 			RETURNING id, version, created_at, updated_at`,
 			order.BuyerID, order.Status, order.CheckoutState, order.SubtotalAmount, order.ShippingAmount, order.TotalAmount, order.Currency,
-			order.RecipientName, order.Phone, order.Province, order.District, order.Ward, order.StreetAddress,
+			order.RecipientName, order.Phone, order.Province, order.District, order.Ward, order.StreetAddress, orderPolicyJSON,
 		).Scan(&order.ID, &order.Version, &order.CreatedAt, &order.UpdatedAt); err != nil {
 			return err
 		}
@@ -97,19 +101,27 @@ func (r *OrderRepository) CreateFromPlan(ctx context.Context, plan *domain.Plan)
 			if c == nil {
 				c = &domain.CommissionSnapshot{}
 			}
+			var vendorPolicy *domain.VendorPolicySnapshot
+			if i < len(plan.VendorPolicies) {
+				vendorPolicy = plan.VendorPolicies[i]
+			}
+			vendorPolicyJSON, err := nullableJSON(vendorPolicy)
+			if err != nil {
+				return err
+			}
 			if err := tx.QueryRow(ctx, `
 				INSERT INTO vendor_orders (order_id, vendor_id, status, subtotal_amount, shipping_fee_amount, currency,
 				    shipping_carrier_id, shipping_zone_id, shipping_fee_rule_id, shipping_fee_rule_version, package_weight_grams, shipping_quoted_at,
 				    commission_rule_id, commission_rule_version, commission_rate_bps, commission_base_amount, commission_amount, net_amount,
-				    commission_rounding, commission_source)
+				    commission_rounding, commission_source, policy_snapshot)
 				VALUES ($1, $2, $3, $4, $5, $6,
 				    NULLIF($7, '')::uuid, NULLIF($8, '')::uuid, NULLIF($9, '')::uuid, NULLIF($10, 0), $11, $12,
-				    $13, $14, $15, $16, $17, $18, NULLIF($19, ''), NULLIF($20, ''))
+				    $13, $14, $15, $16, $17, $18, NULLIF($19, ''), NULLIF($20, ''), $21)
 				RETURNING id`,
 				order.ID, vo.VendorID, vo.Status, vo.SubtotalAmount, vo.ShippingFeeAmount, vo.Currency,
 				q.CarrierID, q.ZoneID, q.FeeRuleID, q.FeeRuleVersion, nullableWeight(vo.Shipping), nullableTime(vo.Shipping),
 				c.RuleID, c.RuleVersion, nullableRate(vo.Commission), nullableBase(vo.Commission), nullableAmount(vo.Commission, false), nullableAmount(vo.Commission, true),
-				c.Rounding, c.Source,
+				c.Rounding, c.Source, vendorPolicyJSON,
 			).Scan(&vendorOrderIDs[i]); err != nil {
 				return err
 			}

@@ -49,7 +49,12 @@ export function loadAttempt(userId: string, now = Date.now(), s = store()): Stor
 // when the input is the same, otherwise a new one (which replaces it).
 export function nextAttempt(
   userId: string,
-  input: { addressId: string; cartVersion: number; expectedTotalAmount: number },
+  input: {
+    addressId: string;
+    cartVersion: number;
+    expectedTotalAmount: number;
+    acceptedPolicyVersions?: Record<string, number>;
+  },
   now = Date.now(),
   s = store(),
 ): StoredAttempt {

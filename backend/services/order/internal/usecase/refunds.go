@@ -260,11 +260,17 @@ func (uc *OrderUseCase) applyRefundOutcome(ctx context.Context, orderID string, 
 
 		switch outcome.Status {
 		case domain.RefundSucceeded:
-			return uc.recordRefunded(ctx, refund)
+			if err := uc.recordRefunded(ctx, refund); err != nil {
+				return err
+			}
+			return uc.syncSupportResolution(ctx, domain.ResolutionRefund, refund.ID, true, nil)
 		case domain.RefundFailed, domain.RefundRejected:
 			if refund.ReturnRequestID != nil {
-				return uc.moveReturn(ctx, *refund.ReturnRequestID, domain.ReturnRefundFailed, "system", nil, "refund_failed", failure)
+				if err := uc.moveReturn(ctx, *refund.ReturnRequestID, domain.ReturnRefundFailed, "system", nil, "refund_failed", failure); err != nil {
+					return err
+				}
 			}
+			return uc.syncSupportResolution(ctx, domain.ResolutionRefund, refund.ID, false, ptr("Refund "+string(outcome.Status)))
 		}
 		return nil
 	})

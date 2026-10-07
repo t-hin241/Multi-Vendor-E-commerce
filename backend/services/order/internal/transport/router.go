@@ -1,6 +1,7 @@
 // Package transport wires Order's HTTP router: middleware, health checks,
-// buyer checkout/orders/returns, the vendor's own sub-orders and returns,
-// admin operations, and the service-authenticated internal contracts.
+// buyer checkout/orders/returns/support cases, the vendor's own sub-orders,
+// returns and support cases, admin operations, and the
+// service-authenticated internal contracts.
 package transport
 
 import (
@@ -27,6 +28,7 @@ func NewRouter(
 	adminHandler *AdminHandler,
 	internalHandler *InternalHandler,
 	returnHandler *ReturnHandler,
+	supportHandler *SupportHandler,
 	internal *serviceauth.Verifier,
 	checkers ...health.Checker,
 ) *gin.Engine {
@@ -51,9 +53,21 @@ func NewRouter(
 		buyerGroup.POST("/checkout/preview", orderHandler.Preview)
 		buyerGroup.GET("/mine", orderHandler.ListMine)
 		buyerGroup.GET("/:id", orderHandler.Get)
+		buyerGroup.GET("/:id/policy-snapshot", orderHandler.PolicySnapshot)
 		buyerGroup.POST("/:id/cancel", orderHandler.Cancel)
 		buyerGroup.POST("/:id/return-requests", returnHandler.Create)
 		buyerGroup.GET("/return-requests/mine", returnHandler.ListMine)
+
+		buyerGroup.GET("/support-cases/capability", supportHandler.Capability)
+		buyerGroup.POST("/:id/support-cases", supportHandler.Create)
+		buyerGroup.GET("/support-cases", supportHandler.List)
+		buyerGroup.GET("/support-cases/:caseID", supportHandler.Get)
+		buyerGroup.GET("/support-cases/:caseID/messages", supportHandler.Messages)
+		buyerGroup.POST("/support-cases/:caseID/messages", supportHandler.PostMessage)
+		buyerGroup.POST("/support-cases/:caseID/reopen", supportHandler.Reopen)
+		buyerGroup.POST("/support-cases/:caseID/confirm", supportHandler.Confirm)
+		buyerGroup.GET("/support-cases/:caseID/attachments/:attachmentID", supportHandler.Attachment)
+		buyerGroup.POST("/support-attachments", supportHandler.Upload)
 
 		buyerGroup.POST("/addresses", addressHandler.Add)
 		buyerGroup.GET("/addresses", addressHandler.ListMine)
@@ -67,7 +81,15 @@ func NewRouter(
 		vendorGroup.GET("/return-requests", returnHandler.VendorList)
 		vendorGroup.POST("/return-requests/:id/confirm", returnHandler.ConfirmByVendor)
 		vendorGroup.POST("/return-requests/:id/receive", returnHandler.Receive)
+		vendorGroup.GET("/support-cases/capability", supportHandler.Capability)
+		vendorGroup.GET("/support-cases", supportHandler.List)
+		vendorGroup.GET("/support-cases/:caseID", supportHandler.Get)
+		vendorGroup.GET("/support-cases/:caseID/messages", supportHandler.Messages)
+		vendorGroup.POST("/support-cases/:caseID/messages", supportHandler.PostMessage)
+		vendorGroup.GET("/support-cases/:caseID/attachments/:attachmentID", supportHandler.Attachment)
+		vendorGroup.POST("/support-attachments", supportHandler.Upload)
 		vendorGroup.GET("/mine", orderHandler.ListVendorMine)
+		vendorGroup.GET("/:id/policy-snapshot", orderHandler.PolicySnapshot)
 		vendorGroup.GET("/summary", orderHandler.Summary)
 		vendorGroup.GET("/export.csv", orderHandler.ExportCSV)
 		vendorGroup.PATCH("/:vendorOrderID/status", orderHandler.UpdateVendorOrderStatus)
@@ -81,13 +103,26 @@ func NewRouter(
 		adminGroup.GET("/operations", adminHandler.Operations)
 		adminGroup.POST("/operations/effects/:effectID/replay", adminHandler.ReplayEffect)
 		adminGroup.GET("/return-requests", returnHandler.AdminList)
+		adminGroup.GET("/return-requests/:id", returnHandler.AdminGet)
 		adminGroup.GET("/return-requests/:id/history", returnHandler.History)
 		adminGroup.POST("/return-requests/:id/decision", returnHandler.Decide)
 		adminGroup.POST("/return-requests/:id/receive", returnHandler.Receive)
 		adminGroup.POST("/return-requests/:id/retry-refund", returnHandler.RetryRefund)
+		adminGroup.GET("/support-cases/capability", supportHandler.Capability)
+		adminGroup.GET("/support-cases", supportHandler.List)
+		adminGroup.GET("/support-cases/:caseID", supportHandler.Get)
+		adminGroup.GET("/support-cases/:caseID/messages", supportHandler.Messages)
+		adminGroup.POST("/support-cases/:caseID/messages", supportHandler.PostMessage)
+		adminGroup.POST("/support-cases/:caseID/assignments", supportHandler.Assign)
+		adminGroup.POST("/support-cases/:caseID/status", supportHandler.ChangeStatus)
+		adminGroup.POST("/support-cases/:caseID/resolutions", supportHandler.Resolve)
+		adminGroup.POST("/support-cases/:caseID/close", supportHandler.Close)
+		adminGroup.GET("/support-cases/:caseID/attachments/:attachmentID", supportHandler.Attachment)
+		adminGroup.POST("/support-attachments", supportHandler.Upload)
 		adminGroup.GET("/commission-rules", adminHandler.ListCommissionRules)
 		adminGroup.POST("/commission-rules", adminHandler.SetCommissionRule)
 		adminGroup.GET("/:id", adminHandler.Get)
+		adminGroup.GET("/:id/policy-snapshot", orderHandler.PolicySnapshot)
 		adminGroup.POST("/:id/transition", adminHandler.Transition)
 		adminGroup.POST("/:id/refunds", adminHandler.CreateRefund)
 	}
@@ -109,19 +144,26 @@ func NewRouter(
 		internalGroup.POST("/refund-events", payment, internalHandler.RefundEvent)
 		internalGroup.POST("/settlements/holds", payment, internalHandler.SettlementHolds)
 		internalGroup.POST("/shipment-events", internal.Allow("shipment"), internalHandler.ShipmentEvent)
+		internalGroup.GET("/policy-rules/readiness", internal.Allow("vendor"), internalHandler.PolicyRuleReadiness)
+		internalGroup.POST("/policy-published", internal.Allow("vendor"), internalHandler.PolicyPublished)
 	}
 
 	return r
 }
 
-// boundRequest caps request body size and processing time.
+// boundRequest caps request body size and processing time. Support
+// attachment uploads get room for one image; everything else is JSON.
 func boundRequest() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		ctx, cancel := context.WithTimeout(c.Request.Context(), 30*time.Second)
 		defer cancel()
 		c.Request = c.Request.WithContext(ctx)
 		if c.Request.Body != nil {
-			c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 1<<20)
+			limit := int64(1 << 20)
+			if isAttachmentUpload(c.FullPath()) {
+				limit = maxAttachmentRequestBytes
+			}
+			c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, limit)
 		}
 		c.Next()
 	}

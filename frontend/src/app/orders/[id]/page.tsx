@@ -1,5 +1,8 @@
 "use client";
 
+import { ActionDeadline } from "@/components/support/action-deadline";
+
+import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
@@ -7,8 +10,10 @@ import { OrderStatusBadge } from "@/components/order-status-badge";
 import { ReturnRequestDialog } from "@/components/orders/return-request-dialog";
 import { PageShell } from "@/components/page-shell";
 import { PaymentSection } from "@/components/payment-section";
+import { OrderPolicyCard } from "@/components/policies/order-policy-card";
 import { ShipmentTimeline, shipmentStatusLabel } from "@/components/shipment-timeline";
 import { EmptyState, ErrorState, LoadingState } from "@/components/states/query-state";
+import { OpenSupportCaseDialog } from "@/components/support/open-support-case-dialog";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -27,6 +32,7 @@ import { useAuth } from "@/lib/auth-context";
 import { formatMoney } from "@/lib/format";
 import { useCancelOrder, useCreateReturnRequest, useOrder } from "@/lib/hooks/use-orders";
 import { useMyShipments } from "@/lib/hooks/use-shipments";
+import { useSupportCapability } from "@/lib/hooks/use-support-cases";
 import {
   orderRefundStatusLabels,
   returnStatusLabel,
@@ -50,6 +56,7 @@ export default function OrderDetailPage() {
   const shipmentsQuery = useMyShipments(enabled);
   const cancelOrder = useCancelOrder(params.id);
   const createReturn = useCreateReturnRequest(params.id);
+  const supportCapability = useSupportCapability(enabled);
 
   if (!user || user.role !== "buyer") return null;
 
@@ -149,6 +156,7 @@ export default function OrderDetailPage() {
                   <p className="text-muted-foreground">
                     Hoàn dự kiến {formatMoney(r.refund_amount, order.currency)}
                   </p>
+                  <ActionDeadline dueAt={r.action_due_at} waitingOn={r.waiting_on} />
                   {r.vendor_note && (
                     <p className="text-muted-foreground">Người bán: {r.vendor_note}</p>
                   )}
@@ -158,6 +166,28 @@ export default function OrderDetailPage() {
                 </div>
               );
             })}
+          </CardContent>
+        </Card>
+      )}
+
+      <OrderPolicyCard orderId={order.id} scope="buyer" />
+
+      {order.checkout_state !== "preparing" && (
+        <Card className="mt-4">
+          <CardHeader>
+            <CardTitle className="text-base">Hỗ trợ</CardTitle>
+          </CardHeader>
+          <CardContent className="flex flex-wrap items-center gap-3 text-sm">
+            {supportCapability.data?.enabled ? (
+              <OpenSupportCaseDialog order={order} capability={supportCapability.data} />
+            ) : (
+              <p className="text-muted-foreground">
+                Gặp vấn đề với đơn hàng? Liên hệ bộ phận hỗ trợ kèm mã đơn #{order.id.slice(0, 8)}.
+              </p>
+            )}
+            <Link href="/support" className="text-primary underline">
+              Yêu cầu hỗ trợ của tôi
+            </Link>
           </CardContent>
         </Card>
       )}
@@ -239,6 +269,10 @@ export default function OrderDetailPage() {
                           Vận chuyển: {shipmentStatusLabel(shipment.status)}
                           {shipment.tracking_number && ` · mã vận đơn ${shipment.tracking_number}`}
                         </p>
+                        <ActionDeadline
+                          dueAt={shipment.action_due_at}
+                          waitingOn={shipment.waiting_on}
+                        />
                         {shipment.shipped_at && (
                           <p className="text-xs text-muted-foreground">
                             Giao cho vận chuyển:{" "}

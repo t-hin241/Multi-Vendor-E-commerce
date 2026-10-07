@@ -439,7 +439,7 @@ func TestIntegrationAPIAuthAndPayoutScopes(t *testing.T) {
 	manager := authjwttest.Manager()
 	gin.SetMode(gin.ReleaseMode)
 	log := zerolog.Nop()
-	router := transport.NewRouter("test", log, manager, transport.NewVendorHandler(f.uc, log), transport.NewVendorAddressHandler(f.addresses, log), transport.NewAdminHandler(f.uc, log), transport.NewInternalHandler(f.uc, log), serviceauth.SharedKey("test-internal-service-key"))
+	router := transport.NewRouter("test", log, manager, transport.NewVendorHandler(f.uc, log), transport.NewVendorAddressHandler(f.addresses, log), transport.NewAdminHandler(f.uc, log), transport.NewInternalHandler(f.uc, log), transport.NewPolicyHandler(&usecase.PolicyUseCase{}, f.uc, log), serviceauth.SharedKey("test-internal-service-key"))
 	cipher, err := adapter.NewPayoutCipher(key)
 	if err != nil {
 		t.Fatal(err)

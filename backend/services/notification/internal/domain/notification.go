@@ -38,6 +38,13 @@ const (
 	TypeOrderRefunded  Type = "order_refunded"
 	TypeVendorApproved Type = "vendor_approved"
 	TypeVendorRejected Type = "vendor_rejected"
+	// Support cases (Order, AF-01); the reference is the order id.
+	TypeSupportCaseOpened   Type = "support_case_opened"
+	TypeSupportCaseResolved Type = "support_case_resolved"
+	// Policies (Vendor, AF-02); the reference is the shop id.
+	TypeMarketplacePolicyUpdated Type = "marketplace_policy_updated"
+	TypeShopPolicyApproved       Type = "shop_policy_approved"
+	TypeShopPolicyRejected       Type = "shop_policy_rejected"
 )
 
 // DefaultMaxAttempts bounds transient retries (about four hours of backoff).

@@ -50,6 +50,7 @@ func NewRouter(env string, log zerolog.Logger, jwtManager *authjwt.Manager, h Ha
 	adminGroup := r.Group("/api/payments/admin", middleware.RequireAuth(jwtManager), middleware.RequireRole("admin"), noStore())
 	{
 		adminGroup.GET("/refunds", h.Refund.AdminList)
+		adminGroup.GET("/refunds/:id", h.Refund.AdminGet)
 		adminGroup.POST("/refunds/:id/resolve", h.Refund.AdminResolve)
 
 		adminGroup.GET("/reconciliation", h.Admin.Overview)

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"shopee/backend/pkg/casesla"
 	"time"
 
 	"shopee/backend/pkg/adminaudit"
@@ -42,6 +43,11 @@ func main() {
 		os.Exit(1)
 	}
 
+	slaConfig, err := sessionconfig.LoadCaseSLA()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "case SLA configuration invalid:", err)
+		os.Exit(1)
+	}
 	log := logger.New(serviceName, cfg.Base.Env, cfg.Base.LogLevel)
 
 	telemetryCfg, err := sessionconfig.LoadTelemetry()
@@ -207,9 +213,13 @@ func main() {
 	)
 	go (usecase.PaymentWorker{Payments: paymentUseCase, Reconciliation: reconUseCase, Log: log}).Run(syncCtx)
 	adminGroup := router.Group("/api/payments/admin", middleware.RequireAuth(jwtManager), middleware.RequireRole("admin"))
+	slaRoles := identityclient.Client{URL: internalServices.IdentityURL, Key: internalServices.Key}
+	slaStore := casesla.Store{Pool: dbPool}
+	casesla.Register(adminGroup, casesla.Service{Repo: slaStore, Roles: slaRoles}, log)
+	go (casesla.Worker{Store: slaStore, Owner: "payment", Config: slaConfig, Roles: slaRoles, Publisher: bus.Bus, Log: log}).Run(syncCtx)
 	bus.RegisterAdmin(adminGroup, roles)
 	adminaudit.Register(adminGroup, "/audit-events",
-		adminaudit.Source{Name: "payment", SQL: repository.AuditSearchSQL + " UNION ALL " + eventbus.InboxAuditSearchSQL, DB: dbPool, Roles: roles}, log)
+		adminaudit.Source{Name: "payment", SQL: repository.AuditSearchSQL + " UNION ALL " + eventbus.InboxAuditSearchSQL + " UNION ALL " + casesla.AuditSearchSQL, DB: dbPool, Roles: roles}, log)
 
 	srv := &http.Server{
 		Addr:              ":" + cfg.Base.Port,

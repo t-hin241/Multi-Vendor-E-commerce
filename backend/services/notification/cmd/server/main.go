@@ -133,7 +133,7 @@ func main() {
 	// PLT-03: notification requests arrive from the event bus (the internal
 	// HTTP route stays for producers in rollback mode).
 	bus.Run(maintenanceCtx, eventbus.Subscription{Durable: "notification-requests",
-		Types: []string{events.OrderNotificationRequested, events.VendorNotificationRequested}, Handle: transport.NotificationRequestedHandler(notificationUseCase)})
+		Types: []string{events.OrderNotificationRequested, events.VendorNotificationRequested, events.OrderWorkItemReminder, events.OrderWorkItemOverdue, events.PaymentWorkItemReminder, events.PaymentWorkItemOverdue, events.ShipmentWorkItemReminder, events.ShipmentWorkItemOverdue}, Handle: transport.NotificationRequestedHandler(notificationUseCase)})
 
 	internalHandler := transport.NewInternalHandler(notificationUseCase, log)
 	adminHandler := transport.NewAdminHandler(notificationUseCase, log)
