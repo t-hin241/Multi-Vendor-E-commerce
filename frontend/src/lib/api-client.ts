@@ -3619,3 +3619,249 @@ export function cancelApprovalRequest(
     json: { expected_version: expectedVersion },
   });
 }
+
+// ----- AF-06 manual bank-transfer refunds -----
+
+// Where a buyer's refund stands. "processing" covers verified, claimed and
+// submitted transfers: money counts as back only once "refunded".
+export type BuyerRefundStage =
+  | "awaiting_destination"
+  | "destination_rejected"
+  | "verifying"
+  | "processing"
+  | "refunded"
+  | "failed";
+
+export type RefundDestinationSummary = {
+  version: number;
+  masked: string;
+  status: "pending_verification" | "verified" | "rejected" | "superseded";
+  submitted_at: string;
+  decided_at?: string;
+  decision_reason?: string;
+};
+
+export type BuyerRefund = {
+  id: string;
+  order_id: string;
+  order_refund_id?: string;
+  vendor_order_id?: string;
+  amount: number;
+  currency: string;
+  status: PaymentRefundStatus;
+  stage: BuyerRefundStage;
+  destination?: RefundDestinationSummary;
+  can_submit_destination: boolean;
+  timeline: { event: string; at: string }[];
+  created_at: string;
+  resolved_at?: string;
+};
+
+export function listMyRefunds(token: string, orderId?: string): Promise<BuyerRefund[]> {
+  return request<BuyerRefund[]>("/api/payments/refunds", {
+    token,
+    query: orderId ? { order_id: orderId } : {},
+  });
+}
+
+export function submitRefundDestination(
+  token: string,
+  refundId: string,
+  input: {
+    bank_code: string;
+    account_number: string;
+    account_name: string;
+    expected_version: number;
+  },
+): Promise<BuyerRefund> {
+  return request<BuyerRefund>(`/api/payments/refunds/${refundId}/beneficiary`, {
+    method: "POST",
+    token,
+    json: input,
+  });
+}
+
+export type ManualRefundStage =
+  | "awaiting_destination"
+  | "verifying"
+  | "ready"
+  | "executing"
+  | "submitted"
+  | "unknown"
+  | "confirmed"
+  | "failed";
+
+export type RefundAttemptStage =
+  "ready" | "executing" | "submitted" | "confirmed" | "failed" | "unknown" | "voided";
+
+export type RefundEvidence = {
+  id: string;
+  content_type: string;
+  size_bytes: number;
+  sha256: string;
+  uploaded_by: string;
+  state: string;
+  created_at: string;
+};
+
+export type RefundAttempt = {
+  id: string;
+  refund_id: string;
+  destination_version: number;
+  amount: number;
+  currency: string;
+  stage: RefundAttemptStage;
+  version: number;
+  prepared_by: string;
+  prepare_reason: string;
+  claimed_by?: string;
+  claimed_at?: string;
+  lease_expires_at?: string;
+  source_account?: string;
+  bank_reference?: string;
+  executed_at?: string;
+  submitted_by?: string;
+  submitted_at?: string;
+  decided_by?: string;
+  decided_at?: string;
+  decision_reason?: string;
+  evidence: RefundEvidence[];
+  created_at: string;
+  updated_at: string;
+};
+
+export type ManualRefundDetail = {
+  refund: PaymentRefund;
+  stage: ManualRefundStage;
+  destinations: (RefundDestinationSummary & {
+    id: string;
+    key_version: number;
+    submitted_by: string;
+    decided_by?: string;
+  })[];
+  attempts: RefundAttempt[];
+  audit: { actor_id: string; action: string; reason: string; created_at: string }[];
+};
+
+export function getManualRefund(token: string, refundId: string): Promise<ManualRefundDetail> {
+  return request<ManualRefundDetail>(`/api/payments/admin/refunds/${refundId}/manual`, { token });
+}
+
+export function decideRefundDestination(
+  token: string,
+  refundId: string,
+  input: {
+    destination_version: number;
+    decision: "verify" | "reject";
+    reason: string;
+    proof?: string;
+  },
+): Promise<{ stage: ManualRefundStage }> {
+  return request(`/api/payments/admin/refunds/${refundId}/destination-decisions`, {
+    method: "POST",
+    token,
+    json: input,
+  });
+}
+
+export type RevealedRefundDestination = {
+  destination_version: number;
+  bank_code: string;
+  account_number: string;
+  account_name: string;
+};
+
+export function revealRefundDestination(
+  token: string,
+  refundId: string,
+  input: { reason: string; proof?: string },
+): Promise<RevealedRefundDestination> {
+  return request<RevealedRefundDestination>(
+    `/api/payments/admin/refunds/${refundId}/sensitive-access`,
+    { method: "POST", token, json: input },
+  );
+}
+
+export function prepareRefundAttempt(
+  token: string,
+  refundId: string,
+  input: { destination_version: number; reason: string },
+): Promise<RefundAttempt> {
+  return request<RefundAttempt>(`/api/payments/admin/refunds/${refundId}/manual-attempts`, {
+    method: "POST",
+    token,
+    json: input,
+  });
+}
+
+function attemptAction<T>(token: string, attemptId: string, action: string, json: unknown) {
+  return request<T>(`/api/payments/admin/refund-attempts/${attemptId}/${action}`, {
+    method: "POST",
+    token,
+    json,
+  });
+}
+
+export function claimRefundAttempt(token: string, attemptId: string, expectedVersion: number) {
+  return attemptAction<RefundAttempt>(token, attemptId, "claims", {
+    expected_version: expectedVersion,
+  });
+}
+
+export function cancelRefundAttempt(
+  token: string,
+  attemptId: string,
+  input: { expected_version: number; reason: string },
+) {
+  return attemptAction<RefundAttempt>(token, attemptId, "cancellation", input);
+}
+
+export function submitRefundAttempt(
+  token: string,
+  attemptId: string,
+  input: {
+    expected_version: number;
+    bank_reference: string;
+    source_account: string;
+    executed_at: string;
+    evidence_ids: string[];
+  },
+) {
+  return attemptAction<RefundAttempt>(token, attemptId, "submissions", input);
+}
+
+export function decideRefundAttempt(
+  token: string,
+  attemptId: string,
+  input: { expected_version: number; decision: "confirm" | "fail"; reason: string; proof?: string },
+) {
+  return attemptAction<RefundAttempt>(token, attemptId, "decisions", input);
+}
+
+export function uploadRefundEvidence(
+  token: string,
+  attemptId: string,
+  file: File,
+): Promise<RefundEvidence> {
+  const form = new FormData();
+  form.append("file", file);
+  return request<RefundEvidence>(`/api/payments/admin/refund-attempts/${attemptId}/evidence`, {
+    method: "POST",
+    token,
+    form,
+  });
+}
+
+// fetchRefundEvidence reads a private transfer receipt with the caller's
+// token; the caller opens it from a blob URL.
+export async function fetchRefundEvidence(token: string, evidenceId: string): Promise<Blob> {
+  const res = await fetch(`${API_BASE_URL}/api/payments/admin/refund-evidence/${evidenceId}`, {
+    headers: { Authorization: `Bearer ${token}` },
+    credentials: "include",
+    cache: "no-store",
+  });
+  if (!res.ok) {
+    throw new ApiError(res.status, "evidence_unavailable", "Could not load the evidence file.");
+  }
+  return res.blob();
+}

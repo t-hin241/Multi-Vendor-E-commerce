@@ -39,4 +39,7 @@ export const queryKeys = {
   adminPermissions: (userId: string) => ["admin-permissions", userId] as const,
   permissionSubjects: () => ["permission-subjects"] as const,
   approvalRequests: (status: string) => ["approval-requests", status] as const,
+  // AF-06: the buyer's refunds of one order and an admin's manual transfer view.
+  myRefunds: (orderId: string) => ["my-refunds", orderId] as const,
+  manualRefund: (refundId: string) => ["manual-refund", refundId] as const,
 } as const;

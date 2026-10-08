@@ -2,9 +2,10 @@
 
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
-import { useState } from "react";
+import { Fragment, useState } from "react";
 
 import { ReasonDialog } from "@/components/admin/confirm-dialogs";
+import { ManualRefundPanel } from "@/components/admin/manual-refund-panel";
 import { StatusFilter } from "@/components/admin/status-filter";
 import { SectionHeader } from "@/components/section-header";
 import {
@@ -46,6 +47,8 @@ export function RefundOperations({ focusID }: { focusID?: string }) {
   const { callWithAuth } = useAuth();
   const queryClient = useQueryClient();
   const [status, setStatus] = useState("open");
+  // AF-06: the refund whose manual bank transfer is open below its row.
+  const [expanded, setExpanded] = useState<string | null>(focusID ?? null);
 
   const refundsQuery = useQuery({
     queryKey: ["payment-refunds", status, focusID],
@@ -82,7 +85,7 @@ export function RefundOperations({ focusID }: { focusID?: string }) {
     <div className="flex flex-col gap-4">
       <SectionHeader
         title="Refunds"
-        subtitle="Return the money through the provider or bank, then record the reference."
+        subtitle="Pay refunds by bank transfer to the buyer's verified account; a second admin confirms the bank reference."
         action={
           <StatusFilter status={status} onChange={setStatus} options={REFUND_STATUS_OPTIONS} />
         }
@@ -108,49 +111,69 @@ export function RefundOperations({ focusID }: { focusID?: string }) {
             </TableHeader>
             <TableBody>
               {refundsQuery.data?.map((r) => (
-                <TableRow key={r.id}>
-                  <TableCell>
-                    <Link className="underline" href={`/admin/orders/${r.order_id}`}>
-                      #{r.order_id.slice(0, 8)}
-                    </Link>
-                    <span className="block text-xs text-muted-foreground">
-                      payment {r.payment_intent_id.slice(0, 8)}
-                    </span>
-                  </TableCell>
-                  <TableCell>{formatMoney(r.amount, r.currency)}</TableCell>
-                  <TableCell className="max-w-64 whitespace-normal text-sm">{r.reason}</TableCell>
-                  <TableCell>
-                    {paymentRefundStatusLabels[r.status] ?? r.status}
-                    {r.evidence_reference && (
+                <Fragment key={r.id}>
+                  <TableRow>
+                    <TableCell>
+                      <Link className="underline" href={`/admin/orders/${r.order_id}`}>
+                        #{r.order_id.slice(0, 8)}
+                      </Link>
                       <span className="block text-xs text-muted-foreground">
-                        ref {r.evidence_reference}
+                        payment {r.payment_intent_id.slice(0, 8)}
                       </span>
-                    )}
-                    {r.failure_reason && (
-                      <span className="block text-xs text-destructive">{r.failure_reason}</span>
-                    )}
-                  </TableCell>
-                  <TableCell className="text-right">
-                    {(r.status === "awaiting_provider_refund" || r.status === "pending") && (
+                    </TableCell>
+                    <TableCell>{formatMoney(r.amount, r.currency)}</TableCell>
+                    <TableCell className="max-w-64 whitespace-normal text-sm">{r.reason}</TableCell>
+                    <TableCell>
+                      {paymentRefundStatusLabels[r.status] ?? r.status}
+                      {r.evidence_reference && (
+                        <span className="block text-xs text-muted-foreground">
+                          ref {r.evidence_reference}
+                        </span>
+                      )}
+                      {r.failure_reason && (
+                        <span className="block text-xs text-destructive">{r.failure_reason}</span>
+                      )}
+                    </TableCell>
+                    <TableCell className="text-right">
                       <div className="flex justify-end gap-2">
-                        <SucceededDialog
-                          onConfirm={(input) => resolve(r.id, { outcome: "succeeded", ...input })}
-                        />
-                        <ReasonDialog
-                          trigger={
-                            <Button size="sm" variant="outline" className="text-destructive">
-                              Failed
-                            </Button>
-                          }
-                          title="Record the refund as failed?"
-                          description="The amount becomes refundable again and Order is told the refund failed."
-                          confirmLabel="Record failure"
-                          onConfirm={(note) => resolve(r.id, { outcome: "failed", note })}
-                        />
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => setExpanded(expanded === r.id ? null : r.id)}
+                        >
+                          {expanded === r.id ? "Hide transfer" : "Bank transfer"}
+                        </Button>
+                        {(r.status === "awaiting_provider_refund" || r.status === "pending") && (
+                          <>
+                            <SucceededDialog
+                              onConfirm={(input) =>
+                                resolve(r.id, { outcome: "succeeded", ...input })
+                              }
+                            />
+                            <ReasonDialog
+                              trigger={
+                                <Button size="sm" variant="outline" className="text-destructive">
+                                  Failed
+                                </Button>
+                              }
+                              title="Record the refund as failed?"
+                              description="The amount becomes refundable again and Order is told the refund failed."
+                              confirmLabel="Record failure"
+                              onConfirm={(note) => resolve(r.id, { outcome: "failed", note })}
+                            />
+                          </>
+                        )}
                       </div>
-                    )}
-                  </TableCell>
-                </TableRow>
+                    </TableCell>
+                  </TableRow>
+                  {expanded === r.id && (
+                    <TableRow>
+                      <TableCell colSpan={5} className="whitespace-normal">
+                        <ManualRefundPanel refundId={r.id} />
+                      </TableCell>
+                    </TableRow>
+                  )}
+                </Fragment>
               ))}
             </TableBody>
           </Table>

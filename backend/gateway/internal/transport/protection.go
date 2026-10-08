@@ -86,6 +86,11 @@ var rateRules = []rateRule{
 	{"staff", 20, func(m, p, _ string) bool {
 		return m == http.MethodPost && strings.HasPrefix(p, "/api/vendor/") && strings.Contains(p, "/staff-invitations")
 	}},
+	// Refund destinations (AF-06): a buyer types one or two; a burst is
+	// guessing refund ids or probing account formats.
+	{"refund_destination", 10, func(m, p, _ string) bool {
+		return m == http.MethodPost && strings.HasPrefix(p, "/api/payments/refunds/") && strings.HasSuffix(p, "/beneficiary")
+	}},
 	{"upload", 60, func(m, _, ct string) bool { return m == http.MethodPost && strings.HasPrefix(ct, "multipart/") }},
 	{"default", 1200, func(string, string, string) bool { return true }},
 }

@@ -19,6 +19,7 @@ import (
 	"shopee/backend/pkg/identityclient"
 	"shopee/backend/pkg/logger"
 	"shopee/backend/pkg/middleware"
+	"shopee/backend/pkg/platform/objectstorage"
 	"shopee/backend/pkg/platform/postgres"
 	"shopee/backend/pkg/platform/redisclient"
 	"shopee/backend/pkg/shutdown"
@@ -182,6 +183,30 @@ func main() {
 	approvalUseCase := &usecase.ApprovalUseCase{Store: repository.ApprovalRepository{Pool: dbPool}, Refunds: refundUseCase, Settlement: settlementUseCase,
 		Payouts: repository.NewPayoutRepository(dbPool), RefundsRepo: refundRepo, Audit: repository.NewAuditRepository(dbPool), Tx: tx, Admins: admins,
 		Enabled: cfg.AdminApprovals, Log: log}
+	// AF-06: manual bank-transfer refunds. Two-person review and password
+	// proofs follow the AF-19 flag.
+	manualUseCase := &usecase.ManualRefundUseCase{Store: repository.ManualRefundRepository{Pool: dbPool}, Refunds: refundUseCase,
+		Audit: repository.NewAuditRepository(dbPool), Tx: tx, Admins: admins, Enabled: cfg.ManualRefunds.Enabled,
+		StepUp: cfg.AdminApprovals, TwoPerson: cfg.AdminApprovals, Lease: cfg.ManualRefunds.Lease, Log: log}
+	if len(cfg.ManualRefunds.Keys) > 0 {
+		destinationCipher, err := adapter.NewDestinationCipher(cfg.ManualRefunds.KeyVersion, cfg.ManualRefunds.Keys)
+		if err != nil {
+			log.Fatal().Err(err).Msg("refund destination key invalid")
+		}
+		manualUseCase.Cipher = destinationCipher
+	} else {
+		log.Warn().Msg("refund_destination_key_missing")
+	}
+	if cfg.ManualRefunds.Evidence != nil {
+		storeCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		evidenceStore, err := objectstorage.NewPrivateClient(storeCtx, *cfg.ManualRefunds.Evidence)
+		cancel()
+		if err != nil {
+			log.Fatal().Err(err).Msg("refund evidence storage unavailable")
+		}
+		manualUseCase.Evidence = evidenceStore
+	}
+	refundUseCase.WithLegacyGuard(manualUseCase.GuardLegacyResolution)
 	reconUseCase := usecase.NewReconciliationUseCase(usecase.ReconciliationDeps{
 		Tx: tx, Payments: paymentUseCase, Refunds: refundUseCase, Intents: intentRepo, Receipts: receiptRepo,
 		OrderSync: orderSync, RefundSync: refundSync, RefundStore: refundRepo, Audit: repository.NewAuditRepository(dbPool), Roles: roles, Log: log,
@@ -194,6 +219,7 @@ func main() {
 		Refund:     transport.NewRefundHandler(refundUseCase, log),
 		Admin:      transport.NewAdminHandler(reconUseCase, settlementUseCase, log),
 		Approval:   transport.NewApprovalHandler(approvalUseCase, log),
+		Manual:     transport.NewManualRefundHandler(manualUseCase, log),
 		AdminGuard: adminGuard,
 	}, internalServices.Verifier,
 		health.Checker{Name: "postgres", Ping: func(ctx context.Context) error { return dbPool.Ping(ctx) }},
@@ -222,6 +248,7 @@ func main() {
 		eventbus.Subscription{Durable: "payment-rejected-outcomes", Types: []string{events.PaymentOutcomeRejected}, Handle: transport.OutcomeRejectedHandler(orderSync, refundSync)},
 	)
 	go (usecase.PaymentWorker{Payments: paymentUseCase, Reconciliation: reconUseCase, Log: log}).Run(syncCtx)
+	go manualUseCase.Run(syncCtx)
 	adminGroup := router.Group("/api/payments/admin", middleware.RequireAuth(jwtManager), middleware.RequireRole("admin"), adminGuard)
 	slaRoles := identityclient.Client{URL: internalServices.IdentityURL, Key: internalServices.Key}
 	slaStore := casesla.Store{Pool: dbPool}

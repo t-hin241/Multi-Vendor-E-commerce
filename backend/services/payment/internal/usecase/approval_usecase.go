@@ -104,6 +104,9 @@ func (uc *ApprovalUseCase) Draft(ctx context.Context, makerID string, in DraftIn
 	if err != nil {
 		return nil, err
 	}
+	if err := uc.checkLegacyRefund(ctx, in.Kind, in.TargetID, payload); err != nil {
+		return nil, err
+	}
 	a := &domain.ApprovalRequest{Kind: in.Kind, TargetID: in.TargetID, Payload: payload, PayloadHash: domain.ApprovalPayloadHash(in.Kind, in.TargetID, payload),
 		Snapshot: snapshot, MakerID: makerID, MakerPermissionVersion: in.PermissionVersion, Reason: in.Reason, ExpiresAt: uc.now().Add(domain.ApprovalTTL)}
 	err = uc.Tx.Run(ctx, func(ctx context.Context) error {
@@ -119,6 +122,23 @@ func (uc *ApprovalUseCase) Draft(ctx context.Context, makerID string, in DraftIn
 		return nil, asAppError(err)
 	}
 	return a, nil
+}
+
+// checkLegacyRefund refuses early a refund resolution the manual
+// workflow (AF-06) would refuse at execution.
+func (uc *ApprovalUseCase) checkLegacyRefund(ctx context.Context, kind domain.ApprovalKind, targetID string, payload json.RawMessage) error {
+	if kind != domain.ApprovalRefundResolution || uc.Refunds == nil || uc.Refunds.legacyGuard == nil {
+		return nil
+	}
+	var p domain.ResolutionPayload
+	if err := json.Unmarshal(payload, &p); err != nil {
+		return apperror.Internal(err)
+	}
+	r, err := uc.RefundsRepo.FindByID(ctx, targetID)
+	if err != nil {
+		return asAppError(err)
+	}
+	return uc.Refunds.legacyGuard(ctx, r, domain.RefundResolution{Outcome: domain.RefundStatus(p.Outcome)})
 }
 
 // snapshot is what the checker approves about the target now.
@@ -306,13 +326,13 @@ func (uc *ApprovalUseCase) execute(ctx context.Context, a *domain.ApprovalReques
 		if err := json.Unmarshal(a.Snapshot, &want); err != nil {
 			return "", err
 		}
-		r, err := uc.Refunds.resolve(ctx, checkerID, a.TargetID, domain.RefundResolution{Outcome: domain.RefundStatus(p.Outcome),
-			EvidenceReference: p.EvidenceReference, Note: p.Note}, func(r *domain.Refund) error {
+		res := domain.RefundResolution{Outcome: domain.RefundStatus(p.Outcome), EvidenceReference: p.EvidenceReference, Note: p.Note}
+		r, err := uc.Refunds.resolve(ctx, checkerID, a.TargetID, res, uc.Refunds.legacy(res, func(_ context.Context, r *domain.Refund) error {
 			if domain.SnapshotRefund(r) != want {
 				return errStaleSnapshot
 			}
 			return nil
-		})
+		}))
 		if err != nil {
 			return "", err
 		}

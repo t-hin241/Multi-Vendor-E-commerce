@@ -493,6 +493,8 @@ services:
         condition: service_healthy
       order:
         condition: service_started
+      minio:
+        condition: service_healthy
     build:
       context: ./backend
       dockerfile: services/payment/Dockerfile
@@ -522,6 +524,19 @@ services:
       PAYOS_CANCEL_URL: ${PAYOS_CANCEL_URL:-http://localhost:3000/orders/payment-cancel}
       VENDOR_SERVICE_URL: http://vendor:8082
       PAYMENT_WEBHOOK_RATE_PER_MINUTE: ${PAYMENT_WEBHOOK_RATE_PER_MINUTE:-600}
+      # AF-06 manual refund transfers: off by default; the key is required
+      # once on (a placeholder with the flag off only disables destinations).
+      FEATURE_MANUAL_REFUND_WORKFLOW_ENABLED: ${FEATURE_MANUAL_REFUND_WORKFLOW_ENABLED:-false}
+      REFUND_DESTINATION_KEY: ${REFUND_DESTINATION_KEY:-}
+      REFUND_DESTINATION_KEY_VERSION: ${REFUND_DESTINATION_KEY_VERSION:-1}
+      REFUND_DESTINATION_PREVIOUS_KEYS: ${REFUND_DESTINATION_PREVIOUS_KEYS:-}
+      MANUAL_REFUND_CLAIM_LEASE_MINUTES: ${MANUAL_REFUND_CLAIM_LEASE_MINUTES:-30}
+      # Private transfer-receipt bucket: no bucket policy, read only through Payment.
+      REFUND_EVIDENCE_STORAGE_ENDPOINT: minio:9000
+      REFUND_EVIDENCE_STORAGE_ACCESS_KEY: ${MINIO_ROOT_USER:?set MINIO_ROOT_USER in .env}
+      REFUND_EVIDENCE_STORAGE_SECRET_KEY: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD in .env}
+      REFUND_EVIDENCE_STORAGE_USE_SSL: "false"
+      REFUND_EVIDENCE_BUCKET: refund-evidence
     ports:
       - "${INTERNAL_BIND_ADDRESS:-127.0.0.1}:8087:8087"
 

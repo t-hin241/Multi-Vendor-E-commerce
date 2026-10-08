@@ -25,6 +25,8 @@ type Handlers struct {
 	Refund   *RefundHandler
 	Admin    *AdminHandler
 	Approval *ApprovalHandler
+	// Manual runs AF-06 manual bank-transfer refunds.
+	Manual *ManualRefundHandler
 	// AdminGuard enforces AdminRoutes (AF-19).
 	AdminGuard gin.HandlerFunc
 }
@@ -48,6 +50,10 @@ func NewRouter(env string, log zerolog.Logger, jwtManager *authjwt.Manager, h Ha
 		buyerGroup.POST("/intents", h.Payment.CreateIntent)
 		buyerGroup.GET("/intents/:id", h.Payment.Get)
 		buyerGroup.POST("/intents/:id/simulate", h.Payment.Simulate)
+		// AF-06: the buyer's refunds and where the money should go.
+		buyerGroup.GET("/refunds", noStore(), h.Manual.BuyerList)
+		buyerGroup.GET("/refunds/:id", noStore(), h.Manual.BuyerGet)
+		buyerGroup.POST("/refunds/:id/beneficiary", noStore(), h.Manual.SubmitBeneficiary)
 	}
 
 	adminGroup := r.Group("/api/payments/admin", middleware.RequireAuth(jwtManager), middleware.RequireRole("admin"), h.AdminGuard, noStore())
@@ -55,6 +61,19 @@ func NewRouter(env string, log zerolog.Logger, jwtManager *authjwt.Manager, h Ha
 		adminGroup.GET("/refunds", h.Refund.AdminList)
 		adminGroup.GET("/refunds/:id", h.Refund.AdminGet)
 		adminGroup.POST("/refunds/:id/resolve", h.Refund.AdminResolve)
+
+		// AF-06 manual transfer: verify destination -> prepare attempt ->
+		// claim -> transfer outside -> submit reference -> confirm/fail.
+		adminGroup.GET("/refunds/:id/manual", h.Manual.AdminDetail)
+		adminGroup.POST("/refunds/:id/destination-decisions", h.Manual.DecideDestination)
+		adminGroup.POST("/refunds/:id/sensitive-access", h.Manual.RevealDestination)
+		adminGroup.POST("/refunds/:id/manual-attempts", h.Manual.PrepareAttempt)
+		adminGroup.POST("/refund-attempts/:id/claims", h.Manual.Claim)
+		adminGroup.POST("/refund-attempts/:id/cancellation", h.Manual.Cancel)
+		adminGroup.POST("/refund-attempts/:id/evidence", h.Manual.UploadEvidence)
+		adminGroup.POST("/refund-attempts/:id/submissions", h.Manual.Submit)
+		adminGroup.POST("/refund-attempts/:id/decisions", h.Manual.Decide)
+		adminGroup.GET("/refund-evidence/:id", h.Manual.Evidence)
 
 		adminGroup.GET("/reconciliation", h.Admin.Overview)
 		adminGroup.GET("/search", h.Admin.Search)
@@ -103,7 +122,12 @@ func boundRequest() gin.HandlerFunc {
 		defer cancel()
 		c.Request = c.Request.WithContext(ctx)
 		if c.Request.Body != nil && !strings.HasPrefix(c.Request.URL.Path, "/api/webhooks/") {
-			c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 1<<20)
+			limit := int64(1 << 20)
+			// Transfer receipts (AF-06) are files of up to 5 MiB.
+			if c.Request.Method == http.MethodPost && strings.HasSuffix(c.Request.URL.Path, "/evidence") {
+				limit = 6 << 20
+			}
+			c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, limit)
 		}
 		c.Next()
 	}

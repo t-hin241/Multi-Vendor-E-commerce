@@ -24,3 +24,13 @@ func TestStaffInvitationRequestsHaveTheirOwnBudget(t *testing.T) {
 		t.Fatalf("reads must stay on the default budget, got %q", got)
 	}
 }
+
+// AF-06: refund destinations have their own small budget.
+func TestRefundDestinationRequestsHaveTheirOwnBudget(t *testing.T) {
+	if got := firstRule(http.MethodPost, "/api/payments/refunds/00000000-0000-4000-8000-000000000001/beneficiary", "application/json"); got != "refund_destination" {
+		t.Fatalf("destination submission uses %q", got)
+	}
+	if got := firstRule(http.MethodGet, "/api/payments/refunds", ""); got != "default" {
+		t.Fatalf("reads must stay on the default budget, got %q", got)
+	}
+}

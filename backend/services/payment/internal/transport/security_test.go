@@ -39,6 +39,7 @@ func testRouter(jwt *authjwt.Manager) http.Handler {
 		Refund:     NewRefundHandler(usecase.NewRefundUseCase(nil, nil, zerolog.Nop()), zerolog.Nop()),
 		Admin:      NewAdminHandler(usecase.NewReconciliationUseCase(usecase.ReconciliationDeps{}), usecase.NewSettlementUseCase(usecase.SettlementDeps{}), zerolog.Nop()),
 		Approval:   NewApprovalHandler(&usecase.ApprovalUseCase{}, zerolog.Nop()),
+		Manual:     NewManualRefundHandler(&usecase.ManualRefundUseCase{}, zerolog.Nop()),
 		AdminGuard: adminaccesstest.Guard(AdminRoutes),
 	}, serviceauth.SharedKey(testServiceKey))
 }
@@ -129,5 +130,72 @@ func TestAdminAndInternalRoutesAreProtected(t *testing.T) {
 	}
 	if code := send(r, "POST", "/api/payments/admin/payouts/items/"+someID+"/resolve", `{"outcome":"paid"}`, token("admin")); code != http.StatusBadRequest {
 		t.Errorf("unknown payout outcome must be 400, got %d", code)
+	}
+}
+
+// AF-06: the buyer's refund routes are the buyer's only; every manual
+// transfer step is admin-only and validates its input first.
+func TestManualRefundRoutesAreProtected(t *testing.T) {
+	jwt := authjwttest.Manager()
+	r := testRouter(jwt)
+	token := func(role string) map[string]string {
+		tok, _, err := jwt.IssueAccessToken(someID, role, time.Minute)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return map[string]string{"Authorization": "Bearer " + tok}
+	}
+	buyer := []struct{ method, path, body string }{
+		{"GET", "/api/payments/refunds", ""},
+		{"GET", "/api/payments/refunds/" + someID, ""},
+		{"POST", "/api/payments/refunds/" + someID + "/beneficiary", `{"bank_code":"VCB","account_number":"0123456789","account_name":"A B","expected_version":0}`},
+	}
+	for _, rt := range buyer {
+		if code := send(r, rt.method, rt.path, rt.body, nil); code != http.StatusUnauthorized {
+			t.Errorf("anonymous %s %s: %d", rt.method, rt.path, code)
+		}
+		for _, role := range []string{"vendor", "admin"} {
+			if code := send(r, rt.method, rt.path, rt.body, token(role)); code != http.StatusForbidden {
+				t.Errorf("%s %s %s: %d", role, rt.method, rt.path, code)
+			}
+		}
+	}
+	if code := send(r, "POST", "/api/payments/refunds/"+someID+"/beneficiary", `{"bank_code":"VCB"}`, token("buyer")); code != http.StatusBadRequest {
+		t.Errorf("incomplete destination must be 400, got %d", code)
+	}
+	if code := send(r, "GET", "/api/payments/refunds?order_id=not-a-uuid", "", token("buyer")); code != http.StatusBadRequest {
+		t.Errorf("invalid order filter must be 400, got %d", code)
+	}
+
+	admin := []struct{ method, path, body string }{
+		{"GET", "/api/payments/admin/refunds/" + someID + "/manual", ""},
+		{"POST", "/api/payments/admin/refunds/" + someID + "/destination-decisions", `{"destination_version":1,"decision":"verify","reason":"x"}`},
+		{"POST", "/api/payments/admin/refunds/" + someID + "/sensitive-access", `{"reason":"x"}`},
+		{"POST", "/api/payments/admin/refunds/" + someID + "/manual-attempts", `{"destination_version":1,"reason":"x"}`},
+		{"POST", "/api/payments/admin/refund-attempts/" + someID + "/claims", `{"expected_version":1}`},
+		{"POST", "/api/payments/admin/refund-attempts/" + someID + "/cancellation", `{"expected_version":1,"reason":"x"}`},
+		{"POST", "/api/payments/admin/refund-attempts/" + someID + "/submissions", `{"expected_version":1,"bank_reference":"FT1","source_account":"X","executed_at":"2026-10-07T00:00:00Z"}`},
+		{"POST", "/api/payments/admin/refund-attempts/" + someID + "/decisions", `{"expected_version":1,"decision":"confirm","reason":"x"}`},
+		{"GET", "/api/payments/admin/refund-evidence/" + someID, ""},
+	}
+	for _, rt := range admin {
+		if code := send(r, rt.method, rt.path, rt.body, nil); code != http.StatusUnauthorized {
+			t.Errorf("anonymous %s %s: %d", rt.method, rt.path, code)
+		}
+		for _, role := range []string{"buyer", "vendor"} {
+			if code := send(r, rt.method, rt.path, rt.body, token(role)); code != http.StatusForbidden {
+				t.Errorf("%s %s %s: %d", role, rt.method, rt.path, code)
+			}
+		}
+	}
+	for _, rt := range []struct{ path, body string }{
+		{"/api/payments/admin/refunds/" + someID + "/destination-decisions", `{"destination_version":1,"decision":"approve","reason":"x"}`},
+		{"/api/payments/admin/refund-attempts/" + someID + "/decisions", `{"expected_version":1,"decision":"succeeded","reason":"x"}`},
+		{"/api/payments/admin/refund-attempts/" + someID + "/submissions", `{"expected_version":1}`},
+		{"/api/payments/admin/refund-attempts/not-a-uuid/claims", `{"expected_version":1}`},
+	} {
+		if code := send(r, "POST", rt.path, rt.body, token("admin")); code != http.StatusBadRequest {
+			t.Errorf("invalid input to %s must be 400, got %d", rt.path, code)
+		}
 	}
 }

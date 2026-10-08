@@ -29,6 +29,32 @@ type RefundUseCase struct {
 	// approvals (AF-19): a resolution only goes through an approved
 	// maker-checker request, never directly.
 	approvals bool
+	// legacyGuard (AF-06) refuses the one-step resolution while a manual
+	// transfer is open or the manual workflow is on; it runs on the locked
+	// refund in the resolution's transaction.
+	legacyGuard func(ctx context.Context, r *domain.Refund, res domain.RefundResolution) error
+}
+
+// WithLegacyGuard installs the manual workflow's check on the one-step
+// resolution (direct and through an approval).
+func (uc *RefundUseCase) WithLegacyGuard(guard func(ctx context.Context, r *domain.Refund, res domain.RefundResolution) error) *RefundUseCase {
+	uc.legacyGuard = guard
+	return uc
+}
+
+// legacy wraps check with the legacy guard.
+func (uc *RefundUseCase) legacy(res domain.RefundResolution, check func(context.Context, *domain.Refund) error) func(context.Context, *domain.Refund) error {
+	return func(ctx context.Context, r *domain.Refund) error {
+		if uc.legacyGuard != nil {
+			if err := uc.legacyGuard(ctx, r, res); err != nil {
+				return err
+			}
+		}
+		if check != nil {
+			return check(ctx, r)
+		}
+		return nil
+	}
 }
 
 // RequireApprovals turns the direct resolution off: it then needs an
@@ -113,19 +139,19 @@ func (uc *RefundUseCase) Resolve(ctx context.Context, adminID, refundID string, 
 	if uc.approvals {
 		return nil, ErrApprovalRequired
 	}
-	return uc.resolve(ctx, adminID, refundID, res, nil)
+	return uc.resolve(ctx, adminID, refundID, res, uc.legacy(res, nil))
 }
 
 // resolve applies a resolution in the caller's transaction (or its own);
 // check, when set, verifies the locked refund first (an approval's
 // snapshot).
-func (uc *RefundUseCase) resolve(ctx context.Context, adminID, refundID string, res domain.RefundResolution, check func(*domain.Refund) error) (*domain.Refund, error) {
+func (uc *RefundUseCase) resolve(ctx context.Context, adminID, refundID string, res domain.RefundResolution, check func(context.Context, *domain.Refund) error) (*domain.Refund, error) {
 	var refund *domain.Refund
 	resolve := func(ctx context.Context) error {
 		var err error
 		refund, err = uc.refunds.Resolve(ctx, refundID, func(r *domain.Refund) (bool, error) {
 			if check != nil {
-				if err := check(r); err != nil {
+				if err := check(ctx, r); err != nil {
 					return false, err
 				}
 			}

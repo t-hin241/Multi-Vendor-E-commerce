@@ -1,6 +1,6 @@
 "use client";
 
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 
 import * as api from "@/lib/api-client";
@@ -58,5 +58,57 @@ export function useSimulatePaymentOutcome(orderId: string) {
       }
     },
     onError: (err) => toast.error(describeApiError(err, "Could not process payment.")),
+  });
+}
+
+// AF-06: the buyer's refunds of one order, refreshed while one is open.
+export function useMyRefunds(orderId: string, enabled: boolean) {
+  const { callWithAuth } = useAuth();
+  return useQuery({
+    queryKey: queryKeys.myRefunds(orderId),
+    queryFn: () => callWithAuth((token) => api.listMyRefunds(token, orderId)),
+    enabled,
+    refetchInterval: (query) =>
+      query.state.data?.some((r) => r.stage !== "refunded" && r.stage !== "failed")
+        ? 30_000
+        : false,
+  });
+}
+
+// refundDestinationError words Payment's refusals of a destination.
+export function refundDestinationError(err: unknown): string {
+  if (err instanceof api.ApiError) {
+    switch (err.code) {
+      case "destination_changed":
+        return "Thông tin hoàn tiền vừa thay đổi. Vui lòng tải lại trang.";
+      case "attempt_active":
+        return "Sàn đang chuyển khoản cho yêu cầu này nên không thể đổi tài khoản lúc này.";
+      case "feature_disabled":
+      case "destination_key_unavailable":
+        return "Tạm thời chưa nhận được thông tin tài khoản. Vui lòng thử lại sau hoặc liên hệ hỗ trợ.";
+    }
+  }
+  return describeApiError(err, "Không gửi được thông tin tài khoản.");
+}
+
+export function useSubmitRefundDestination(orderId: string) {
+  const { callWithAuth } = useAuth();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: {
+      refundId: string;
+      bank_code: string;
+      account_number: string;
+      account_name: string;
+      expected_version: number;
+    }) =>
+      callWithAuth((token) => {
+        const { refundId, ...body } = input;
+        return api.submitRefundDestination(token, refundId, body);
+      }),
+    onSuccess: () => {
+      toast.success("Đã gửi thông tin tài khoản. Sàn sẽ xác minh trước khi chuyển tiền.");
+    },
+    onSettled: () => queryClient.invalidateQueries({ queryKey: queryKeys.myRefunds(orderId) }),
   });
 }

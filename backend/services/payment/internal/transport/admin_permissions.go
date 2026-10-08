@@ -6,10 +6,24 @@ import "shopee/backend/pkg/adminaccess"
 // (AF-19); a route missing here is refused. Recording money results and
 // ledger adjustments is finance.prepare; with approvals on, the direct
 // routes answer 409 approval_required and only finance.approve executes.
+// AF-06: verifying a refund destination and confirming a manual transfer
+// are finance.approve; reading a destination in full is finance.prepare
+// for the claimer (anyone else also needs finance.approve, checked by
+// the use case).
 var AdminRoutes = adminaccess.Routes{
 	"GET /api/payments/admin/refunds":                               adminaccess.FinanceRead,
 	"GET /api/payments/admin/refunds/:id":                           adminaccess.FinanceRead,
 	"POST /api/payments/admin/refunds/:id/resolve":                  adminaccess.FinancePrepare,
+	"GET /api/payments/admin/refunds/:id/manual":                    adminaccess.FinanceRead,
+	"POST /api/payments/admin/refunds/:id/destination-decisions":    adminaccess.FinanceApprove,
+	"POST /api/payments/admin/refunds/:id/sensitive-access":         adminaccess.FinancePrepare,
+	"POST /api/payments/admin/refunds/:id/manual-attempts":          adminaccess.FinancePrepare,
+	"POST /api/payments/admin/refund-attempts/:id/claims":           adminaccess.FinancePrepare,
+	"POST /api/payments/admin/refund-attempts/:id/cancellation":     adminaccess.FinancePrepare,
+	"POST /api/payments/admin/refund-attempts/:id/evidence":         adminaccess.FinancePrepare,
+	"POST /api/payments/admin/refund-attempts/:id/submissions":      adminaccess.FinancePrepare,
+	"POST /api/payments/admin/refund-attempts/:id/decisions":        adminaccess.FinanceApprove,
+	"GET /api/payments/admin/refund-evidence/:id":                   adminaccess.FinanceRead,
 	"GET /api/payments/admin/reconciliation":                        adminaccess.FinanceRead,
 	"GET /api/payments/admin/search":                                adminaccess.FinanceRead,
 	"GET /api/payments/admin/audit":                                 adminaccess.FinanceRead,

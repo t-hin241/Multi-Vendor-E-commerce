@@ -167,7 +167,12 @@ type AuditRepository struct{ pool *pgxpool.Pool }
 
 func NewAuditRepository(pool *pgxpool.Pool) *AuditRepository { return &AuditRepository{pool: pool} }
 
+// Record appends an audit row; a reason composed from several parts is
+// clipped to the column's 500 characters rather than failing the action.
 func (r *AuditRepository) Record(ctx context.Context, actor, action, targetType, targetID, reason string) error {
+	if runes := []rune(reason); len(runes) > 500 {
+		reason = string(runes[:499]) + "…"
+	}
 	_, err := connection(ctx, r.pool).Exec(ctx, `
 		INSERT INTO payment_admin_audit (actor_id, action, target_type, target_id, reason, request_id) VALUES ($1, $2, $3, $4, $5, $6)`,
 		actor, action, targetType, targetID, reason, middleware.CorrelationID(ctx))

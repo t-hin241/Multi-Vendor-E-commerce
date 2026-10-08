@@ -96,3 +96,7 @@ Không chạy migration down khi đã có receipt, settlement hoặc payout mớ
 ## Quyền admin theo bundle và phê duyệt hai người (AF-19)
 
 Xem `deploy/admin-permissions-runbook.md`: migration, cờ `FEATURE_ADMIN_SCOPED_PERMISSIONS_ENABLED`, lệnh `bootstrap-access`, luồng phê duyệt và rollback.
+
+## Hoàn tiền chuyển khoản thủ công (AF-06)
+
+Xem `deploy/manual-refund-runbook.md`: migration `000013`, cờ `FEATURE_MANUAL_REFUND_WORKFLOW_ENABLED`, khoá `REFUND_DESTINATION_KEY`, các bước xác minh → chuyển → xác nhận, trạng thái `unknown` và rollback.
