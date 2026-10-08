@@ -270,6 +270,37 @@ func (h *SupportHandler) Resolve(c *gin.Context) {
 	httpresponse.OK(c, status, toSupportCaseResponse(sc))
 }
 
+type caseRefundRequest struct {
+	Amount          int64  `json:"amount" binding:"required,min=1"`
+	Reason          string `json:"reason" binding:"required,max=500"`
+	ExpectedVersion int64  `json:"expected_version" binding:"required,min=1"`
+}
+
+// Refund opens a dispute refund from the case and links it as the pending
+// resolution (202; 200 on an Idempotency-Key replay).
+func (h *SupportHandler) Refund(c *gin.Context) {
+	if !validID(c, c.Param("caseID")) {
+		return
+	}
+	var req caseRefundRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		httpresponse.Error(c, http.StatusBadRequest, "validation_error", "amount, a reason of at most 500 characters and expected_version are required")
+		return
+	}
+	sc, refund, replayed, err := h.orders.CreateCaseRefund(c.Request.Context(), middleware.GetUserID(c), c.Param("caseID"), usecase.CaseRefundInput{
+		Amount: req.Amount, Reason: req.Reason, ExpectedVersion: req.ExpectedVersion, IdempotencyKey: c.GetHeader("Idempotency-Key")})
+	if err != nil {
+		httpresponse.HandleError(c, h.log, err)
+		return
+	}
+	status := http.StatusAccepted
+	if replayed {
+		status = http.StatusOK
+	}
+	httpresponse.OK(c, status, gin.H{"case": toSupportCaseResponse(sc), "refund_id": refund.ID, "refund_status": refund.Status,
+		"amount": refund.Amount, "currency": refund.Currency})
+}
+
 func (h *SupportHandler) Close(c *gin.Context) {
 	if !validID(c, c.Param("caseID")) {
 		return
@@ -420,10 +451,18 @@ type supportEventResponse struct {
 	CreatedAt  time.Time `json:"created_at"`
 }
 
+type caseHoldResponse struct {
+	Status    string    `json:"status"`
+	Note      *string   `json:"note,omitempty"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
 type supportCaseDetailResponse struct {
 	supportCaseResponse
 	Messages []supportMessageResponse `json:"messages"`
 	Events   []supportEventResponse   `json:"events"`
+	// SettlementHold (admin only): the case's payout hold in Payment.
+	SettlementHold *caseHoldResponse `json:"settlement_hold,omitempty"`
 }
 
 func toSupportCaseDetailResponse(d *usecase.SupportCaseDetail) supportCaseDetailResponse {
@@ -432,7 +471,11 @@ func toSupportCaseDetailResponse(d *usecase.SupportCaseDetail) supportCaseDetail
 		events = append(events, supportEventResponse{ID: e.ID, ActorID: e.ActorID, ActorRole: e.ActorRole, Action: e.Action,
 			FromStatus: e.FromStatus, ToStatus: e.ToStatus, Note: e.Note, CreatedAt: e.CreatedAt})
 	}
-	return supportCaseDetailResponse{supportCaseResponse: toSupportCaseResponse(d.Case), Messages: toSupportMessageResponses(d.Messages), Events: events}
+	out := supportCaseDetailResponse{supportCaseResponse: toSupportCaseResponse(d.Case), Messages: toSupportMessageResponses(d.Messages), Events: events}
+	if d.Hold != nil {
+		out.SettlementHold = &caseHoldResponse{Status: d.Hold.Status, Note: d.Hold.Note, UpdatedAt: d.Hold.UpdatedAt}
+	}
+	return out
 }
 
 // isAttachmentUpload reports whether the matched route is an upload, which

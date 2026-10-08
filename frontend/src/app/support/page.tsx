@@ -6,6 +6,7 @@ import { useEffect } from "react";
 
 import { PageShell } from "@/components/page-shell";
 import { EmptyState, ErrorState, LoadingState } from "@/components/states/query-state";
+import { SupportIntakePanel } from "@/components/support/support-intake-panel";
 import { SupportStatusBadge } from "@/components/support/support-status-badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -69,6 +70,7 @@ export default function MySupportCasesPage() {
           </Button>
         )}
       </div>
+      <SupportIntakePanel enabled={enabled} />
     </PageShell>
   );
 }

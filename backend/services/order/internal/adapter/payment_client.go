@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -122,4 +123,71 @@ func (c *HTTPPaymentClient) post(ctx context.Context, path string, payload any, 
 		return nil, apperror.Internal(fmt.Errorf("payment service returned status %d", resp.StatusCode))
 	}
 	return data, nil
+}
+
+// HoldRequest acquires a settlement hold in Payment's ledger (00 §6.1);
+// HoldID is chosen by Order and is the idempotency key.
+type HoldRequest struct {
+	HoldID        string `json:"hold_id"`
+	VendorID      string `json:"vendor_id"`
+	VendorOrderID string `json:"vendor_order_id"`
+	SourceType    string `json:"source_type"`
+	SourceID      string `json:"source_id"`
+	SourceVersion int64  `json:"source_version"`
+	ReasonCode    string `json:"reason_code"`
+}
+
+// HoldRelease releases a hold; OperationID makes a retry the same release.
+type HoldRelease struct {
+	OperationID   string `json:"operation_id"`
+	SourceVersion int64  `json:"source_version"`
+	ResolutionRef string `json:"resolution_ref,omitempty"`
+	Reason        string `json:"reason"`
+}
+
+// HoldReceipt is Payment's view of a hold.
+type HoldReceipt struct {
+	HoldID        string `json:"hold_id"`
+	Status        string `json:"status"`
+	PayoutClaimed bool   `json:"payout_claimed"`
+}
+
+// AcquireSettlementHold records the hold. Payment answers 409
+// payout_already_claimed when a payout claimed the vendor order first (the
+// hold is still recorded). A 404 means a Payment without the ledger yet:
+// it is retried, never taken as a refusal.
+func (c *HTTPPaymentClient) AcquireSettlementHold(ctx context.Context, r HoldRequest) (*HoldReceipt, error) {
+	data, err := c.post(ctx, "/internal/payments/settlement-holds", r, "Payment refused the settlement hold")
+	if err != nil {
+		return nil, retryNotFound(err)
+	}
+	return decodeHold(data)
+}
+
+// ReleaseSettlementHold releases the hold; repeating it returns the same
+// receipt, and a release before the acquire leaves a released tombstone.
+func (c *HTTPPaymentClient) ReleaseSettlementHold(ctx context.Context, holdID string, r HoldRelease) (*HoldReceipt, error) {
+	data, err := c.post(ctx, "/internal/payments/settlement-holds/"+holdID+"/releases", r, "Payment refused the hold release")
+	if err != nil {
+		return nil, retryNotFound(err)
+	}
+	return decodeHold(data)
+}
+
+func decodeHold(data []byte) (*HoldReceipt, error) {
+	var envelope struct {
+		Data HoldReceipt `json:"data"`
+	}
+	if err := json.Unmarshal(data, &envelope); err != nil || envelope.Data.HoldID == "" {
+		return nil, apperror.Internal(fmt.Errorf("invalid settlement hold receipt"))
+	}
+	return &envelope.Data, nil
+}
+
+func retryNotFound(err error) error {
+	var app *apperror.Error
+	if errors.As(err, &app) && app.Status == http.StatusNotFound {
+		return apperror.Internal(fmt.Errorf("payment settlement hold endpoint not found: %s", app.Message))
+	}
+	return err
 }

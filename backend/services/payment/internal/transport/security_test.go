@@ -40,6 +40,7 @@ func testRouter(jwt *authjwt.Manager) http.Handler {
 		Admin:      NewAdminHandler(usecase.NewReconciliationUseCase(usecase.ReconciliationDeps{}), usecase.NewSettlementUseCase(usecase.SettlementDeps{}), zerolog.Nop()),
 		Approval:   NewApprovalHandler(&usecase.ApprovalUseCase{}, zerolog.Nop()),
 		Manual:     NewManualRefundHandler(&usecase.ManualRefundUseCase{}, zerolog.Nop()),
+		Holds:      NewSettlementHoldHandler(&usecase.SettlementHoldUseCase{}, zerolog.Nop()),
 		AdminGuard: adminaccesstest.Guard(AdminRoutes),
 	}, serviceauth.SharedKey(testServiceKey))
 }
@@ -197,5 +198,36 @@ func TestManualRefundRoutesAreProtected(t *testing.T) {
 		if code := send(r, "POST", rt.path, rt.body, token("admin")); code != http.StatusBadRequest {
 			t.Errorf("invalid input to %s must be 400, got %d", rt.path, code)
 		}
+	}
+}
+
+// 00 §6.1: only Order (service key) acquires and releases holds.
+func TestSettlementHoldRoutesNeedTheServiceKey(t *testing.T) {
+	jwt := authjwttest.Manager()
+	r := testRouter(jwt)
+	tok, _, err := jwt.IssueAccessToken(someID, "admin", time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, rt := range []struct{ method, path string }{
+		{"POST", "/internal/payments/settlement-holds"},
+		{"GET", "/internal/payments/settlement-holds/" + someID},
+		{"POST", "/internal/payments/settlement-holds/" + someID + "/releases"},
+	} {
+		for _, headers := range []map[string]string{nil, {serviceauth.Header: "wrong"}, {"Authorization": "Bearer " + tok}} {
+			if code := send(r, rt.method, rt.path, `{}`, headers); code != http.StatusForbidden {
+				t.Errorf("%s %s must require the service key, got %d", rt.method, rt.path, code)
+			}
+		}
+	}
+	key := map[string]string{serviceauth.Header: testServiceKey}
+	if code := send(r, "POST", "/internal/payments/settlement-holds", `{"hold_id":"x"}`, key); code != http.StatusBadRequest {
+		t.Errorf("incomplete acquire must be 400, got %d", code)
+	}
+	if code := send(r, "POST", "/internal/payments/settlement-holds/not-a-uuid/releases", `{"operation_id":"x","reason":"y"}`, key); code != http.StatusBadRequest {
+		t.Errorf("invalid hold id must be 400, got %d", code)
+	}
+	if code := send(r, "GET", "/api/payments/admin/settlement-holds", "", nil); code != http.StatusUnauthorized {
+		t.Errorf("anonymous hold list must be 401, got %d", code)
 	}
 }

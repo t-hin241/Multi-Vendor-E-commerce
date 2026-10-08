@@ -110,6 +110,10 @@ func (uc *OrderUseCase) executeEffect(ctx context.Context, e *domain.Effect) err
 		return uc.restockReturn(ctx, e.Target)
 	case domain.EffectSettleVendorOrder:
 		return uc.settleVendorOrder(ctx, e)
+	case domain.EffectAcquireSettlementHold:
+		return uc.acquireCaseHold(ctx, e)
+	case domain.EffectReleaseSettlementHold:
+		return uc.releaseCaseHold(ctx, e)
 	case domain.EffectReportRejectedOutcome:
 		var p domain.RejectedOutcomePayload
 		if err := json.Unmarshal(e.Payload, &p); err != nil {

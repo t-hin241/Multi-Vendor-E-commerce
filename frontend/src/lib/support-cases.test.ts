@@ -5,7 +5,9 @@ import {
   adminCanResolve,
   buyerCanReply,
   canReopen,
+  caseRefundBlocked,
   checkImageFile,
+  checkIntakeReference,
   isCaseActive,
   isOverdue,
   supportErrorMessage,
@@ -100,5 +102,20 @@ describe("support case requests", () => {
     expect(fetcher.mock.calls[1]?.[0]).toMatch(
       /\/api\/orders\/admin\/support-cases\?assignee=me&overdue=true$/,
     );
+  });
+});
+
+describe("AF-01 completion helpers", () => {
+  it("blocks a refund from the case until the payout hold is confirmed", () => {
+    expect(caseRefundBlocked({ financial_hold: true }, { status: "preparing" })).not.toBeNull();
+    expect(caseRefundBlocked({ financial_hold: true }, { status: "active" })).toBeNull();
+    expect(caseRefundBlocked({ financial_hold: true }, { status: "needs_review" })).toBeNull();
+    expect(caseRefundBlocked({ financial_hold: false }, undefined)).not.toBeNull();
+  });
+
+  it("checks an intake reference like Order", () => {
+    expect(checkIntakeReference("FT 2610-0001")).toBeNull();
+    expect(checkIntakeReference("ab")).not.toBeNull();
+    expect(checkIntakeReference("<script>")).not.toBeNull();
   });
 });

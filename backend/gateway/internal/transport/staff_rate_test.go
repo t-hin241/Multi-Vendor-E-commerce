@@ -25,6 +25,13 @@ func TestStaffInvitationRequestsHaveTheirOwnBudget(t *testing.T) {
 	}
 }
 
+// PW-012: requests without an order id share the support budget.
+func TestSupportIntakesUseTheSupportBudget(t *testing.T) {
+	if got := firstRule(http.MethodPost, "/api/orders/support-intakes", "application/json"); got != "support" {
+		t.Fatalf("support intake uses %q", got)
+	}
+}
+
 // AF-06: refund destinations have their own small budget.
 func TestRefundDestinationRequestsHaveTheirOwnBudget(t *testing.T) {
 	if got := firstRule(http.MethodPost, "/api/payments/refunds/00000000-0000-4000-8000-000000000001/beneficiary", "application/json"); got != "refund_destination" {

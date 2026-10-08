@@ -1,9 +1,12 @@
 import { ApiError } from "@/lib/api-client";
 import type {
+  CaseHoldStatus,
   SupportCase,
   SupportCaseEvent,
   SupportCaseStatus,
   SupportCategory,
+  SupportIntake,
+  SupportIntakeReferenceKind,
 } from "@/lib/api-client";
 
 // Presentation helpers for support cases. Order decides every status and
@@ -180,6 +183,10 @@ export function supportErrorMessage(err: unknown, fallback: string): string {
       return err.message || "Chỉ nhận ảnh JPEG hoặc PNG, tối đa 5 MiB.";
     case "attachments_unavailable":
       return "Tạm thời chưa tải ảnh lên được. Bạn có thể gửi nội dung trước và bổ sung ảnh sau.";
+    case "intake_already_open":
+      return "Bạn đã gửi yêu cầu với mã này và sàn đang tra cứu. Vui lòng chờ phản hồi.";
+    case "too_many_open_intakes":
+      return "Bạn đang có 3 yêu cầu chờ sàn tra cứu. Sàn sẽ phản hồi các yêu cầu này trước.";
   }
   if (err.status === 0 || err.status >= 500) return `${fallback} ${err.message}`;
   return err.message || fallback;
@@ -193,4 +200,50 @@ export function checkImageFile(file: Pick<File, "type" | "size">, maxBytes: numb
   if (!ACCEPTED_IMAGE_TYPES.includes(file.type)) return "Chỉ nhận ảnh JPEG hoặc PNG.";
   if (file.size > maxBytes) return "Mỗi ảnh tối đa 5 MiB.";
   return null;
+}
+
+// Settlement hold of a case in Payment's ledger (PW-001), as admins read it.
+export const CASE_HOLD_LABELS: Record<CaseHoldStatus, string> = {
+  preparing: "Payout hold: waiting for Payment to confirm",
+  active: "Payout hold: active",
+  needs_review: "Payout hold: needs review (payout may already be claimed)",
+  releasing: "Payout hold: being released",
+  released: "Payout hold: released",
+};
+
+// caseRefundBlocked says why a refund cannot open from the case yet; the
+// server checks again (503 hold_unavailable).
+export function caseRefundBlocked(
+  c: Pick<SupportCase, "financial_hold">,
+  hold: { status: CaseHoldStatus } | undefined,
+): string | null {
+  if (!c.financial_hold) return "This case's category does not hold the payout.";
+  if (hold?.status === "preparing") return "Wait until Payment confirms the payout hold.";
+  return null;
+}
+
+// Requests without an order id (PW-012).
+export const INTAKE_REFERENCE_KINDS: { value: SupportIntakeReferenceKind; label: string }[] = [
+  { value: "bank_transfer", label: "Mã giao dịch chuyển khoản" },
+  { value: "payment", label: "Mã thanh toán" },
+  { value: "checkout", label: "Mã đặt hàng (checkout)" },
+];
+
+export function intakeStatusLabel(status: SupportIntake["status"]): string {
+  switch (status) {
+    case "open":
+      return "Đang chờ sàn tra cứu";
+    case "linked":
+      return "Đã gắn với đơn hàng";
+    case "closed":
+      return "Đã đóng";
+  }
+}
+
+// checkIntakeReference mirrors Order's rule for a quick answer.
+export function checkIntakeReference(reference: string): string | null {
+  const ref = reference.trim().replace(/\s+/g, " ");
+  return /^[A-Za-z0-9 ._:/#-]{3,100}$/.test(ref)
+    ? null
+    : "Mã gồm 3-100 ký tự: chữ, số, khoảng trắng hoặc . _ : / # -";
 }

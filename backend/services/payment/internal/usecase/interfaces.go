@@ -91,6 +91,8 @@ type SettlementRepositoryPort interface {
 	HasEntry(ctx context.Context, t domain.EntryType, source string) (bool, error)
 	SucceededRefunds(ctx context.Context, vendorOrderID string) ([]repository.SettledRefund, error)
 	OpenRefundVendorOrders(ctx context.Context, ids []string) (map[string]bool, error)
+	// ActiveHolds: vendor orders with an active settlement hold (00 §6.1).
+	ActiveHolds(ctx context.Context, ids []string) (map[string]bool, error)
 	Unpaid(ctx context.Context, vendorID, currency string) ([]*domain.Entry, error)
 	VendorsWithUnpaid(ctx context.Context, currency string) ([]string, error)
 	Statement(ctx context.Context, vendorID, currency string, limit, offset int) ([]*domain.Entry, error)

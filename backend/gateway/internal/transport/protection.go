@@ -78,8 +78,8 @@ var rateRules = []rateRule{
 	// Support cases and their messages (AF-01): people type them, so a
 	// flood is abuse; attachments fall under the upload rule below.
 	{"support", 60, func(m, p, ct string) bool {
-		return m == http.MethodPost && strings.HasPrefix(p, "/api/orders/") && strings.Contains(p, "/support-cases") &&
-			!strings.HasPrefix(ct, "multipart/")
+		return m == http.MethodPost && strings.HasPrefix(p, "/api/orders/") &&
+			(strings.Contains(p, "/support-cases") || strings.Contains(p, "/support-intakes")) && !strings.HasPrefix(ct, "multipart/")
 	}},
 	// Shop staff invitations (AF-17): sending and accepting are rare,
 	// a burst is guessing or spam.

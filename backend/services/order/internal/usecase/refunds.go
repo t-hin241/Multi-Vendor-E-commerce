@@ -57,6 +57,26 @@ func (uc *OrderUseCase) AdminRequestRefund(ctx context.Context, adminID string, 
 		if err != nil {
 			return err
 		}
+		refund, created, err = uc.requestRefundLocked(ctx, adminID, order, in)
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	if !created {
+		return refund, nil
+	}
+	uc.Log.Info().Str("order_id", in.OrderID).Str("refund_id", refund.ID).Str("admin_id", adminID).Int64("amount", refund.Amount).Msg("order_refund_requested")
+	uc.runEffectsSoon(ctx, in.OrderID)
+	return refund, nil
+}
+
+// requestRefundLocked records a refund under the order lock the caller
+// holds: replays by idempotency key, checks what is still refundable,
+// queues the request for Payment and audits it. created is false for a
+// replay.
+func (uc *OrderUseCase) requestRefundLocked(ctx context.Context, adminID string, order *domain.Order, in RefundInput) (refund *domain.Refund, created bool, err error) {
+	err = func() error {
 		if in.IdempotencyKey != "" {
 			existing, err := uc.Refunds.FindByIdempotencyKey(ctx, order.ID, in.IdempotencyKey)
 			if err != nil {
@@ -125,16 +145,8 @@ func (uc *OrderUseCase) AdminRequestRefund(ctx context.Context, adminID string, 
 		}
 		return uc.audit(ctx, domain.AdminAction{ActorID: adminID, Action: "refund_requested", EntityType: domain.AuditRefund,
 			EntityID: refund.ID, OrderID: &order.ID, Reason: &refund.Reason, Changes: changes})
-	})
-	if err != nil {
-		return nil, err
-	}
-	if !created {
-		return refund, nil
-	}
-	uc.Log.Info().Str("order_id", in.OrderID).Str("refund_id", refund.ID).Str("admin_id", adminID).Int64("amount", refund.Amount).Msg("order_refund_requested")
-	uc.runEffectsSoon(ctx, in.OrderID)
-	return refund, nil
+	}()
+	return refund, created, err
 }
 
 // refundableFor is what can still be refunded for a vendor order: its paid

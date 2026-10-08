@@ -26,6 +26,9 @@ type SupportConfig struct {
 	PilotVendorIDs map[string]bool
 	// AttachmentRetention is how long evidence is kept after a case closes.
 	AttachmentRetention time.Duration
+	// HoldLedger is FEATURE_SETTLEMENT_HOLD_LEDGER_ENABLED (PW-001): cases
+	// that may affect money acquire a hold in Payment's ledger.
+	HoldLedger bool
 }
 
 // SupportActor is the authenticated caller; the role comes from the
@@ -78,6 +81,8 @@ type SupportCaseDetail struct {
 	Case     *domain.SupportCase
 	Messages []*domain.SupportMessage
 	Events   []*domain.SupportCaseEvent
+	// Hold is the case's settlement hold, for admins only (PW-001).
+	Hold *domain.CaseHold
 }
 
 // SupportCasePage is one page of a case list with the cursor of the next.
@@ -191,6 +196,9 @@ func (uc *OrderUseCase) CreateSupportCase(ctx context.Context, buyerID string, i
 		}
 		if err := uc.Support.AddEvent(ctx, &domain.SupportCaseEvent{CaseID: c.ID, ActorID: &buyerID, ActorRole: "buyer", Action: "opened",
 			ToStatus: string(c.Status)}); err != nil {
+			return err
+		}
+		if err := uc.prepareCaseHold(ctx, c); err != nil {
 			return err
 		}
 		notice := domain.NewNotifyEffect(order.ID, buyerID, notifySupportCaseOpened)
@@ -367,6 +375,10 @@ func (uc *OrderUseCase) GetSupportCase(ctx context.Context, actor SupportActor, 
 	if !admin {
 		visible := make([]*domain.SupportCaseEvent, 0, len(events))
 		for _, e := range events {
+			// The payout hold is between the marketplace and Payment.
+			if strings.HasPrefix(e.Action, "settlement_hold_") {
+				continue
+			}
 			copied := *e
 			copied.Note = nil
 			if copied.ActorID != nil && *copied.ActorID != actor.ID {
@@ -386,7 +398,13 @@ func (uc *OrderUseCase) GetSupportCase(ctx context.Context, actor SupportActor, 
 		}
 		messages = shown
 	}
-	return &SupportCaseDetail{Case: redactCase(c, actor), Messages: messages, Events: events}, nil
+	detail := &SupportCaseDetail{Case: redactCase(c, actor), Messages: messages, Events: events}
+	if admin {
+		if detail.Hold, err = uc.CaseHold(ctx, c.ID); err != nil {
+			return nil, err
+		}
+	}
+	return detail, nil
 }
 
 // redactCase hides what the caller's role may not see: admin ids and
@@ -597,6 +615,11 @@ func (uc *OrderUseCase) ResolveSupportCase(ctx context.Context, adminID, caseID 
 		if c.Status != domain.CaseInProgress && c.Status != domain.CaseWaitingBuyer && c.Status != domain.CaseWaitingVendor {
 			return apperror.Conflict("Only a case in progress can be resolved (assign it first; a pending resolution waits for its outcome)")
 		}
+		if in.Kind != domain.ResolutionNoAction {
+			if err := uc.requireCaseHold(ctx, c); err != nil {
+				return err
+			}
+		}
 		done, err := uc.linkedOutcome(ctx, c, in.Kind, in.LinkedOperationID)
 		if err != nil {
 			return err
@@ -623,6 +646,95 @@ func (uc *OrderUseCase) ResolveSupportCase(ctx context.Context, adminID, caseID 
 	}
 	uc.runEffectsSoon(ctx, c.OrderID)
 	return c, pending, nil
+}
+
+// CaseRefundInput is an admin's dispute refund opened from a case.
+type CaseRefundInput struct {
+	Amount          int64
+	Reason          string
+	ExpectedVersion int64
+	// IdempotencyKey is required: a resend after a timeout returns the
+	// refund and case already written.
+	IdempotencyKey string
+}
+
+// CreateCaseRefund opens a dispute refund on the case's vendor order and
+// links it as the case's pending resolution, in one transaction (PW-014).
+// The case's payout hold must be confirmed first; the case is resolved
+// only when Payment confirms the money was returned.
+func (uc *OrderUseCase) CreateCaseRefund(ctx context.Context, adminID, caseID string, in CaseRefundInput) (*domain.SupportCase, *domain.Refund, bool, error) {
+	if !idempotencyKeyPattern.MatchString(in.IdempotencyKey) {
+		return nil, nil, false, apperror.Validation("Idempotency-Key of 8-100 letters, digits or ._:- is required")
+	}
+	reason, err := adminReason(in.Reason)
+	if err != nil {
+		return nil, nil, false, err
+	}
+	if err := uc.requireAdmin(ctx, adminID); err != nil {
+		return nil, nil, false, err
+	}
+	c, err := uc.supportCaseFor(ctx, SupportActor{ID: adminID, Role: "admin"}, caseID)
+	if err != nil {
+		return nil, nil, false, err
+	}
+	var result *domain.SupportCase
+	var refund *domain.Refund
+	replayed := false
+	err = uc.withOrder(ctx, c.OrderID, func(ctx context.Context) error {
+		current, err := uc.Support.FindByID(ctx, caseID)
+		if err != nil {
+			return err
+		}
+		existing, err := uc.Refunds.FindByIdempotencyKey(ctx, current.OrderID, in.IdempotencyKey)
+		if err != nil {
+			return err
+		}
+		if existing != nil {
+			if current.ResolutionRef == nil || *current.ResolutionRef != existing.ID || existing.Amount != in.Amount {
+				return domain.SupportKeyReused()
+			}
+			result, refund, replayed = current, existing, true
+			return nil
+		}
+		if in.ExpectedVersion <= 0 || current.Version != in.ExpectedVersion {
+			return domain.CaseVersionConflict()
+		}
+		if current.Status != domain.CaseInProgress && current.Status != domain.CaseWaitingBuyer && current.Status != domain.CaseWaitingVendor {
+			return apperror.Conflict("Only a case in progress can open a refund (assign it first)")
+		}
+		if !current.FinancialHold {
+			return apperror.Conflict("This case's category does not hold the payout; it cannot open a refund")
+		}
+		if err := uc.requireCaseHold(ctx, current); err != nil {
+			return err
+		}
+		order, err := uc.findOrder(ctx, current.OrderID)
+		if err != nil {
+			return err
+		}
+		refund, _, err = uc.requestRefundLocked(ctx, adminID, order, RefundInput{OrderID: order.ID, VendorOrderID: current.VendorOrderID,
+			ReasonCode: domain.RefundReasonDispute, Amount: in.Amount, Reason: *reason, IdempotencyKey: in.IdempotencyKey})
+		if err != nil {
+			return err
+		}
+		kind := domain.ResolutionRefund
+		current.ResolutionKind, current.ResolutionRef, current.ResolutionNote = &kind, &refund.ID, reason
+		if err := uc.moveCaseWith(ctx, current, domain.CaseResolutionPending, "admin", &adminID, "resolution_proposed", reason,
+			map[string]any{"resolution_kind": kind, "resolution_ref": refund.ID, "refund_amount": refund.Amount}); err != nil {
+			return err
+		}
+		result = current
+		return nil
+	})
+	if err != nil {
+		return nil, nil, false, err
+	}
+	if !replayed {
+		uc.Log.Info().Str("case_id", caseID).Str("order_id", result.OrderID).Str("refund_id", refund.ID).Int64("amount", refund.Amount).
+			Msg("order_support_case_refund_opened")
+		uc.runEffectsSoon(ctx, result.OrderID)
+	}
+	return result, refund, replayed, nil
 }
 
 // linkedOutcome checks a refund/return belongs to the case's vendor order
@@ -785,7 +897,13 @@ func (uc *OrderUseCase) moveCaseWith(ctx context.Context, c *domain.SupportCase,
 		closed := now.UTC()
 		c.ClosedAt = &closed
 	}
-	return uc.saveCaseStep(ctx, c, to, role, actor, action, note, changes)
+	if err := uc.saveCaseStep(ctx, c, to, role, actor, action, note, changes); err != nil {
+		return err
+	}
+	if to == domain.CaseClosed {
+		return uc.releaseCaseHoldOnClose(ctx, c)
+	}
+	return nil
 }
 
 func (uc *OrderUseCase) saveCaseStep(ctx context.Context, c *domain.SupportCase, to domain.SupportCaseStatus, role string, actor *string,

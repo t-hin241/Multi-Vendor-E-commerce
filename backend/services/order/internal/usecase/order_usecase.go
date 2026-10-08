@@ -36,6 +36,12 @@ type Deps struct {
 	Refunds          RefundRepositoryPort
 	Returns          ReturnRepositoryPort
 	Support          SupportCaseRepositoryPort
+	// CaseHolds and Holds carry support cases' settlement holds to
+	// Payment's ledger (PW-001); nil keeps only the legacy hold query.
+	CaseHolds SupportHoldPort
+	Holds     SettlementHoldGateway
+	// Intakes are buyers' requests without an order id (PW-012).
+	Intakes SupportIntakePort
 	// Policies is the read model of published policies (AF-02).
 	Policies PolicyVersionPort
 

@@ -2918,9 +2918,15 @@ export type SupportCaseEvent = {
   created_at: string;
 };
 
+// The case's payout hold in Payment's ledger (PW-001), admin only.
+// preparing: Payment has not confirmed it yet; needs_review: a payout
+// already claimed the vendor order (or Payment refused the hold).
+export type CaseHoldStatus = "preparing" | "active" | "needs_review" | "releasing" | "released";
+
 export type SupportCaseDetail = SupportCase & {
   messages: SupportMessage[];
   events: SupportCaseEvent[];
+  settlement_hold?: { status: CaseHoldStatus; note?: string; updated_at: string };
 };
 
 export type SupportCasePage = { items: SupportCase[]; next_cursor: string };
@@ -3864,4 +3870,100 @@ export async function fetchRefundEvidence(token: string, evidenceId: string): Pr
     throw new ApiError(res.status, "evidence_unavailable", "Could not load the evidence file.");
   }
   return res.blob();
+}
+
+// ----- AF-01 completion: refund from a case (PW-014), intakes (PW-012) -----
+
+export type CaseRefundResult = {
+  case: SupportCase;
+  refund_id: string;
+  refund_status: OrderRefundStatus;
+  amount: number;
+  currency: string;
+};
+
+// createCaseRefund opens a dispute refund on the case's vendor order and
+// links it as the pending resolution. idempotencyKey is reused on a retry.
+export function createCaseRefund(
+  token: string,
+  caseId: string,
+  input: { amount: number; reason: string; expected_version: number },
+  idempotencyKey: string,
+): Promise<CaseRefundResult> {
+  return request<CaseRefundResult>(`/api/orders/admin/support-cases/${caseId}/refunds`, {
+    method: "POST",
+    token,
+    headers: { "Idempotency-Key": idempotencyKey },
+    json: input,
+  });
+}
+
+export type SupportIntakeReferenceKind = "checkout" | "payment" | "bank_transfer";
+
+export type SupportIntake = {
+  id: string;
+  buyer_id?: string;
+  reference_kind: SupportIntakeReferenceKind;
+  reference: string;
+  message: string;
+  status: "open" | "linked" | "closed";
+  linked_case_id?: string;
+  handled_at?: string;
+  close_reason?: string;
+  version: number;
+  created_at: string;
+};
+
+export function createSupportIntake(
+  token: string,
+  input: { reference_kind: SupportIntakeReferenceKind; reference: string; message: string },
+  idempotencyKey: string,
+): Promise<SupportIntake> {
+  return request<SupportIntake>("/api/orders/support-intakes", {
+    method: "POST",
+    token,
+    headers: { "Idempotency-Key": idempotencyKey },
+    json: input,
+  });
+}
+
+export function listMySupportIntakes(token: string): Promise<SupportIntake[]> {
+  return request<SupportIntake[]>("/api/orders/support-intakes", { token });
+}
+
+export function listSupportIntakes(token: string, status = "open"): Promise<SupportIntake[]> {
+  return request<SupportIntake[]>("/api/orders/admin/support-intakes", {
+    token,
+    query: { status },
+  });
+}
+
+export function linkSupportIntake(
+  token: string,
+  intakeId: string,
+  input: {
+    order_id: string;
+    vendor_order_id: string;
+    category: SupportCategory;
+    expected_version: number;
+    reason: string;
+  },
+): Promise<SupportCase> {
+  return request<SupportCase>(`/api/orders/admin/support-intakes/${intakeId}/links`, {
+    method: "POST",
+    token,
+    json: input,
+  });
+}
+
+export function closeSupportIntake(
+  token: string,
+  intakeId: string,
+  input: { expected_version: number; reason: string },
+): Promise<SupportIntake> {
+  return request<SupportIntake>(`/api/orders/admin/support-intakes/${intakeId}/closure`, {
+    method: "POST",
+    token,
+    json: input,
+  });
 }

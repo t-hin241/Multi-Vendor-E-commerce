@@ -149,6 +149,9 @@ func main() {
 		Refunds:           repository.NewRefundRepository(dbPool),
 		Returns:           repository.NewReturnRequestRepository(dbPool),
 		Support:           repository.NewSupportCaseRepository(dbPool),
+		CaseHolds:         repository.SupportHoldRepository{Pool: dbPool},
+		Intakes:           repository.SupportIntakeRepository{Pool: dbPool},
+		Holds:             paymentClient,
 		Policies:          repository.NewPolicyVersionRepository(dbPool),
 		Attachments:       attachments,
 		Cart:              cartClient,
@@ -165,7 +168,7 @@ func main() {
 		ReturnPolicy:      domain.ReturnPolicy{Version: cfg.ReturnPolicyVersion(), WindowDays: cfg.ReturnWindowDays},
 		VersionedPolicies: cfg.VersionedPolicies,
 		SupportConfig: usecase.SupportConfig{Enabled: cfg.Support.Enabled, PilotVendorIDs: pilotVendors,
-			AttachmentRetention: time.Duration(cfg.Support.AttachmentRetentionDays) * 24 * time.Hour},
+			AttachmentRetention: time.Duration(cfg.Support.AttachmentRetentionDays) * 24 * time.Hour, HoldLedger: cfg.Support.HoldLedger},
 		Log: log,
 	})
 	workerCtx, stopWorker := context.WithCancel(ctx)

@@ -180,7 +180,8 @@ type SkippedVendor struct {
 
 // CreatePayoutBatch builds a manual payout batch: for each vendor, every
 // unpaid debit and every credit past its return window whose vendor order
-// has no open return or refund, paid to the vendor's verified destination.
+// has no open return or refund and no active settlement hold, paid to the
+// vendor's verified destination.
 // The batch is idempotent by key; a vendor's entries are locked so no two
 // batches include them. Order unreachable means nothing is paid.
 func (uc *SettlementUseCase) CreatePayoutBatch(ctx context.Context, adminID, key, currency string, vendorIDs []string) (*domain.PayoutBatch, []SkippedVendor, error) {
@@ -269,6 +270,12 @@ func (uc *SettlementUseCase) addVendorItem(ctx context.Context, batch *domain.Pa
 	if err != nil {
 		return "", err
 	}
+	// Read under the vendor lock that every hold acquire takes too: a hold
+	// acquired before this point is seen here, a later one sees this claim.
+	ledgerHolds, err := uc.Settlement.ActiveHolds(ctx, ids)
+	if err != nil {
+		return "", err
+	}
 	now := uc.Now()
 	var total int64
 	pay := []string{}
@@ -276,7 +283,7 @@ func (uc *SettlementUseCase) addVendorItem(ctx context.Context, batch *domain.Pa
 		isHeld := false
 		if e.VendorOrderID != nil {
 			_, orderHold := held[*e.VendorOrderID]
-			isHeld = orderHold || openRefunds[*e.VendorOrderID]
+			isHeld = orderHold || openRefunds[*e.VendorOrderID] || ledgerHolds[*e.VendorOrderID]
 		}
 		if e.Payable(now, isHeld) {
 			total += e.Amount

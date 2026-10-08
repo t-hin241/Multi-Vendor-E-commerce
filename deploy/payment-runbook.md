@@ -100,3 +100,7 @@ Xem `deploy/admin-permissions-runbook.md`: migration, cờ `FEATURE_ADMIN_SCOPED
 ## Hoàn tiền chuyển khoản thủ công (AF-06)
 
 Xem `deploy/manual-refund-runbook.md`: migration `000013`, cờ `FEATURE_MANUAL_REFUND_WORKFLOW_ENABLED`, khoá `REFUND_DESTINATION_KEY`, các bước xác minh → chuyển → xác nhận, trạng thái `unknown` và rollback.
+
+## Sổ hold payout (PW-001, 00 §6.1)
+
+Migration `000014_settlement_holds`. Order gọi ba route nội bộ (`internal.Allow("order")`): `POST /internal/payments/settlement-holds`, `GET …/:holdID`, `POST …/:holdID/releases`. Tạo payout batch bỏ qua credit của vendor order có hold `active`, đọc dưới cùng khóa vendor với lệnh giữ. Hold sau khi payout đã claim vẫn được ghi nhưng trả 409 `payout_already_claimed` (Order đưa case vào `needs_review`). Xem danh sách: `GET /api/payments/admin/settlement-holds` (`finance.read`, `?status=all`, `?vendor_order_id=`). Log `settlement_hold_acquired` (warn khi `payout_claimed`), `settlement_hold_released_before_acquire`. Chi tiết vận hành: mục PW-001 trong `deploy/order-runbook.md`.

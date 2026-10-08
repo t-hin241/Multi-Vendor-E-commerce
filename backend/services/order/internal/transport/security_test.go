@@ -174,3 +174,38 @@ func TestEveryAdminRouteNamesAPermission(t *testing.T) {
 	r, _ := testRouter()
 	adminaccesstest.AssertCovered(t, r.(*gin.Engine), AdminRoutes)
 }
+
+// PW-012 and PW-014: intakes are the buyer's to send and the support
+// admins' to link; a refund from a case is admin-only and needs a body.
+func TestSupportIntakeAndCaseRefundRoutesCheckRolesAndInput(t *testing.T) {
+	r, jwt := testRouter()
+	forbidden := []struct{ method, path, role string }{
+		{"POST", "/api/orders/support-intakes", "vendor"},
+		{"POST", "/api/orders/support-intakes", "admin"},
+		{"GET", "/api/orders/support-intakes", "vendor"},
+		{"GET", "/api/orders/admin/support-intakes", "buyer"},
+		{"POST", "/api/orders/admin/support-intakes/" + someID + "/links", "buyer"},
+		{"POST", "/api/orders/admin/support-intakes/" + someID + "/closure", "vendor"},
+		{"POST", "/api/orders/admin/support-cases/" + someID + "/refunds", "buyer"},
+		{"POST", "/api/orders/admin/support-cases/" + someID + "/refunds", "vendor"},
+	}
+	for _, tc := range forbidden {
+		if code := do(r, tc.method, tc.path, `{}`, as(t, jwt, tc.role)); code != http.StatusForbidden {
+			t.Errorf("%s %s as %s: expected 403, got %d", tc.method, tc.path, tc.role, code)
+		}
+	}
+	if code := do(r, "POST", "/api/orders/support-intakes", `{}`, nil); code != http.StatusUnauthorized {
+		t.Errorf("anonymous intake: %d", code)
+	}
+	invalid := []struct{ method, path, body, role string }{
+		{"POST", "/api/orders/support-intakes", `{"reference_kind":"payment"}`, "buyer"},
+		{"POST", "/api/orders/admin/support-intakes/" + someID + "/links", `{"order_id":"x","vendor_order_id":"` + someID + `","category":"other","expected_version":1,"reason":"r"}`, "admin"},
+		{"POST", "/api/orders/admin/support-intakes/not-a-uuid/closure", `{"expected_version":1,"reason":"r"}`, "admin"},
+		{"POST", "/api/orders/admin/support-cases/" + someID + "/refunds", `{"amount":0,"reason":"r","expected_version":1}`, "admin"},
+	}
+	for _, tc := range invalid {
+		if code := do(r, tc.method, tc.path, tc.body, as(t, jwt, tc.role)); code != http.StatusBadRequest {
+			t.Errorf("%s %s %s: expected 400, got %d", tc.method, tc.path, tc.body, code)
+		}
+	}
+}

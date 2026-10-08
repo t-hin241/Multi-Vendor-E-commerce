@@ -469,6 +469,9 @@ services:
       # AF-01 support cases: off by default; off only stops new cases.
       FEATURE_ORDER_SUPPORT_ENABLED: ${FEATURE_ORDER_SUPPORT_ENABLED:-false}
       FEATURE_ORDER_SUPPORT_PILOT_VENDOR_IDS: ${FEATURE_ORDER_SUPPORT_PILOT_VENDOR_IDS:-}
+      # PW-001: money cases hold the payout in Payment's ledger; turn on after
+      # Payment runs migration 000014. Off still releases holds already taken.
+      FEATURE_SETTLEMENT_HOLD_LEDGER_ENABLED: ${FEATURE_SETTLEMENT_HOLD_LEDGER_ENABLED:-false}
       SUPPORT_ATTACHMENT_RETENTION_DAYS: ${SUPPORT_ATTACHMENT_RETENTION_DAYS:-180}
       # Private evidence bucket: no bucket policy, read only through Order.
       SUPPORT_ATTACHMENT_STORAGE_ENDPOINT: minio:9000

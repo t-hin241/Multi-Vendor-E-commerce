@@ -44,6 +44,10 @@ type SupportConfig struct {
 	AttachmentRetentionDays int
 	// Attachments is the private evidence bucket; nil turns attachments off.
 	Attachments *objectstorage.PrivateConfig
+	// HoldLedger is FEATURE_SETTLEMENT_HOLD_LEDGER_ENABLED (PW-001): cases
+	// that may affect money acquire a hold in Payment's ledger. Off still
+	// releases holds acquired earlier.
+	HoldLedger bool
 }
 
 // ReturnPolicyVersion names the policy in force, derived from its settings
@@ -138,6 +142,13 @@ func loadSupportConfig() (SupportConfig, error) {
 			return SupportConfig{}, fmt.Errorf("config: FEATURE_ORDER_SUPPORT_PILOT_VENDOR_IDS must be a comma-separated list of vendor ids")
 		}
 		cfg.PilotVendorIDs = append(cfg.PilotVendorIDs, id)
+	}
+	if raw := os.Getenv("FEATURE_SETTLEMENT_HOLD_LEDGER_ENABLED"); raw != "" {
+		v, err := strconv.ParseBool(raw)
+		if err != nil {
+			return SupportConfig{}, fmt.Errorf("config: FEATURE_SETTLEMENT_HOLD_LEDGER_ENABLED must be true or false")
+		}
+		cfg.HoldLedger = v
 	}
 	if raw := os.Getenv("SUPPORT_ATTACHMENT_RETENTION_DAYS"); raw != "" {
 		v, err := strconv.Atoi(raw)

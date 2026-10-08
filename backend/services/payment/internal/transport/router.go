@@ -27,6 +27,8 @@ type Handlers struct {
 	Approval *ApprovalHandler
 	// Manual runs AF-06 manual bank-transfer refunds.
 	Manual *ManualRefundHandler
+	// Holds is the settlement hold ledger (00 §6.1).
+	Holds *SettlementHoldHandler
 	// AdminGuard enforces AdminRoutes (AF-19).
 	AdminGuard gin.HandlerFunc
 }
@@ -90,6 +92,7 @@ func NewRouter(env string, log zerolog.Logger, jwtManager *authjwt.Manager, h Ha
 		adminGroup.POST("/payouts/batches", h.Admin.CreateBatch)
 		adminGroup.GET("/payouts/batches/:id", h.Admin.GetBatch)
 		adminGroup.POST("/payouts/items/:id/resolve", h.Admin.ResolvePayoutItem)
+		adminGroup.GET("/settlement-holds", h.Holds.AdminList)
 
 		// AF-19 maker-checker: draft -> submission (maker, password proof)
 		// -> decision (another admin with finance.approve, password proof).
@@ -105,6 +108,11 @@ func NewRouter(env string, log zerolog.Logger, jwtManager *authjwt.Manager, h Ha
 	{
 		internalGroup.POST("/payments/refunds", h.Refund.Request)
 		internalGroup.POST("/settlements/vendor-orders", h.Admin.IngestVendorOrder)
+		// 00 §6.1: Order holds a vendor order's payout before it reports the
+		// money protected, and releases it once its case is closed.
+		internalGroup.POST("/payments/settlement-holds", h.Holds.Acquire)
+		internalGroup.GET("/payments/settlement-holds/:holdID", h.Holds.Get)
+		internalGroup.POST("/payments/settlement-holds/:holdID/releases", h.Holds.Release)
 	}
 
 	// The provider calls this directly, with no bearer token; its signature

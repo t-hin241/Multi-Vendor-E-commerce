@@ -54,6 +54,9 @@ func (w OrderWorker) Run(ctx context.Context) {
 			if _, err := uc.CleanSupportAttachments(ctx, batch); err != nil && ctx.Err() == nil {
 				uc.Log.Error().Err(err).Msg("order_support_attachment_cleanup_failed")
 			}
+			if _, err := uc.EnsureSupportHolds(ctx, batch); err != nil && ctx.Err() == nil {
+				uc.Log.Error().Err(err).Msg("order_support_hold_sweep_failed")
+			}
 		}
 		select {
 		case <-ctx.Done():
@@ -107,6 +110,7 @@ func (w OrderWorker) report(ctx context.Context) {
 	} else if ctx.Err() == nil {
 		uc.Log.Error().Err(err).Msg("order_effect_stats_failed")
 	}
+	uc.reportSupportHolds(ctx)
 	if exceptions, err := uc.Payments.ListRejected(ctx, 1, 0); err == nil && len(exceptions) > 0 {
 		uc.Log.Warn().Str("oldest_payment_id", exceptions[0].PaymentID).Msg("order_payment_exceptions_pending")
 	}

@@ -214,12 +214,14 @@ func main() {
 	limiter := adapter.RedisRateLimiter{Client: redisClient, Prefix: "payment:webhook:", Limit: cfg.WebhookRatePerMinute, Window: time.Minute}
 
 	router := transport.NewRouter(cfg.Base.Env, log, jwtManager, transport.Handlers{
-		Payment:    transport.NewPaymentHandler(paymentUseCase, log),
-		Webhook:    transport.NewWebhookHandler(paymentUseCase, limiter, log),
-		Refund:     transport.NewRefundHandler(refundUseCase, log),
-		Admin:      transport.NewAdminHandler(reconUseCase, settlementUseCase, log),
-		Approval:   transport.NewApprovalHandler(approvalUseCase, log),
-		Manual:     transport.NewManualRefundHandler(manualUseCase, log),
+		Payment:  transport.NewPaymentHandler(paymentUseCase, log),
+		Webhook:  transport.NewWebhookHandler(paymentUseCase, limiter, log),
+		Refund:   transport.NewRefundHandler(refundUseCase, log),
+		Admin:    transport.NewAdminHandler(reconUseCase, settlementUseCase, log),
+		Approval: transport.NewApprovalHandler(approvalUseCase, log),
+		Manual:   transport.NewManualRefundHandler(manualUseCase, log),
+		Holds: transport.NewSettlementHoldHandler(&usecase.SettlementHoldUseCase{Store: repository.SettlementHoldRepository{Pool: dbPool},
+			Vendors: repository.NewPayoutRepository(dbPool), Tx: tx, Log: log}, log),
 		AdminGuard: adminGuard,
 	}, internalServices.Verifier,
 		health.Checker{Name: "postgres", Ping: func(ctx context.Context) error { return dbPool.Ping(ctx) }},

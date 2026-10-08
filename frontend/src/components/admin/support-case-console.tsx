@@ -31,7 +31,9 @@ import {
 } from "@/lib/hooks/use-support-cases";
 import { returnStatusLabel } from "@/lib/order-workflow";
 import {
+  CASE_HOLD_LABELS,
   adminCanResolve,
+  caseRefundBlocked,
   isOverdue,
   supportCategoryLabel,
   supportResolutionLabel,
@@ -123,10 +125,24 @@ export function SupportCaseConsole({ caseId }: { caseId: string }) {
               <p className={isOverdue(c) ? "text-destructive" : undefined}>
                 Due: {c.due_at ? new Date(c.due_at).toLocaleString("vi-VN") : "—"}
               </p>
-              {c.financial_hold && c.status !== "closed" && (
-                <p className="text-muted-foreground">
-                  The vendor order&apos;s payout is held until the case is closed.
+              {c.settlement_hold ? (
+                <p
+                  className={
+                    c.settlement_hold.status === "needs_review"
+                      ? "text-destructive"
+                      : "text-muted-foreground"
+                  }
+                >
+                  {CASE_HOLD_LABELS[c.settlement_hold.status] ?? c.settlement_hold.status}
+                  {c.settlement_hold.note && `: ${c.settlement_hold.note}`}
                 </p>
+              ) : (
+                c.financial_hold &&
+                c.status !== "closed" && (
+                  <p className="text-muted-foreground">
+                    The vendor order&apos;s payout is held until the case is closed.
+                  </p>
+                )
               )}
               {c.status !== "resolved" &&
                 c.status !== "closed" &&
@@ -253,15 +269,16 @@ function StatusActions({
   );
 }
 
-// ResolveCard records the conclusion. Refunds and returns are created on
-// the order page (dispute refund) or by the buyer (return); here they are
-// only linked, never created.
+// ResolveCard records the conclusion. A dispute refund can be opened here
+// (PW-014: refund and link in one step, once the payout hold is
+// confirmed) or an existing refund/return linked; returns are requested
+// by the buyer.
 function ResolveCard({
   c,
   busy,
   act,
 }: {
-  c: api.SupportCase;
+  c: api.SupportCaseDetail;
   busy: boolean;
   act: (fn: (token: string) => Promise<unknown>) => Promise<void>;
 }) {
@@ -348,9 +365,14 @@ function ResolveCard({
                 {order && refunds.length === 0 && (
                   <p className="text-muted-foreground">No refund for this vendor order yet.</p>
                 )}
-                <Link className="text-primary underline" href={`/admin/orders/${c.order_id}`}>
-                  Request a dispute refund on the order page
-                </Link>
+                <CaseRefundForm
+                  c={c}
+                  currency={order?.currency}
+                  reason={reason}
+                  busy={busy}
+                  act={act}
+                  onDone={() => setReason("")}
+                />
               </>
             )}
             {kind === "return" && (
@@ -391,5 +413,73 @@ function ResolveCard({
         </Button>
       </CardContent>
     </Card>
+  );
+}
+
+// CaseRefundForm opens a dispute refund on the case's vendor order and
+// links it, using the conclusion above as the refund reason. The key is
+// kept until it succeeds, so a retry after a timeout cannot open two.
+function CaseRefundForm({
+  c,
+  currency,
+  reason,
+  busy,
+  act,
+  onDone,
+}: {
+  c: api.SupportCaseDetail;
+  currency?: string;
+  reason: string;
+  busy: boolean;
+  act: (fn: (token: string) => Promise<unknown>) => Promise<void>;
+  onDone: () => void;
+}) {
+  const [amount, setAmount] = useState("");
+  const [key, setKey] = useState(() => crypto.randomUUID());
+  const blocked = caseRefundBlocked(c, c.settlement_hold);
+  const value = Number(amount);
+  const valid = Number.isInteger(value) && value > 0 && reason.trim().length > 0;
+
+  async function submit() {
+    try {
+      await act((t) =>
+        api.createCaseRefund(
+          t,
+          c.id,
+          { amount: value, reason: reason.trim(), expected_version: c.version },
+          key,
+        ),
+      );
+      setAmount("");
+      setKey(crypto.randomUUID());
+      onDone();
+    } catch {
+      // Shown in the Handling card; the same key is reused on retry.
+    }
+  }
+
+  return (
+    <div className="mt-2 flex flex-col gap-1 border-t pt-2">
+      <Label htmlFor="case-refund-amount">
+        Or open a dispute refund from this case{currency ? ` (${currency}, minor units)` : ""}
+      </Label>
+      <Input
+        id="case-refund-amount"
+        inputMode="numeric"
+        value={amount}
+        onChange={(e) => setAmount(e.target.value.replace(/[^0-9]/g, ""))}
+      />
+      {blocked && <p className="text-xs text-muted-foreground">{blocked}</p>}
+      <Button
+        size="sm"
+        variant="outline"
+        disabled={!valid || busy || Boolean(blocked)}
+        onClick={submit}
+      >
+        {valid && currency
+          ? `Refund ${formatMoney(value, currency)} and link it`
+          : "Refund and link it"}
+      </Button>
+    </div>
   );
 }

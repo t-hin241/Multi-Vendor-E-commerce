@@ -30,9 +30,13 @@ var AdminRoutes = adminaccess.Routes{
 	"POST /api/orders/admin/support-cases/:caseID/assignments":              adminaccess.SupportManage,
 	"POST /api/orders/admin/support-cases/:caseID/status":                   adminaccess.SupportManage,
 	"POST /api/orders/admin/support-cases/:caseID/resolutions":              adminaccess.SupportManage,
+	"POST /api/orders/admin/support-cases/:caseID/refunds":                  adminaccess.FinancePrepare,
 	"POST /api/orders/admin/support-cases/:caseID/close":                    adminaccess.SupportManage,
 	"GET /api/orders/admin/support-cases/:caseID/attachments/:attachmentID": adminaccess.SupportManage,
 	"POST /api/orders/admin/support-attachments":                            adminaccess.SupportManage,
+	"GET /api/orders/admin/support-intakes":                                 adminaccess.SupportManage,
+	"POST /api/orders/admin/support-intakes/:intakeID/links":                adminaccess.SupportManage,
+	"POST /api/orders/admin/support-intakes/:intakeID/closure":              adminaccess.SupportManage,
 	"GET /api/orders/admin/commission-rules":                                adminaccess.FinanceRead,
 	"POST /api/orders/admin/commission-rules":                               adminaccess.PlatformConfigure,
 }.Merge(adminaccess.Shared("/api/orders/admin", true, true, true))

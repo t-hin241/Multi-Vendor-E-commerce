@@ -69,6 +69,9 @@ func NewRouter(
 		buyerGroup.POST("/support-cases/:caseID/confirm", supportHandler.Confirm)
 		buyerGroup.GET("/support-cases/:caseID/attachments/:attachmentID", supportHandler.Attachment)
 		buyerGroup.POST("/support-attachments", supportHandler.Upload)
+		// PW-012: a request without an order id, linked by an admin later.
+		buyerGroup.POST("/support-intakes", supportHandler.CreateIntake)
+		buyerGroup.GET("/support-intakes", supportHandler.MyIntakes)
 
 		buyerGroup.POST("/addresses", addressHandler.Add)
 		buyerGroup.GET("/addresses", addressHandler.ListMine)
@@ -119,9 +122,13 @@ func NewRouter(
 		adminGroup.POST("/support-cases/:caseID/assignments", supportHandler.Assign)
 		adminGroup.POST("/support-cases/:caseID/status", supportHandler.ChangeStatus)
 		adminGroup.POST("/support-cases/:caseID/resolutions", supportHandler.Resolve)
+		adminGroup.POST("/support-cases/:caseID/refunds", supportHandler.Refund)
 		adminGroup.POST("/support-cases/:caseID/close", supportHandler.Close)
 		adminGroup.GET("/support-cases/:caseID/attachments/:attachmentID", supportHandler.Attachment)
 		adminGroup.POST("/support-attachments", supportHandler.Upload)
+		adminGroup.GET("/support-intakes", supportHandler.AdminIntakes)
+		adminGroup.POST("/support-intakes/:intakeID/links", supportHandler.LinkIntake)
+		adminGroup.POST("/support-intakes/:intakeID/closure", supportHandler.CloseIntake)
 		adminGroup.GET("/commission-rules", adminHandler.ListCommissionRules)
 		adminGroup.POST("/commission-rules", adminHandler.SetCommissionRule)
 		adminGroup.GET("/:id", adminHandler.Get)

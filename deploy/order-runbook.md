@@ -132,6 +132,57 @@ Vận hành:
 
 Rollback: đặt `FEATURE_ORDER_SUPPORT_ENABLED=false`. Không chạy down `000016` khi đã có case: down tự từ chối để không mất hồ sơ khiếu nại và hold payout. Order bản cũ bỏ qua bảng mới; khi đó payout của vendor order có case mở **không** còn bị giữ, nên chỉ rollback image khi không còn case ảnh hưởng tiền đang mở.
 
+### Sổ hold payout do Payment sở hữu (PW-001)
+
+Migration Order `000019_settlement_hold_ledger`, Payment `000014_settlement_holds`. Cờ `FEATURE_SETTLEMENT_HOLD_LEDGER_ENABLED` ở Order, mặc định `false`.
+
+- **Cách chạy:**
+  - Case ảnh hưởng tiền nhận `hold_id` và trạng thái `preparing` trong cùng transaction tạo case.
+  - Effect `acquire_settlement_hold` gọi `POST /internal/payments/settlement-holds` (có retry). Payment lấy khóa payout của vendor rồi ghi hold.
+  - Tạo payout batch cũng đọc hold dưới cùng khóa đó, nên hold và claim không chen nhau.
+  - Khi case `closed`, effect `release_settlement_hold` nhả hold. Lặp lại vẫn trả cùng biên nhận; nhả trước khi giữ để lại tombstone.
+- **Trạng thái** (admin thấy ở trang case):
+  - `preparing`: Payment chưa xác nhận. Mở refund từ case trả 503 `hold_unavailable`; resolution refund/return cũng bị chặn.
+  - `active`.
+  - `needs_review`: Payment trả `payout_already_claimed`, tức payout đã claim vendor order trước khi case mở, hoặc Payment từ chối hold. Refund cho buyer vẫn mở được.
+  - `releasing`, `released`.
+- **Xử lý `needs_review`:** người vận hành Payment kiểm item payout chứa vendor order đó.
+  - Item còn `pending`: ghi `failed` có audit để nhả entry.
+  - Tiền đã đi: ghi khoản phải thu của vendor bằng điều chỉnh sổ.
+  - Danh sách hold xem tại `GET /api/payments/admin/settlement-holds` (`finance.read`).
+- **Worker** (mỗi phút):
+  - Cấp hold cho case mở trước khi bật cờ (backfill).
+  - Gửi nhả hold cho case đã đóng mà hold chưa được nhả.
+  - Log `order_support_hold_backlog`: `preparing`, `needs_review`, `releasing`; mức `warn` khi có `needs_review`.
+  - Effect hold bị parked hiện trong `order_effect_backlog`.
+- **Bật cờ:**
+  1. Deploy Payment có `000014`.
+  2. Deploy Order có `000019`.
+  3. Bật cờ ở staging, mở một case `damaged`, kiểm hold `active` ở Payment và payout batch bỏ qua vendor order đó.
+  4. Đóng case, kiểm hold `released`.
+- **Tắt cờ:** case mới không cấp hold nữa; hold đã có vẫn được nhả khi case đóng. Truy vấn cũ `/internal/settlements/holds` vẫn giữ payout cho case mở, nên tắt cờ không mở payout. Không chạy down `000019`/`000014` khi đã có hold (down tự từ chối).
+
+### Mở refund từ trang case (PW-014)
+
+`POST /api/orders/admin/support-cases/:caseID/refunds {amount, reason, expected_version}` với header `Idempotency-Key` bắt buộc, quyền `finance.prepare`.
+
+- Trong một transaction: tạo refund tranh chấp cho vendor order của case, liên kết refund làm resolution và chuyển case sang `resolution_pending`.
+- Gửi lại cùng key trả lại đúng refund và case đó.
+- Cần hold đã `active` hoặc `needs_review` khi bật cờ hold.
+- Case chỉ `resolved` khi Payment xác nhận tiền đã hoàn.
+
+### Yêu cầu không có mã đơn (PW-012)
+
+Migration `000020_support_intakes`.
+
+- **Buyer:** `POST /api/orders/support-intakes {reference_kind, reference, message}` (trang `/support`, mục "Không tìm thấy đơn hàng?"). Tối đa 3 yêu cầu đang mở; mỗi mã chỉ một yêu cầu mở.
+- **Admin** (`support.manage`), ở đầu `/admin/support`:
+  - Tra mã qua tìm kiếm thanh toán; tìm kiếm cần `finance.read`, nếu không có thì nhập order id.
+  - **Gắn** (`POST …/support-intakes/:id/links`): Order từ chối nếu đơn không phải của chính buyer gửi yêu cầu (422 `intake_order_mismatch`). Khi gắn, Order mở case mới với lời của buyer, hoặc thêm vào case đang mở cùng vendor order và cùng loại.
+  - **Đóng** (`…/closure`): lý do đóng được hiện cho buyer.
+- Cả gắn và đóng đều có audit `support_intake`.
+- Gateway: dùng chung giới hạn `support` (60 lần/phút).
+
 ## Snapshot chính sách khi đặt đơn (AF-02)
 
 Migration `000017_policy_snapshots`: read model `policy_versions` (từ `vendor.policy_published`, consumer `order-policy-versions`, HTTP dự phòng `POST /internal/policy-published`) và cột `policy_snapshot` trên `orders`/`vendor_orders`.
