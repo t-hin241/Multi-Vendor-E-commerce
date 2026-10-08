@@ -163,6 +163,28 @@ func (h *InternalHandler) RestockReturn(c *gin.Context) {
 	httpresponse.OK(c, status, gin.H{"return_id": req.ReturnID, "replayed": replayed})
 }
 
+// RestockRecovery puts back units of a cancelled vendor order (AF-03): 201
+// the first time, 200 for a replay of the same recovery.
+func (h *InternalHandler) RestockRecovery(c *gin.Context) {
+	var req recoveryRestockRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		httpresponse.Error(c, http.StatusBadRequest, "validation_error", "recovery_id, product_id and a positive quantity are required")
+		return
+	}
+	replayed, err := h.inventory.RestockRecovery(c.Request.Context(), req.RecoveryID, req.ProductID, req.VariantID, req.Quantity)
+	if err != nil {
+		httpresponse.HandleError(c, h.log, err)
+		return
+	}
+	status := http.StatusCreated
+	if replayed {
+		status = http.StatusOK
+	} else {
+		h.log.Info().Str("recovery_id", req.RecoveryID).Str("product_id", req.ProductID).Int64("quantity", req.Quantity).Msg("inventory_recovery_restocked")
+	}
+	httpresponse.OK(c, status, gin.H{"recovery_id": req.RecoveryID, "replayed": replayed})
+}
+
 func (h *InternalHandler) Commit(c *gin.Context) {
 	var req releaseRequest // same {order_id} shape
 	if err := c.ShouldBindJSON(&req); err != nil {

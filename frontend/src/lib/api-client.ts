@@ -3967,3 +3967,124 @@ export function closeSupportIntake(
     json: input,
   });
 }
+
+// ----- AF-03 cancelling a paid package before handover -----
+
+export type CancellationStatus =
+  | "preparing"
+  | "requested"
+  | "stopping_fulfillment"
+  | "approved"
+  | "refund_pending"
+  | "resolved"
+  | "rejected"
+  | "needs_review";
+
+export type CancellationRequest = {
+  id: string;
+  order_id: string;
+  vendor_order_id: string;
+  vendor_id: string;
+  buyer_id?: string;
+  origin: "buyer" | "vendor";
+  reason_code: string;
+  reason: string;
+  status: CancellationStatus;
+  policy_version: string;
+  hold_status?: CaseHoldStatus;
+  hold_note?: string;
+  stop_result?: "stopped" | "handed_over" | "delivered";
+  restock?: boolean;
+  refund_id?: string;
+  decided_at?: string;
+  decision_reason?: string;
+  review_reason?: string;
+  resolved_at?: string;
+  action_due_at?: string;
+  waiting_on?: string;
+  version: number;
+  created_at: string;
+  updated_at: string;
+};
+
+export type CancellationEvent = {
+  actor_id?: string;
+  actor_role: string;
+  action: string;
+  from_status: string | null;
+  to_status: string;
+  note?: string;
+  created_at: string;
+};
+
+// requestCancellation: the buyer on their package, or the shop that
+// cannot fulfil it. idempotencyKey is reused on a retry.
+export function requestCancellation(
+  token: string,
+  scope: "buyer" | "vendor",
+  vendorOrderId: string,
+  input: { reason_code: string; reason: string },
+  idempotencyKey: string,
+): Promise<CancellationRequest> {
+  const path =
+    scope === "buyer"
+      ? `/api/orders/vendor-orders/${vendorOrderId}/cancellation-requests`
+      : `/api/orders/vendor/${vendorOrderId}/cancellation-requests`;
+  return request<CancellationRequest>(path, {
+    method: "POST",
+    token,
+    headers: { "Idempotency-Key": idempotencyKey },
+    json: input,
+  });
+}
+
+export function listOrderCancellations(
+  token: string,
+  orderId: string,
+): Promise<CancellationRequest[]> {
+  return request<CancellationRequest[]>(`/api/orders/${orderId}/cancellation-requests`, { token });
+}
+
+export function listVendorCancellations(
+  token: string,
+  vendorId: string,
+  status = "",
+): Promise<CancellationRequest[]> {
+  return request<CancellationRequest[]>("/api/orders/vendor/cancellation-requests", {
+    token,
+    query: { vendor_id: vendorId, status: status || undefined },
+  });
+}
+
+export function listCancellations(token: string, status = "open"): Promise<CancellationRequest[]> {
+  return request<CancellationRequest[]>("/api/orders/admin/cancellation-requests", {
+    token,
+    query: { status },
+  });
+}
+
+export function getCancellation(
+  token: string,
+  scope: "buyer" | "vendor" | "admin",
+  id: string,
+): Promise<{ request: CancellationRequest; events: CancellationEvent[] }> {
+  const prefix = scope === "buyer" ? "/api/orders" : `/api/orders/${scope}`;
+  return request(`${prefix}/cancellation-requests/${id}`, { token });
+}
+
+export function decideCancellation(
+  token: string,
+  id: string,
+  input: {
+    decision: "approve" | "reject" | "retry_refund";
+    reason: string;
+    expected_version: number;
+    restock?: boolean;
+  },
+): Promise<CancellationRequest> {
+  return request<CancellationRequest>(`/api/orders/admin/cancellation-requests/${id}/decisions`, {
+    method: "POST",
+    token,
+    json: input,
+  });
+}

@@ -299,7 +299,10 @@ func (r *VendorOrderRepository) HeldForSettlement(ctx context.Context, ids []str
 		WHERE vendor_order_id::text = ANY($1) AND status IN ('requested', 'submitted')
 		UNION ALL
 		SELECT vendor_order_id::text, 'support_case_open' FROM support_cases
-		WHERE vendor_order_id::text = ANY($1) AND financial_hold AND status <> 'closed'`, ids)
+		WHERE vendor_order_id::text = ANY($1) AND financial_hold AND status <> 'closed'
+		UNION ALL
+		SELECT vendor_order_id::text, 'cancellation_open' FROM cancellation_requests
+		WHERE vendor_order_id::text = ANY($1) AND status NOT IN ('rejected', 'resolved')`, ids)
 	if err != nil {
 		return nil, err
 	}

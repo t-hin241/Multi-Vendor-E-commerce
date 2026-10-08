@@ -15,10 +15,22 @@ import (
 // item and quantity is acknowledged (replayed=true), anything else under
 // that return id is a conflict.
 func (r *InventoryItemRepository) RestockReturn(ctx context.Context, returnID, productID string, variantID *string, quantity int64) (replayed bool, err error) {
+	return r.restock(ctx, "return:"+returnID, "return_restock", returnID, productID, variantID, quantity)
+}
+
+// RestockRecovery puts back units that never left the warehouse (AF-03: a
+// paid vendor order cancelled before handover) with a
+// 'cancellation_restock' movement, once per recovery id. The id names the
+// source and item ("cancellation:<request>:<item>"), so a cancellation and a
+// later return of the same item can never both restock it.
+func (r *InventoryItemRepository) RestockRecovery(ctx context.Context, recoveryID, productID string, variantID *string, quantity int64) (replayed bool, err error) {
+	return r.restock(ctx, "recovery:"+recoveryID, "cancellation_restock", recoveryID, productID, variantID, quantity)
+}
+
+func (r *InventoryItemRepository) restock(ctx context.Context, key, reason, referenceID, productID string, variantID *string, quantity int64) (replayed bool, err error) {
 	if quantity <= 0 {
-		return false, apperror.Validation("Return quantity must be positive")
+		return false, apperror.Validation("Restock quantity must be positive")
 	}
-	key := "return:" + returnID
 	err = (Transactions{Pool: r.pool}).Run(ctx, func(ctx context.Context) error {
 		q := connection(ctx, r.pool)
 		var itemID, itemProduct string
@@ -43,7 +55,7 @@ func (r *InventoryItemRepository) RestockReturn(ctx context.Context, returnID, p
 		err = q.QueryRow(ctx, `SELECT inventory_item_id, change_quantity FROM stock_movements WHERE operation_key = $1 LIMIT 1`, key).Scan(&doneItem, &doneQty)
 		if err == nil {
 			if doneItem != itemID || doneQty != quantity {
-				return apperror.Conflict("This return was already restocked with different values")
+				return apperror.Conflict("This return or recovery was already restocked with different values")
 			}
 			replayed = true
 			return nil
@@ -61,7 +73,7 @@ func (r *InventoryItemRepository) RestockReturn(ctx context.Context, returnID, p
 			return apperror.Validation("Stock quantity exceeds the supported maximum")
 		}
 		_, err = q.Exec(ctx, `INSERT INTO stock_movements (inventory_item_id, change_quantity, reason, reference_id, operation_key)
-			VALUES ($1, $2, 'return_restock', $3, $4)`, itemID, quantity, returnID, key)
+			VALUES ($1, $2, $3, $4, $5)`, itemID, quantity, reason, referenceID, key)
 		return err
 	})
 	return replayed, err

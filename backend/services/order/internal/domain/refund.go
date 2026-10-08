@@ -46,6 +46,9 @@ const (
 	RefundReasonDispute          = "dispute"
 	RefundReasonLatePayment      = "late_payment"
 	RefundReasonDuplicatePayment = "duplicate_payment"
+	// RefundReasonCancellation: a paid vendor order cancelled before
+	// handover (AF-03).
+	RefundReasonCancellation = "cancellation"
 )
 
 // Open reports whether the refund still reserves part of the refundable

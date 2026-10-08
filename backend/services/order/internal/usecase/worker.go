@@ -111,6 +111,7 @@ func (w OrderWorker) report(ctx context.Context) {
 		uc.Log.Error().Err(err).Msg("order_effect_stats_failed")
 	}
 	uc.reportSupportHolds(ctx)
+	uc.reportCancellations(ctx)
 	if exceptions, err := uc.Payments.ListRejected(ctx, 1, 0); err == nil && len(exceptions) > 0 {
 		uc.Log.Warn().Str("oldest_payment_id", exceptions[0].PaymentID).Msg("order_payment_exceptions_pending")
 	}

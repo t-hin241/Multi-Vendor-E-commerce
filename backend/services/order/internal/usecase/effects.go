@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"time"
 
 	"shopee/backend/pkg/apperror"
@@ -111,9 +112,25 @@ func (uc *OrderUseCase) executeEffect(ctx context.Context, e *domain.Effect) err
 	case domain.EffectSettleVendorOrder:
 		return uc.settleVendorOrder(ctx, e)
 	case domain.EffectAcquireSettlementHold:
+		if id, ok := strings.CutPrefix(e.Target, cancellationTarget); ok {
+			if uc.Cancellations == nil || uc.Holds == nil {
+				return errHoldsNotWired
+			}
+			return uc.acquireCancellationHold(ctx, id)
+		}
 		return uc.acquireCaseHold(ctx, e)
 	case domain.EffectReleaseSettlementHold:
+		if id, ok := strings.CutPrefix(e.Target, cancellationTarget); ok {
+			if uc.Cancellations == nil || uc.Holds == nil {
+				return errHoldsNotWired
+			}
+			return uc.releaseCancellationHoldEffect(ctx, id)
+		}
 		return uc.releaseCaseHold(ctx, e)
+	case domain.EffectStopFulfillment:
+		return uc.stopFulfillment(ctx, e)
+	case domain.EffectRecoverCancelledStock:
+		return uc.recoverCancelledStock(ctx, e)
 	case domain.EffectReportRejectedOutcome:
 		var p domain.RejectedOutcomePayload
 		if err := json.Unmarshal(e.Payload, &p); err != nil {
@@ -192,6 +209,10 @@ func (uc *OrderUseCase) createShipment(ctx context.Context, e *domain.Effect) er
 	}
 	if !vo.Fulfillable() {
 		return nil
+	}
+	// AF-03: a package whose cancellation is open is not shipped.
+	if open, err := uc.cancellationOpenFor(ctx, vo.ID); err != nil || open {
+		return asError(err)
 	}
 	order, err := uc.findOrder(ctx, vo.OrderID)
 	if err != nil {

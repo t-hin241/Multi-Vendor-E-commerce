@@ -114,6 +114,7 @@ func NewRouter(
 		internalGroup.POST("", internalHandler.CreateShipment)
 		internalGroup.POST("/quotes", internalHandler.Quote)
 		internalGroup.POST("/by-vendor-order/:id/cancel", internalHandler.CancelForVendorOrder)
+		internalGroup.POST("/by-vendor-order/:id/stops", internalHandler.StopFulfillment)
 	}
 
 	// The carrier calls this directly, with no bearer token — its signature

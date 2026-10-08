@@ -30,6 +30,10 @@ func TestSupportIntakesUseTheSupportBudget(t *testing.T) {
 	if got := firstRule(http.MethodPost, "/api/orders/support-intakes", "application/json"); got != "support" {
 		t.Fatalf("support intake uses %q", got)
 	}
+	// AF-03: cancellation requests share it too.
+	if got := firstRule(http.MethodPost, "/api/orders/vendor-orders/00000000-0000-4000-8000-000000000001/cancellation-requests", "application/json"); got != "support" {
+		t.Fatalf("cancellation request uses %q", got)
+	}
 }
 
 // AF-06: refund destinations have their own small budget.

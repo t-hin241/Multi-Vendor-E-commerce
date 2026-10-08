@@ -15,6 +15,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
 import { StatCard } from "@/components/vendor/stat-card";
+import { VendorCancelForm } from "@/components/vendor/vendor-cancel-form";
 import * as api from "@/lib/api-client";
 import { useAuth } from "@/lib/auth-context";
 import { formatMoney } from "@/lib/format";
@@ -49,9 +50,18 @@ export default function VendorOrdersPage() {
     enabled: Boolean(selectedVendorId),
   });
 
+  // AF-03: open cancellation requests fence a package's handover.
+  const cancellationsQuery = useQuery({
+    queryKey: ["vendor-cancellations", selectedVendorId],
+    queryFn: () =>
+      callWithAuth((token) => api.listVendorCancellations(token, selectedVendorId!, "")),
+    enabled: Boolean(selectedVendorId),
+  });
+
   async function refresh() {
     await queryClient.invalidateQueries({ queryKey: ["vendor-orders"] });
     await queryClient.invalidateQueries({ queryKey: ["vendor-shipments"] });
+    await queryClient.invalidateQueries({ queryKey: ["vendor-cancellations"] });
   }
 
   if (!selectedVendorId) {
@@ -67,6 +77,10 @@ export default function VendorOrdersPage() {
 
   const shipmentFor = (vo: api.VendorOrder) =>
     shipmentsQuery.data?.find((s) => s.vendor_order_id === vo.id);
+  const cancellationFor = (vo: api.VendorOrder) =>
+    cancellationsQuery.data?.find(
+      (c) => c.vendor_order_id === vo.id && c.status !== "rejected" && c.status !== "resolved",
+    );
 
   const orders = ordersQuery.data ?? [];
   const queue = orders.filter((vo) => needsAction(vo, shipmentFor(vo)));
@@ -99,6 +113,7 @@ export default function VendorOrdersPage() {
                 key={vo.id}
                 vendorOrder={vo}
                 shipment={shipmentFor(vo)}
+                cancellation={cancellationFor(vo)}
                 onChanged={refresh}
               />
             ))}
@@ -115,6 +130,7 @@ export default function VendorOrdersPage() {
                 key={vo.id}
                 vendorOrder={vo}
                 shipment={shipmentFor(vo)}
+                cancellation={cancellationFor(vo)}
                 onChanged={refresh}
               />
             ))}
@@ -313,10 +329,12 @@ function ExportCsvButton({ vendorId }: { vendorId: string }) {
 function VendorOrderCard({
   vendorOrder,
   shipment,
+  cancellation,
   onChanged,
 }: {
   vendorOrder: api.VendorOrder;
   shipment?: api.Shipment;
+  cancellation?: api.CancellationRequest;
   onChanged: () => void;
 }) {
   return (
@@ -358,7 +376,12 @@ function VendorOrderCard({
             </ul>
           </>
         )}
-        <VendorOrderActions vendorOrder={vendorOrder} shipment={shipment} onChanged={onChanged} />
+        <VendorOrderActions
+          vendorOrder={vendorOrder}
+          shipment={shipment}
+          cancellation={cancellation}
+          onChanged={onChanged}
+        />
       </CardContent>
     </Card>
   );
@@ -371,10 +394,12 @@ function VendorOrderCard({
 function VendorOrderActions({
   vendorOrder,
   shipment,
+  cancellation,
   onChanged,
 }: {
   vendorOrder: api.VendorOrder;
   shipment?: api.Shipment;
+  cancellation?: api.CancellationRequest;
   onChanged: () => void;
 }) {
   const { callWithAuth } = useAuth();
@@ -405,6 +430,10 @@ function VendorOrderActions({
   }
 
   const canShip =
+    !cancellation &&
+    (vendorOrder.status === "paid" || vendorOrder.status === "processing") &&
+    (!shipment || shipment.status === "pending" || shipment.status === "ready_to_ship");
+  const preHandover =
     (vendorOrder.status === "paid" || vendorOrder.status === "processing") &&
     (!shipment || shipment.status === "pending" || shipment.status === "ready_to_ship");
 
@@ -456,6 +485,13 @@ function VendorOrderActions({
         </form>
       )}
 
+      {preHandover && (
+        <VendorCancelForm
+          vendorOrder={vendorOrder}
+          openRequest={cancellation}
+          onChanged={onChanged}
+        />
+      )}
       <ActionDeadline dueAt={shipment?.action_due_at} waitingOn={shipment?.waiting_on} />
       {shipment?.status === "shipped" && (
         <div className="flex flex-col gap-2">

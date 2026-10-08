@@ -6,6 +6,7 @@ package usecase
 import (
 	"context"
 	"errors"
+	"regexp"
 
 	"shopee/backend/pkg/apperror"
 	"shopee/backend/pkg/shopaccess"
@@ -357,6 +358,26 @@ func (uc *InventoryUseCase) RestockReturn(ctx context.Context, returnID, product
 	var notStocked *repository.ErrProductNotStocked
 	if errors.As(err, &notStocked) {
 		return false, apperror.Conflict("The returned product has no stock item")
+	}
+	return replayed, inventoryError(err)
+}
+
+// recoveryIDPattern: "<source>:<id>:<item id>", e.g. cancellation:<uuid>:<uuid>.
+var recoveryIDPattern = regexp.MustCompile(`^[a-z_]{2,30}(:[0-9a-f-]{36}){2}$`)
+
+// RestockRecovery puts back units of a cancelled vendor order that never
+// left the warehouse, once per recovery id (AF-03).
+func (uc *InventoryUseCase) RestockRecovery(ctx context.Context, recoveryID, productID string, variantID *string, quantity int64) (replayed bool, err error) {
+	if !recoveryIDPattern.MatchString(recoveryID) || productID == "" {
+		return false, apperror.Validation("recovery_id (source:id:item) and product_id are required")
+	}
+	if quantity <= 0 {
+		return false, apperror.Validation("quantity must be positive")
+	}
+	replayed, err = uc.items.RestockRecovery(ctx, recoveryID, productID, variantID, quantity)
+	var notStocked *repository.ErrProductNotStocked
+	if errors.As(err, &notStocked) {
+		return false, apperror.Conflict("The recovered product has no stock item")
 	}
 	return replayed, inventoryError(err)
 }

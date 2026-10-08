@@ -169,6 +169,15 @@ func (uc *OrderUseCase) GetVendorOrderForInternal(ctx context.Context, vendorOrd
 		return nil, err
 	}
 	out := &VendorOrderForInternal{VendorOrder: vo, Order: order, Fulfillable: vo.Fulfillable() && order.CheckoutState == domain.CheckoutReady}
+	// AF-03: an open cancellation fences the package (Shipments that only
+	// read this flag stop too; newer ones claim the grant).
+	if out.Fulfillable {
+		open, err := uc.cancellationOpenFor(ctx, vo.ID)
+		if err != nil {
+			return nil, appError(err)
+		}
+		out.Fulfillable = !open
+	}
 	if vo.Shipping != nil {
 		out.PackageWeightGrams = vo.Shipping.PackageWeightGrams
 	} else if out.PackageWeightGrams, err = uc.legacyPackageWeight(ctx, vo.ID); err != nil {

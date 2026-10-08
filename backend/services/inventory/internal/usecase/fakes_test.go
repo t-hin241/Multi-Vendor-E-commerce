@@ -99,6 +99,10 @@ func (f *fakeItemRepository) Restock(_ context.Context, productID string, quanti
 	return nil
 }
 
+func (f *fakeItemRepository) RestockRecovery(ctx context.Context, recoveryID, productID string, variantID *string, quantity int64) (bool, error) {
+	return f.RestockReturn(ctx, recoveryID, productID, variantID, quantity)
+}
+
 func (f *fakeItemRepository) RestockReturn(_ context.Context, returnID, productID string, variantID *string, quantity int64) (bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()

@@ -17,7 +17,7 @@ import (
 func TestInventoryMutationsRequireAuthentication(t *testing.T) {
 	jwt := authjwttest.Manager()
 	r := NewRouter("test", zerolog.Nop(), jwt, &ItemHandler{}, &InternalHandler{}, &AdminHandler{}, adminaccesstest.Guard(AdminRoutes), serviceauth.SharedKey("fake-test-internal-key-not-a-real-secret"))
-	for _, path := range []string{"/internal/inventory/reserve", "/internal/inventory/commit", "/internal/inventory/release", "/internal/inventory/returns"} {
+	for _, path := range []string{"/internal/inventory/reserve", "/internal/inventory/commit", "/internal/inventory/release", "/internal/inventory/returns", "/internal/inventory/recoveries"} {
 		w := httptest.NewRecorder()
 		r.ServeHTTP(w, httptest.NewRequest("POST", path, strings.NewReader(`{"order_id":"00000000-0000-0000-0000-000000000001"}`)))
 		if w.Code != 401 && w.Code != 403 {

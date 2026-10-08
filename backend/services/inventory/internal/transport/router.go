@@ -76,6 +76,7 @@ func NewRouter(
 		internalGroup.POST("/release", orderOnly, internalHandler.Release)
 		internalGroup.POST("/commit", orderOnly, internalHandler.Commit)
 		internalGroup.POST("/returns", orderOnly, internalHandler.RestockReturn)
+		internalGroup.POST("/recoveries", orderOnly, internalHandler.RestockRecovery)
 		internalGroup.GET("/variants/stock", stockReaders, internalHandler.GetVariantStock)
 		internalGroup.GET("/products/:productID/readiness", stockReaders, internalHandler.CheckStockReadiness)
 		internalGroup.GET("/products/:productID/stock", stockReaders, internalHandler.GetProductStock)

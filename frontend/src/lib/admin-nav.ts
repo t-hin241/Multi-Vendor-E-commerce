@@ -1,4 +1,5 @@
 import {
+  Ban,
   Banknote,
   ClipboardList,
   CreditCard,
@@ -55,6 +56,7 @@ export const ADMIN_NAV_GROUPS: AdminNavGroup[] = [
       { href: "/admin/orders", label: "Orders", icon: ClipboardList },
       { href: "/admin/work-items", label: "Case deadlines", icon: ClipboardList },
       { href: "/admin/support", label: "Support cases", icon: LifeBuoy },
+      { href: "/admin/cancellations", label: "Paid cancellations", icon: Ban },
       { href: "/admin/fulfillment", label: "Fulfillment", icon: Truck },
       { href: "/admin/returns", label: "Returns", icon: Undo2 },
       { href: "/admin/refunds", label: "Refunds", icon: Banknote },

@@ -44,7 +44,7 @@ func TestShipmentRoutesAreProtected(t *testing.T) {
 		}
 		return map[string]string{"Authorization": "Bearer " + tok}
 	}
-	for _, path := range []string{"/internal/shipments", "/internal/shipments/quotes", "/internal/shipments/by-vendor-order/" + someID + "/cancel"} {
+	for _, path := range []string{"/internal/shipments", "/internal/shipments/quotes", "/internal/shipments/by-vendor-order/" + someID + "/cancel", "/internal/shipments/by-vendor-order/" + someID + "/stops"} {
 		for _, h := range []map[string]string{nil, {serviceauth.Header: "wrong"}, token("admin")} {
 			if code := send("POST", path, `{}`, h); code != http.StatusForbidden {
 				t.Errorf("%s must require the service key, got %d", path, code)

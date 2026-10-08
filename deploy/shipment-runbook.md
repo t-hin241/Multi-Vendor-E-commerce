@@ -59,3 +59,7 @@ Log khác: `shipment_quote_unavailable` (kèm lý do: chưa có phương thức,
 - Order về bản cũ: không có endpoint nhận event, event Shipment bị đánh dấu chờ review. Sau khi lên lại Order mới, gửi lại ở trang Fulfillment. Vendor dùng lại luồng cũ.
 - Shipment về bản cũ: trạng thái `returned` không được bản cũ hiểu; xử lý các shipment `returned` trước. Event chưa gửi nằm lại trong `shipment_outbox`.
 - Không xóa shipment đã giao, không gửi lại cho hãng vì rollback image. Không chạy migration down khi đã có shipment `returned` hoặc event trong outbox.
+
+## Fence bàn giao và lệnh dừng (AF-03)
+
+Từ bản AF-03, "Đã giao cho vận chuyển" luôn claim quyền bàn giao ở Order (`POST /internal/orders/fulfillment-grants/:id/claims`); Order từ chối khi gói có yêu cầu hủy đang mở (409 `cancellation_pending`). Order dừng gói bằng `POST /internal/shipments/by-vendor-order/:id/stops` (`stopped` / `handed_over` / `delivered`). Deploy Order trước Shipment. Chi tiết: `deploy/paid-cancellation-runbook.md`.

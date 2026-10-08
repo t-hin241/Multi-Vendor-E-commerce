@@ -20,7 +20,7 @@ const someID = "00000000-0000-0000-0000-000000000001"
 
 func testRouter() (http.Handler, *authjwt.Manager) {
 	jwt := authjwttest.Manager()
-	return NewRouter("test", zerolog.Nop(), jwt, &OrderHandler{}, &BuyerAddressHandler{}, &AdminHandler{}, &InternalHandler{}, &ReturnHandler{}, &SupportHandler{}, adminaccesstest.Guard(AdminRoutes),
+	return NewRouter("test", zerolog.Nop(), jwt, &OrderHandler{}, &BuyerAddressHandler{}, &AdminHandler{}, &InternalHandler{}, &ReturnHandler{}, &SupportHandler{}, &CancellationHandler{}, adminaccesstest.Guard(AdminRoutes),
 		serviceauth.SharedKey("fake-test-service-key-not-a-real-secret")), jwt
 }
 
@@ -202,6 +202,44 @@ func TestSupportIntakeAndCaseRefundRoutesCheckRolesAndInput(t *testing.T) {
 		{"POST", "/api/orders/admin/support-intakes/" + someID + "/links", `{"order_id":"x","vendor_order_id":"` + someID + `","category":"other","expected_version":1,"reason":"r"}`, "admin"},
 		{"POST", "/api/orders/admin/support-intakes/not-a-uuid/closure", `{"expected_version":1,"reason":"r"}`, "admin"},
 		{"POST", "/api/orders/admin/support-cases/" + someID + "/refunds", `{"amount":0,"reason":"r","expected_version":1}`, "admin"},
+	}
+	for _, tc := range invalid {
+		if code := do(r, tc.method, tc.path, tc.body, as(t, jwt, tc.role)); code != http.StatusBadRequest {
+			t.Errorf("%s %s %s: expected 400, got %d", tc.method, tc.path, tc.body, code)
+		}
+	}
+}
+
+// AF-03: buyers request on their packages, vendors on their shop's,
+// admins decide; Shipment alone claims the handover grant.
+func TestCancellationRoutesCheckRolesAndInput(t *testing.T) {
+	r, jwt := testRouter()
+	forbidden := []struct{ method, path, role string }{
+		{"POST", "/api/orders/vendor-orders/" + someID + "/cancellation-requests", "admin"},
+		{"GET", "/api/orders/" + someID + "/cancellation-requests", "admin"},
+		{"GET", "/api/orders/admin/cancellation-requests", "buyer"},
+		{"GET", "/api/orders/admin/cancellation-requests", "vendor"},
+		{"POST", "/api/orders/admin/cancellation-requests/" + someID + "/decisions", "buyer"},
+		{"POST", "/api/orders/admin/cancellation-requests/" + someID + "/decisions", "vendor"},
+	}
+	for _, tc := range forbidden {
+		if code := do(r, tc.method, tc.path, `{}`, as(t, jwt, tc.role)); code != http.StatusForbidden {
+			t.Errorf("%s %s as %s: expected 403, got %d", tc.method, tc.path, tc.role, code)
+		}
+	}
+	if code := do(r, "POST", "/api/orders/vendor-orders/"+someID+"/cancellation-requests", `{}`, nil); code != http.StatusUnauthorized {
+		t.Errorf("anonymous request: %d", code)
+	}
+	for _, headers := range []map[string]string{nil, {serviceauth.Header: "wrong"}, as(t, jwt, "admin")} {
+		if code := do(r, "POST", "/internal/orders/fulfillment-grants/"+someID+"/claims", `{}`, headers); code != http.StatusForbidden {
+			t.Errorf("the handover claim needs Shipment's service key, got %d", code)
+		}
+	}
+	invalid := []struct{ method, path, body, role string }{
+		{"POST", "/api/orders/vendor-orders/not-a-uuid/cancellation-requests", `{"reason_code":"other","reason":"x"}`, "buyer"},
+		{"POST", "/api/orders/vendor-orders/" + someID + "/cancellation-requests", `{"reason_code":"other"}`, "buyer"},
+		{"POST", "/api/orders/admin/cancellation-requests/" + someID + "/decisions", `{"decision":"cancel","reason":"x","expected_version":1}`, "admin"},
+		{"GET", "/api/orders/admin/cancellation-requests?status=unknown", "", "admin"},
 	}
 	for _, tc := range invalid {
 		if code := do(r, tc.method, tc.path, tc.body, as(t, jwt, tc.role)); code != http.StatusBadRequest {

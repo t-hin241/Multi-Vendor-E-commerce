@@ -69,6 +69,14 @@ type returnRestockRequest struct {
 	Quantity  int64   `json:"quantity" binding:"required,min=1"`
 }
 
+// recoveryRestockRequest puts back units that never left the warehouse.
+type recoveryRestockRequest struct {
+	RecoveryID string  `json:"recovery_id" binding:"required,max=120"`
+	ProductID  string  `json:"product_id" binding:"required,uuid"`
+	VariantID  *string `json:"variant_id" binding:"omitempty,uuid"`
+	Quantity   int64   `json:"quantity" binding:"required,min=1"`
+}
+
 type releaseRequest struct {
 	OrderID string `json:"order_id" binding:"required,uuid"`
 }

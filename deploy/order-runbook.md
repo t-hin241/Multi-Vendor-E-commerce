@@ -193,3 +193,7 @@ Migration `000017_policy_snapshots`: read model `policy_versions` (từ `vendor.
 - Theo dõi tỉ lệ 409 `policy_changed` ở checkout (tăng ngay sau khi một phiên bản có hiệu lực là bình thường).
 
 Rollback: tắt flag (đơn mới quay về rule config; đơn đã có snapshot giữ nguyên). Không chạy down `000017` khi đã có snapshot.
+
+## Hủy gói hàng đã thanh toán (AF-03)
+
+Xem `deploy/paid-cancellation-runbook.md`: migration `000021`, cờ `FEATURE_PAID_CANCELLATION_ENABLED`, fence bàn giao (`/internal/orders/fulfillment-grants/:id/claims`), trạng thái yêu cầu, thứ tự deploy (Order trước Shipment) và rollback.

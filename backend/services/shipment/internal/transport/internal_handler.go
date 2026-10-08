@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"github.com/rs/zerolog"
 
 	"shopee/backend/pkg/httpresponse"
@@ -90,6 +91,29 @@ func (h *InternalHandler) Quote(c *gin.Context) {
 		ZoneName: q.ZoneName, FeeRuleID: q.FeeRuleID, FeeRuleVersion: q.FeeRuleVersion,
 		PackageWeightGrams: q.PackageWeightGrams, QuotedAt: q.QuotedAt, ExpiresAt: q.ExpiresAt,
 	})
+}
+
+type stopFulfillmentRequest struct {
+	OperationID string `json:"operation_id" binding:"required,max=100"`
+}
+
+// StopFulfillment answers stopped / handed_over / delivered (AF-03).
+func (h *InternalHandler) StopFulfillment(c *gin.Context) {
+	var req stopFulfillmentRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		httpresponse.Error(c, http.StatusBadRequest, "validation_error", "operation_id is required")
+		return
+	}
+	if _, err := uuid.Parse(c.Param("id")); err != nil {
+		httpresponse.Error(c, http.StatusBadRequest, "validation_error", "Invalid vendor order id")
+		return
+	}
+	result, err := h.shipments.StopFulfillment(c.Request.Context(), c.Param("id"), req.OperationID)
+	if err != nil {
+		httpresponse.HandleError(c, h.log, err)
+		return
+	}
+	httpresponse.OK(c, http.StatusOK, gin.H{"vendor_order_id": c.Param("id"), "operation_id": req.OperationID, "result": result})
 }
 
 func (h *InternalHandler) CancelForVendorOrder(c *gin.Context) {

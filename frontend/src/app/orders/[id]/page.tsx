@@ -7,6 +7,7 @@ import { useParams, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
 import { OrderStatusBadge } from "@/components/order-status-badge";
+import { CancellationPanel } from "@/components/orders/cancellation-panel";
 import { RefundStatusPanel } from "@/components/orders/refund-status-panel";
 import { ReturnRequestDialog } from "@/components/orders/return-request-dialog";
 import { PageShell } from "@/components/page-shell";
@@ -229,6 +230,7 @@ export default function OrderDetailPage() {
         </CardContent>
       </Card>
 
+      <CancellationPanel order={order} shipments={shipmentsQuery.data} />
       <RefundStatusPanel orderId={order.id} />
 
       <Card className="mt-4">

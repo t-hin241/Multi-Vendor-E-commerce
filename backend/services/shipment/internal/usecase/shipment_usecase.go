@@ -362,12 +362,13 @@ func (uc *ShipmentUseCase) MarkShipped(ctx context.Context, actor Actor, id, tra
 		return nil, err
 	}
 	if s.Status == domain.StatusPending || s.Status == domain.StatusReadyToShip {
-		vo, err := uc.Orders.GetVendorOrder(ctx, s.VendorOrderID)
-		if err != nil {
+		if err := uc.authorize(ctx, actor, s); err != nil {
 			return nil, err
 		}
-		if notShippableStatuses[vo.Status] || !vo.Fulfillable {
-			return nil, apperror.Conflict("Order does not allow this package to ship (not paid, stock not committed, or cancelled)")
+		// AF-03: claim the grant at Order (not just read it), so a buyer's
+		// cancellation and this handover are ordered by Order's lock.
+		if err := uc.Orders.ClaimHandover(ctx, s.VendorOrderID, s.ID); err != nil {
+			return nil, err
 		}
 	}
 	return uc.act(ctx, actor, id, func(ctx context.Context, s *domain.Shipment) error {
@@ -514,6 +515,58 @@ func (uc *ShipmentUseCase) CancelForVendorOrder(ctx context.Context, vendorOrder
 		return uc.requestInterception(ctx, shipment)
 	}
 	return nil
+}
+
+// Stop results answered to Order for a paid cancellation (AF-03).
+const (
+	StopStopped    = "stopped"     // never handed over: the package will not ship
+	StopHandedOver = "handed_over" // with the carrier: only interception can stop it
+	StopDelivered  = "delivered"   // already delivered or returned
+)
+
+// StopFulfillment is Order stopping a vendor order it agreed to cancel.
+// Before handover the shipment is cancelled (or there is none); after
+// handover nothing is changed here and Order decides (interception, or
+// the delivery exception flow). The shipment row lock orders it against a
+// concurrent handover, and a repeat answers the same.
+func (uc *ShipmentUseCase) StopFulfillment(ctx context.Context, vendorOrderID, operationID string) (string, error) {
+	result := StopStopped
+	err := uc.Tx.Run(ctx, func(ctx context.Context) error {
+		found, err := uc.Shipments.FindByVendorOrderID(ctx, vendorOrderID)
+		if errors.Is(err, repository.ErrShipmentNotFound) {
+			return nil
+		}
+		if err != nil {
+			return err
+		}
+		s, err := uc.Shipments.LockByID(ctx, found.ID)
+		if err != nil {
+			return err
+		}
+		switch {
+		case domain.IsCancellable(s.Status):
+			now := uc.Now().UTC()
+			note := "Paid order cancelled before handover (operation " + operationID + ")"
+			return uc.transition(ctx, s, domain.StatusCancelled, repository.Change{CancelledAt: &now}, Actor{Role: domain.ActorSystem}, &note, nil)
+		case s.Status == domain.StatusCancelled:
+			if s.ShippedAt != nil {
+				result = StopHandedOver // intercepted after handover, on its way back
+			}
+		case s.Status == domain.StatusShipped || s.Status == domain.StatusInterceptionRequested:
+			result = StopHandedOver
+		default:
+			result = StopDelivered
+		}
+		return nil
+	})
+	if err != nil {
+		return "", mapError(err)
+	}
+	if result == StopStopped {
+		uc.wake()
+	}
+	uc.Log.Info().Str("vendor_order_id", vendorOrderID).Str("operation_id", operationID).Str("result", result).Msg("shipment_fulfillment_stop")
+	return result, nil
 }
 
 func (uc *ShipmentUseCase) requestInterception(ctx context.Context, shipment *domain.Shipment) error {

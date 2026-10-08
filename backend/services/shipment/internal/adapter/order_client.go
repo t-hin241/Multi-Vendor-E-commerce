@@ -1,6 +1,7 @@
 package adapter
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -70,6 +71,52 @@ type internalVendorOrderResponseBody struct {
 		ShippingZoneID    *string `json:"shipping_zone_id"`
 		ShippingFeeRuleID *string `json:"shipping_fee_rule_id"`
 	} `json:"data"`
+}
+
+// ClaimHandover claims the fulfillment grant of a vendor order before the
+// package is handed over (AF-03). 409 from Order (cancellation pending,
+// not fulfillable) is a refusal; anything else is retried by the caller.
+func (c *HTTPOrderClient) ClaimHandover(ctx context.Context, vendorOrderID, shipmentID string) error {
+	endpoint := fmt.Sprintf("%s/internal/orders/fulfillment-grants/%s/claims", c.baseURL, url.PathEscape(vendorOrderID))
+	body, err := json.Marshal(map[string]string{"shipment_id": shipmentID})
+	if err != nil {
+		return apperror.Internal(err)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(body))
+	if err != nil {
+		return apperror.Internal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	serviceauth.SetRequestHeaders(req, c.key)
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return apperror.Internal(err)
+	}
+	defer resp.Body.Close()
+	switch resp.StatusCode {
+	case http.StatusOK:
+		return nil
+	case http.StatusNotFound:
+		return apperror.NotFound("Order not found")
+	case http.StatusConflict:
+		var envelope struct {
+			Error struct {
+				Code    string `json:"code"`
+				Message string `json:"message"`
+			} `json:"error"`
+		}
+		_ = json.NewDecoder(resp.Body).Decode(&envelope)
+		msg := envelope.Error.Message
+		if msg == "" {
+			msg = "Order does not allow this package to ship"
+		}
+		code := apperror.Code(envelope.Error.Code)
+		if code == "" {
+			code = apperror.CodeConflict
+		}
+		return &apperror.Error{Code: code, Status: http.StatusConflict, Message: msg}
+	}
+	return apperror.Internal(fmt.Errorf("order service returned status %d", resp.StatusCode))
 }
 
 // GetVendorOrder lets Shipment verify that the vendor calling it actually

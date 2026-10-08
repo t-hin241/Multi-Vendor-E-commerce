@@ -32,6 +32,7 @@ export const ADMIN_PAGE_BUNDLES: Record<string, string[]> = {
   "/admin/orders": ["support.manage"],
   "/admin/work-items": ["support.manage"],
   "/admin/support": ["support.manage"],
+  "/admin/cancellations": ["support.manage", "finance.prepare"],
   "/admin/fulfillment": ["support.manage"],
   "/admin/returns": ["support.manage"],
   "/admin/refunds": ["finance.read"],

@@ -59,6 +59,10 @@ type VendorGateway interface {
 // lets it ship. Order remains the owner of order status.
 type OrderGateway interface {
 	GetVendorOrder(ctx context.Context, vendorOrderID string) (*adapter.VendorOrderSnapshot, error)
+	// ClaimHandover asks Order for the right to hand the package to the
+	// carrier (AF-03 fence). Order refuses while a cancellation is open, so
+	// a cancel and a handover never both win.
+	ClaimHandover(ctx context.Context, vendorOrderID, shipmentID string) error
 }
 
 // RoleVerifier re-checks an admin's role with Identity.

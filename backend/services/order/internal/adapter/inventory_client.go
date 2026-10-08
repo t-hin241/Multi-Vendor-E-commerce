@@ -173,3 +173,33 @@ func (c *HTTPInventoryClient) Commit(ctx context.Context, id string) error {
 	}
 	return nil
 }
+
+// RestockRecovery puts back one item of a cancelled vendor order that never
+// left the warehouse (AF-03), once per recovery id.
+func (c *HTTPInventoryClient) RestockRecovery(ctx context.Context, recoveryID, productID string, variantID *string, quantity int64) error {
+	body, err := json.Marshal(map[string]any{"recovery_id": recoveryID, "product_id": productID, "variant_id": variantID, "quantity": quantity})
+	if err != nil {
+		return apperror.Internal(err)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/internal/inventory/recoveries", bytes.NewReader(body))
+	if err != nil {
+		return apperror.Internal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	serviceauth.SetRequestHeaders(req, c.key)
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return apperror.Internal(fmt.Errorf("inventory service unreachable: %w", err))
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusCreated {
+		return nil
+	}
+	var envelope errorEnvelope
+	_ = json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&envelope)
+	// 404 is an Inventory without the endpoint yet: retried, not refused.
+	if resp.StatusCode >= 400 && resp.StatusCode < 500 && resp.StatusCode != http.StatusForbidden && resp.StatusCode != http.StatusNotFound {
+		return &apperror.Error{Code: apperror.CodeConflict, Status: resp.StatusCode, Message: envelope.Error.Message}
+	}
+	return apperror.Internal(fmt.Errorf("inventory returned status %d", resp.StatusCode))
+}

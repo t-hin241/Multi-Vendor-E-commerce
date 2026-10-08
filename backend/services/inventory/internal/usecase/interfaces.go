@@ -17,6 +17,7 @@ type InventoryItemRepositoryPort interface {
 	FindByID(ctx context.Context, id string) (*domain.InventoryItem, error)
 	RecordStockCount(ctx context.Context, count *domain.StockCount) (*domain.StockCount, bool, error)
 	RestockReturn(ctx context.Context, returnID, productID string, variantID *string, quantity int64) (bool, error)
+	RestockRecovery(ctx context.Context, recoveryID, productID string, variantID *string, quantity int64) (bool, error)
 }
 
 type ReservationRepositoryPort interface {

@@ -139,3 +139,22 @@ func (c *HTTPShipmentClient) CreateShipment(ctx context.Context, in CreateShipme
 func (c *HTTPShipmentClient) CancelForVendorOrder(ctx context.Context, vendorOrderID string) error {
 	return c.post(ctx, "/internal/shipments/by-vendor-order/"+url.PathEscape(vendorOrderID)+"/cancel", map[string]string{}, nil)
 }
+
+// StopFulfillment asks Shipment to stop a vendor order Order agreed to
+// cancel (AF-03): stopped, handed_over or delivered. A transport error or
+// 5xx is retried by the caller with the same operation id.
+func (c *HTTPShipmentClient) StopFulfillment(ctx context.Context, vendorOrderID, operationID string) (string, error) {
+	var out struct {
+		Data struct {
+			Result string `json:"result"`
+		} `json:"data"`
+	}
+	if err := c.post(ctx, "/internal/shipments/by-vendor-order/"+url.PathEscape(vendorOrderID)+"/stops", map[string]string{"operation_id": operationID}, &out); err != nil {
+		return "", err
+	}
+	switch out.Data.Result {
+	case "stopped", "handed_over", "delivered":
+		return out.Data.Result, nil
+	}
+	return "", apperror.Internal(fmt.Errorf("unknown stop result %q", out.Data.Result))
+}

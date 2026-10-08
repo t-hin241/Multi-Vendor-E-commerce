@@ -22,6 +22,10 @@ const (
 	// EffectReportRejectedOutcome tells Payment that Order refused a payment
 	// or refund outcome it received as an event, so Payment reviews it.
 	EffectReportRejectedOutcome EffectKind = "report_rejected_outcome"
+	// AF-03: stop a cancelled vendor order at Shipment, and put its
+	// units back at Inventory once per item. Target is the request id.
+	EffectStopFulfillment       EffectKind = "stop_fulfillment"
+	EffectRecoverCancelledStock EffectKind = "recover_cancelled_stock"
 )
 
 // RejectedOutcomePayload is what a report_rejected_outcome effect sends.

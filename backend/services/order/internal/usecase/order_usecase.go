@@ -42,6 +42,12 @@ type Deps struct {
 	Holds     SettlementHoldGateway
 	// Intakes are buyers' requests without an order id (PW-012).
 	Intakes SupportIntakePort
+	// Cancellations, Stops and Recoveries run AF-03 (paid cancellation);
+	// PaidCancellation is FEATURE_PAID_CANCELLATION_ENABLED (new requests).
+	Cancellations    CancellationPort
+	Stops            FulfillmentStopper
+	Recoveries       StockRecoverer
+	PaidCancellation bool
 	// Policies is the read model of published policies (AF-02).
 	Policies PolicyVersionPort
 

@@ -29,6 +29,7 @@ func NewRouter(
 	internalHandler *InternalHandler,
 	returnHandler *ReturnHandler,
 	supportHandler *SupportHandler,
+	cancellationHandler *CancellationHandler,
 	adminGuard gin.HandlerFunc,
 	internal *serviceauth.Verifier,
 	checkers ...health.Checker,
@@ -58,6 +59,10 @@ func NewRouter(
 		buyerGroup.POST("/:id/cancel", orderHandler.Cancel)
 		buyerGroup.POST("/:id/return-requests", returnHandler.Create)
 		buyerGroup.GET("/return-requests/mine", returnHandler.ListMine)
+		// AF-03: cancel a paid package before handover.
+		buyerGroup.POST("/vendor-orders/:id/cancellation-requests", cancellationHandler.Create)
+		buyerGroup.GET("/:id/cancellation-requests", cancellationHandler.OrderList)
+		buyerGroup.GET("/cancellation-requests/:requestID", cancellationHandler.Get)
 
 		buyerGroup.GET("/support-cases/capability", supportHandler.Capability)
 		buyerGroup.POST("/:id/support-cases", supportHandler.Create)
@@ -85,6 +90,9 @@ func NewRouter(
 	vendorGroup := r.Group("/api/orders/vendor", requireAuth, middleware.SellerConsole())
 	{
 		vendorGroup.GET("/return-requests", returnHandler.VendorList)
+		vendorGroup.POST("/:id/cancellation-requests", cancellationHandler.Create)
+		vendorGroup.GET("/cancellation-requests", cancellationHandler.VendorList)
+		vendorGroup.GET("/cancellation-requests/:requestID", cancellationHandler.Get)
 		vendorGroup.POST("/return-requests/:id/confirm", returnHandler.ConfirmByVendor)
 		vendorGroup.POST("/return-requests/:id/receive", returnHandler.Receive)
 		vendorGroup.GET("/support-cases/capability", supportHandler.Capability)
@@ -127,6 +135,9 @@ func NewRouter(
 		adminGroup.GET("/support-cases/:caseID/attachments/:attachmentID", supportHandler.Attachment)
 		adminGroup.POST("/support-attachments", supportHandler.Upload)
 		adminGroup.GET("/support-intakes", supportHandler.AdminIntakes)
+		adminGroup.GET("/cancellation-requests", cancellationHandler.AdminList)
+		adminGroup.GET("/cancellation-requests/:requestID", cancellationHandler.Get)
+		adminGroup.POST("/cancellation-requests/:requestID/decisions", cancellationHandler.Decide)
 		adminGroup.POST("/support-intakes/:intakeID/links", supportHandler.LinkIntake)
 		adminGroup.POST("/support-intakes/:intakeID/closure", supportHandler.CloseIntake)
 		adminGroup.GET("/commission-rules", adminHandler.ListCommissionRules)
@@ -150,6 +161,8 @@ func NewRouter(
 		internalGroup.GET("/orders/products/quantity-sold", internal.Allow("catalog"), internalHandler.QuantitySoldByProductIDs)
 		internalGroup.GET("/orders/review-eligibility", internal.Allow("review"), internalHandler.ListReviewEligibility)
 		internalGroup.GET("/vendor-orders/:id", internal.Allow("shipment"), internalHandler.GetVendorOrder)
+		// AF-03 fence: Shipment claims the grant before handover.
+		internalGroup.POST("/orders/fulfillment-grants/:id/claims", internal.Allow("shipment"), cancellationHandler.ClaimHandover)
 		internalGroup.POST("/inventory-events", internal.Allow("inventory"), internalHandler.InventoryEvent)
 		internalGroup.POST("/refund-events", payment, internalHandler.RefundEvent)
 		internalGroup.POST("/settlements/holds", payment, internalHandler.SettlementHolds)

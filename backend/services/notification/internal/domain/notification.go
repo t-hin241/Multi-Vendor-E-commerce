@@ -41,6 +41,10 @@ const (
 	// Support cases (Order, AF-01); the reference is the order id.
 	TypeSupportCaseOpened   Type = "support_case_opened"
 	TypeSupportCaseResolved Type = "support_case_resolved"
+	// Paid-order cancellation (Order, AF-03); the reference is the order id.
+	TypeCancellationRequested Type = "cancellation_requested"
+	TypeCancellationApproved  Type = "cancellation_approved"
+	TypeCancellationRejected  Type = "cancellation_rejected"
 	// Policies (Vendor, AF-02); the reference is the shop id.
 	TypeMarketplacePolicyUpdated Type = "marketplace_policy_updated"
 	TypeShopPolicyApproved       Type = "shop_policy_approved"

@@ -103,6 +103,20 @@ func (f *fakeOrders) GetVendorOrder(_ context.Context, id string) (*adapter.Vend
 	return &cp, nil
 }
 
+// ClaimHandover grants a fulfillable vendor order, like Order's fence.
+func (f *fakeOrders) ClaimHandover(_ context.Context, id, _ string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	vo, ok := f.vos[id]
+	if !ok {
+		return apperror.NotFound("Order not found")
+	}
+	if !vo.Fulfillable || vo.Status == "cancelled" || vo.Status == "refunded" {
+		return apperror.Conflict("Order does not allow this package to ship")
+	}
+	return nil
+}
+
 type allowAdmin struct{}
 
 func (allowAdmin) RequireRole(context.Context, string, string) error { return nil }

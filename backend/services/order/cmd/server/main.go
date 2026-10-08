@@ -151,6 +151,10 @@ func main() {
 		Support:           repository.NewSupportCaseRepository(dbPool),
 		CaseHolds:         repository.SupportHoldRepository{Pool: dbPool},
 		Intakes:           repository.SupportIntakeRepository{Pool: dbPool},
+		Cancellations:     repository.CancellationRepository{Pool: dbPool},
+		Stops:             shipmentClient,
+		Recoveries:        inventoryClient,
+		PaidCancellation:  cfg.PaidCancellation,
 		Holds:             paymentClient,
 		Policies:          repository.NewPolicyVersionRepository(dbPool),
 		Attachments:       attachments,
@@ -180,10 +184,11 @@ func main() {
 	internalHandler := transport.NewInternalHandler(orderUseCase, log)
 	returnHandler := transport.NewReturnHandler(orderUseCase, log)
 	supportHandler := transport.NewSupportHandler(orderUseCase, log)
+	cancellationHandler := transport.NewCancellationHandler(orderUseCase, log)
 	// AF-19: every admin route needs the bundle named in transport.AdminRoutes.
 	adminGuard := adminaccess.Guard(adminaccess.Client{URL: internalServices.IdentityURL, Key: internalServices.Key}, transport.AdminRoutes, log)
 	router := transport.NewRouter(cfg.Base.Env, log, jwtManager, orderHandler, addressHandler, adminHandler, internalHandler, returnHandler,
-		supportHandler, adminGuard, internalServices.Verifier, checkers...,
+		supportHandler, cancellationHandler, adminGuard, internalServices.Verifier, checkers...,
 	)
 
 	salesStore := vendorsales.Store{Pool: dbPool}
