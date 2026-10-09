@@ -21,9 +21,9 @@ type Config struct {
 	Internal                         config.InternalServices
 	CatalogURL, OrderURL, PaymentURL string
 	// ShipmentURL answers rule readiness for shipping policies (PW-010).
-	ShipmentURL string
-	NotificationServiceURL           string
-	ObjectStorage                    objectstorage.Config
+	ShipmentURL            string
+	NotificationServiceURL string
+	ObjectStorage          objectstorage.Config
 	// VersionedPolicies is FEATURE_VERSIONED_POLICIES_ENABLED (AF-02).
 	VersionedPolicies bool
 	// ShopStaff is FEATURE_SHOP_STAFF_ENABLED (AF-17); StaffInvitesPaused
