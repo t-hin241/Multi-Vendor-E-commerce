@@ -16,6 +16,7 @@ import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
 import { StatCard } from "@/components/vendor/stat-card";
 import { VendorCancelForm } from "@/components/vendor/vendor-cancel-form";
+import { VendorDeliveryExceptionsSection } from "@/components/vendor/delivery-exceptions-section";
 import * as api from "@/lib/api-client";
 import { useAuth } from "@/lib/auth-context";
 import { formatMoney } from "@/lib/format";
@@ -98,6 +99,8 @@ export default function VendorOrdersPage() {
       <SummarySection vendorId={selectedVendorId} />
 
       <VendorReturnsSection vendorId={selectedVendorId} />
+
+      <VendorDeliveryExceptionsSection vendorId={selectedVendorId} vendorOrders={ordersQuery.data ?? []} />
 
       {ordersQuery.isPending && <p className="text-sm text-muted-foreground">Đang tải…</p>}
       {ordersQuery.data?.length === 0 && (

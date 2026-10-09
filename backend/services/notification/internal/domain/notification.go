@@ -45,6 +45,10 @@ const (
 	TypeCancellationRequested Type = "cancellation_requested"
 	TypeCancellationApproved  Type = "cancellation_approved"
 	TypeCancellationRejected  Type = "cancellation_rejected"
+	// Failed delivery (Order, AF-04); the reference is the order id.
+	TypeDeliveryExceptionOpened   Type = "delivery_exception_opened"
+	TypeRedeliveryOffered         Type = "delivery_redelivery_offered"
+	TypeDeliveryExceptionResolved Type = "delivery_exception_resolved"
 	// Policies (Vendor, AF-02); the reference is the shop id.
 	TypeMarketplacePolicyUpdated Type = "marketplace_policy_updated"
 	TypeShopPolicyApproved       Type = "shop_policy_approved"

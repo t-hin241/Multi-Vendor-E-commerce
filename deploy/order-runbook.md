@@ -197,3 +197,7 @@ Rollback: tắt flag (đơn mới quay về rule config; đơn đã có snapshot
 ## Hủy gói hàng đã thanh toán (AF-03)
 
 Xem `deploy/paid-cancellation-runbook.md`: migration `000021`, cờ `FEATURE_PAID_CANCELLATION_ENABLED`, fence bàn giao (`/internal/orders/fulfillment-grants/:id/claims`), trạng thái yêu cầu, thứ tự deploy (Order trước Shipment) và rollback.
+
+## Giao thất bại và hàng hoàn về (AF-04)
+
+Xem `deploy/delivery-exception-runbook.md`: migration `000022`, consumer `order-shipment-exceptions` (event `shipment.exception_detected`, HTTP dự phòng `/internal/shipment-exceptions`), cờ `FEATURE_DELIVERY_RESOLUTION_ENABLED` (chỉ chặn đề nghị giao lại mới), hold payout, phiếu nhận hàng của shop, hoàn kho theo `delivery_exception:<case>:<item>`, thứ tự deploy (Order trước Shipment) và rollback.

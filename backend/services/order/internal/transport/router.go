@@ -30,6 +30,7 @@ func NewRouter(
 	returnHandler *ReturnHandler,
 	supportHandler *SupportHandler,
 	cancellationHandler *CancellationHandler,
+	deliveryHandler *DeliveryExceptionHandler,
 	adminGuard gin.HandlerFunc,
 	internal *serviceauth.Verifier,
 	checkers ...health.Checker,
@@ -63,6 +64,10 @@ func NewRouter(
 		buyerGroup.POST("/vendor-orders/:id/cancellation-requests", cancellationHandler.Create)
 		buyerGroup.GET("/:id/cancellation-requests", cancellationHandler.OrderList)
 		buyerGroup.GET("/cancellation-requests/:requestID", cancellationHandler.Get)
+		// AF-04: failed delivery; the buyer answers a redelivery offer.
+		buyerGroup.GET("/:id/delivery-exceptions", deliveryHandler.OrderList)
+		buyerGroup.GET("/delivery-exceptions/:exceptionID", deliveryHandler.Get)
+		buyerGroup.POST("/delivery-exceptions/:exceptionID/redelivery-consents", deliveryHandler.Consent)
 
 		buyerGroup.GET("/support-cases/capability", supportHandler.Capability)
 		buyerGroup.POST("/:id/support-cases", supportHandler.Create)
@@ -93,6 +98,9 @@ func NewRouter(
 		vendorGroup.POST("/:id/cancellation-requests", cancellationHandler.Create)
 		vendorGroup.GET("/cancellation-requests", cancellationHandler.VendorList)
 		vendorGroup.GET("/cancellation-requests/:requestID", cancellationHandler.Get)
+		vendorGroup.GET("/delivery-exceptions", deliveryHandler.VendorList)
+		vendorGroup.GET("/delivery-exceptions/:exceptionID", deliveryHandler.Get)
+		vendorGroup.POST("/delivery-exceptions/:exceptionID/receipts", deliveryHandler.Receipt)
 		vendorGroup.POST("/return-requests/:id/confirm", returnHandler.ConfirmByVendor)
 		vendorGroup.POST("/return-requests/:id/receive", returnHandler.Receive)
 		vendorGroup.GET("/support-cases/capability", supportHandler.Capability)
@@ -138,6 +146,10 @@ func NewRouter(
 		adminGroup.GET("/cancellation-requests", cancellationHandler.AdminList)
 		adminGroup.GET("/cancellation-requests/:requestID", cancellationHandler.Get)
 		adminGroup.POST("/cancellation-requests/:requestID/decisions", cancellationHandler.Decide)
+		adminGroup.GET("/delivery-exceptions", deliveryHandler.AdminList)
+		adminGroup.GET("/delivery-exceptions/:exceptionID", deliveryHandler.Get)
+		adminGroup.POST("/delivery-exceptions/:exceptionID/receipts", deliveryHandler.Receipt)
+		adminGroup.POST("/delivery-exceptions/:exceptionID/decisions", deliveryHandler.Decide)
 		adminGroup.POST("/support-intakes/:intakeID/links", supportHandler.LinkIntake)
 		adminGroup.POST("/support-intakes/:intakeID/closure", supportHandler.CloseIntake)
 		adminGroup.GET("/commission-rules", adminHandler.ListCommissionRules)
@@ -167,6 +179,7 @@ func NewRouter(
 		internalGroup.POST("/refund-events", payment, internalHandler.RefundEvent)
 		internalGroup.POST("/settlements/holds", payment, internalHandler.SettlementHolds)
 		internalGroup.POST("/shipment-events", internal.Allow("shipment"), internalHandler.ShipmentEvent)
+		internalGroup.POST("/shipment-exceptions", internal.Allow("shipment"), deliveryHandler.ShipmentException)
 		internalGroup.GET("/policy-rules/readiness", internal.Allow("vendor"), internalHandler.PolicyRuleReadiness)
 		internalGroup.POST("/policy-published", internal.Allow("vendor"), internalHandler.PolicyPublished)
 	}

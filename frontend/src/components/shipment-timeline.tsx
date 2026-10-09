@@ -15,6 +15,7 @@ const SHIPMENT_STATUS_LABEL: Record<ShipmentStatus, string> = {
   cancelled: "Đã hủy",
   interception_requested: "Yêu cầu thu hồi",
   returned: "Hàng đã hoàn về người bán",
+  lost: "Đơn vị vận chuyển xác nhận thất lạc",
 };
 
 export function shipmentStatusLabel(status: ShipmentStatus): string {

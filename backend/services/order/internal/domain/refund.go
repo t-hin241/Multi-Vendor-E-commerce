@@ -49,6 +49,9 @@ const (
 	// RefundReasonCancellation: a paid vendor order cancelled before
 	// handover (AF-03).
 	RefundReasonCancellation = "cancellation"
+	// RefundReasonDeliveryException: a package that never reached the
+	// buyer (returned or lost, AF-04).
+	RefundReasonDeliveryException = "delivery_exception"
 )
 
 // Open reports whether the refund still reserves part of the refundable

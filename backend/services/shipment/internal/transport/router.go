@@ -75,6 +75,7 @@ func NewRouter(
 		vendorGroup.POST("/:id/failed-attempts", shipmentHandler.FailedAttempt)
 		vendorGroup.POST("/:id/deliver", shipmentHandler.MarkDelivered)
 		vendorGroup.POST("/:id/return", shipmentHandler.MarkReturned)
+		vendorGroup.POST("/:id/failure-reports", shipmentHandler.FailureReport)
 		vendorGroup.POST("/:id/interception-decision", shipmentHandler.ResolveInterception)
 		vendorGroup.POST("/:id/simulate-carrier-decision", shipmentHandler.SimulateCarrierDecision)
 	}
@@ -104,6 +105,7 @@ func NewRouter(
 		adminGroup.POST("/shipments/:id/deliver", opsHandler.MarkDelivered)
 		adminGroup.POST("/shipments/:id/failed-attempts", opsHandler.FailedAttempt)
 		adminGroup.POST("/shipments/:id/return", opsHandler.MarkReturned)
+		adminGroup.POST("/shipments/:id/failure-reports", opsHandler.FailureReport)
 		adminGroup.POST("/shipments/:id/tracking", opsHandler.UpdateTracking)
 		adminGroup.POST("/shipments/:id/interception-decision", opsHandler.ResolveInterception)
 		adminGroup.POST("/order-events/:id/retry", opsHandler.RetryOrderEvent)
@@ -115,6 +117,7 @@ func NewRouter(
 		internalGroup.POST("/quotes", internalHandler.Quote)
 		internalGroup.POST("/by-vendor-order/:id/cancel", internalHandler.CancelForVendorOrder)
 		internalGroup.POST("/by-vendor-order/:id/stops", internalHandler.StopFulfillment)
+		internalGroup.POST("/replacement-attempts", internalHandler.ReplacementAttempt)
 	}
 
 	// The carrier calls this directly, with no bearer token — its signature

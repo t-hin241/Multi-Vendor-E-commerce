@@ -30,15 +30,38 @@ type OutboxEvent struct {
 	Type           domain.OrderEvent `json:"type"`
 	OccurredAt     time.Time         `json:"occurred_at"`
 	TrackingNumber *string           `json:"tracking_number,omitempty"`
+	// Exception facts (AF-04) only.
+	AttemptNo      *int    `json:"attempt_no,omitempty"`
+	FailedAttempts *int    `json:"failed_attempts,omitempty"`
+	Reason         *string `json:"reason,omitempty"`
 }
 
 // Enqueue records an event once per shipment and type.
 func (o OrderOutbox) Enqueue(ctx context.Context, e OutboxEvent) error {
 	_, err := connection(ctx, o.Pool).Exec(ctx, `
-		INSERT INTO shipment_outbox (shipment_id, vendor_order_id, event_type, occurred_at, tracking_number)
-		VALUES ($1, $2, $3, $4, $5) ON CONFLICT (shipment_id, event_type) DO NOTHING`,
-		e.ShipmentID, e.VendorOrderID, e.Type, e.OccurredAt, e.TrackingNumber)
+		INSERT INTO shipment_outbox (shipment_id, vendor_order_id, event_type, occurred_at, tracking_number, attempt_no, failed_attempts, reason)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8) ON CONFLICT (shipment_id, event_type) DO NOTHING`,
+		e.ShipmentID, e.VendorOrderID, e.Type, e.OccurredAt, e.TrackingNumber, e.AttemptNo, e.FailedAttempts, e.Reason)
 	return err
+}
+
+// EnqueueLegacyReturned gives packages returned before AF-04 their
+// exception fact, so Order opens a case an admin takes (never an automatic
+// refund). One fact per shipment; returns how many were queued.
+func (o OrderOutbox) EnqueueLegacyReturned(ctx context.Context, limit int) (int64, error) {
+	tag, err := connection(ctx, o.Pool).Exec(ctx, `
+		INSERT INTO shipment_outbox (shipment_id, vendor_order_id, event_type, occurred_at, attempt_no, failed_attempts, reason)
+		SELECT s.id, s.vendor_order_id, 'exception_returned', COALESCE(s.returned_at, s.updated_at), s.attempt_no, s.failed_attempts,
+			'Returned before delivery exceptions were recorded'
+		FROM shipments s
+		WHERE s.status = 'returned' AND NOT EXISTS (
+			SELECT 1 FROM shipment_outbox x WHERE x.shipment_id = s.id AND x.event_type = 'exception_returned')
+		ORDER BY s.updated_at LIMIT $1
+		ON CONFLICT (shipment_id, event_type) DO NOTHING`, limit)
+	if err != nil {
+		return 0, err
+	}
+	return tag.RowsAffected(), nil
 }
 
 // Dispatch delivers the next due event. Shipped is always delivered before
@@ -47,14 +70,14 @@ func (o OrderOutbox) Dispatch(ctx context.Context, deliver func(context.Context,
 	return inTx(ctx, o.Pool, func(tx pgx.Tx) error {
 		var e OutboxEvent
 		err := tx.QueryRow(ctx, `
-			SELECT x.id, x.shipment_id, x.vendor_order_id, x.event_type, x.occurred_at, x.tracking_number
+			SELECT x.id, x.shipment_id, x.vendor_order_id, x.event_type, x.occurred_at, x.tracking_number, x.attempt_no, x.failed_attempts, x.reason
 			FROM shipment_outbox x
 			WHERE x.delivered_at IS NULL AND NOT x.requires_review AND x.next_attempt_at <= now() AND x.attempts < $1
 			  AND (x.event_type = 'shipped' OR NOT EXISTS (
 			      SELECT 1 FROM shipment_outbox s WHERE s.shipment_id = x.shipment_id AND s.event_type = 'shipped' AND s.delivered_at IS NULL))
 			ORDER BY x.next_attempt_at, x.created_at LIMIT 1
 			FOR UPDATE OF x SKIP LOCKED`, maxOutboxAttempts).
-			Scan(&e.ID, &e.ShipmentID, &e.VendorOrderID, &e.Type, &e.OccurredAt, &e.TrackingNumber)
+			Scan(&e.ID, &e.ShipmentID, &e.VendorOrderID, &e.Type, &e.OccurredAt, &e.TrackingNumber, &e.AttemptNo, &e.FailedAttempts, &e.Reason)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrNothingToDeliver
 		}

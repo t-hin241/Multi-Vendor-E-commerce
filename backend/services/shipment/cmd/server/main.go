@@ -25,6 +25,7 @@ import (
 	"shopee/backend/services/shipment/internal/carrier/manual"
 	"shopee/backend/services/shipment/internal/carrier/mock"
 	"shopee/backend/services/shipment/internal/config"
+	"shopee/backend/services/shipment/internal/domain"
 	"shopee/backend/services/shipment/internal/repository"
 	"shopee/backend/services/shipment/internal/transport"
 	"shopee/backend/services/shipment/internal/usecase"
@@ -115,6 +116,8 @@ func main() {
 		Vendors: vendorClient, Orders: orderClient, Identity: identityclient.Client{URL: internalServices.IdentityURL, Key: internalServices.Key},
 		Audit: repository.AuditRepository{Pool: dbPool},
 		Log:   log,
+		// AF-04: failed deliveries become Order cases; redelivery attempts.
+		DeliveryResolution: cfg.DeliveryResolution, AttemptLimit: cfg.AttemptLimit,
 	}
 	if cfg.CarrierProvider == "mock" {
 		mockCarrier := mock.New(cfg.CarrierMockWebhookSecret)
@@ -157,6 +160,28 @@ func main() {
 	// status_changed; HTTP only in rollback mode). Order's refusal parks the
 	// event in Order's inbox, where it is replayed or discarded.
 	go outbox.Run(workerCtx, func(ctx context.Context, e repository.OutboxEvent) error {
+		// AF-04: exception facts have their own event type and HTTP route.
+		if kind, ok := domain.ExceptionTypeOf(e.Type); ok {
+			x := events.ShipmentException{EventID: e.ID, ShipmentID: e.ShipmentID, VendorOrderID: e.VendorOrderID, ExceptionType: string(kind),
+				OccurredAt: e.OccurredAt}
+			if e.AttemptNo != nil {
+				x.AttemptNo = *e.AttemptNo
+			}
+			if e.FailedAttempts != nil {
+				x.FailedAttempts = *e.FailedAttempts
+			}
+			if e.Reason != nil {
+				x.Reason = *e.Reason
+			}
+			if !bus.Publish {
+				return orderClient.SendShipmentException(ctx, x)
+			}
+			env, err := events.ShipmentExceptionEvent(x)
+			if err != nil {
+				return err
+			}
+			return bus.Bus.Publish(ctx, env.WithCorrelation(e.ID))
+		}
 		if !bus.Publish {
 			return orderClient.SendShipmentEvent(ctx, adapter.ShipmentEvent{EventID: e.ID, ShipmentID: e.ShipmentID, VendorOrderID: e.VendorOrderID,
 				Type: string(e.Type), OccurredAt: e.OccurredAt, TrackingNumber: e.TrackingNumber})

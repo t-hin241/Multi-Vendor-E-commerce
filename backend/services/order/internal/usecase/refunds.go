@@ -278,6 +278,9 @@ func (uc *OrderUseCase) applyRefundOutcome(ctx context.Context, orderID string, 
 			if err := uc.syncCancellationRefund(ctx, refund, true, nil); err != nil {
 				return err
 			}
+			if err := uc.syncDeliveryRefund(ctx, refund, true, nil); err != nil {
+				return err
+			}
 			return uc.syncSupportResolution(ctx, domain.ResolutionRefund, refund.ID, true, nil)
 		case domain.RefundFailed, domain.RefundRejected:
 			if refund.ReturnRequestID != nil {
@@ -286,6 +289,9 @@ func (uc *OrderUseCase) applyRefundOutcome(ctx context.Context, orderID string, 
 				}
 			}
 			if err := uc.syncCancellationRefund(ctx, refund, false, ptr("Refund "+string(outcome.Status))); err != nil {
+				return err
+			}
+			if err := uc.syncDeliveryRefund(ctx, refund, false, ptr("Refund "+string(outcome.Status))); err != nil {
 				return err
 			}
 			return uc.syncSupportResolution(ctx, domain.ResolutionRefund, refund.ID, false, ptr("Refund "+string(outcome.Status)))

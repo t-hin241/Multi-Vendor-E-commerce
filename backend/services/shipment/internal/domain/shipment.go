@@ -23,20 +23,25 @@ const (
 	// StatusReturned: the carrier brought the package back to the vendor
 	// (delivery failed for good). Money is Order's decision.
 	StatusReturned Status = "returned"
+	// StatusLost: the carrier confirmed the package lost (AF-04), recorded
+	// by an admin with the carrier's evidence; never inferred from silence.
+	StatusLost Status = "lost"
 )
 
 // validTransitions is forward-only. Before handover a shipment can be
 // cancelled directly; after handover only the carrier can stop it
-// (interception), and a package either reaches the buyer (delivered) or
-// comes back (returned). Delivered, cancelled and returned are final.
+// (interception), and a package either reaches the buyer (delivered),
+// comes back (returned) or is lost. Delivered, cancelled, returned and lost
+// are final: a redelivery is a new attempt, never this one reset.
 var validTransitions = map[Status][]Status{
 	StatusPending:               {StatusReadyToShip, StatusCancelled},
 	StatusReadyToShip:           {StatusShipped, StatusCancelled},
-	StatusShipped:               {StatusDelivered, StatusInterceptionRequested, StatusReturned},
-	StatusInterceptionRequested: {StatusShipped, StatusCancelled, StatusReturned},
+	StatusShipped:               {StatusDelivered, StatusInterceptionRequested, StatusReturned, StatusLost},
+	StatusInterceptionRequested: {StatusShipped, StatusCancelled, StatusReturned, StatusLost},
 	StatusDelivered:             {},
 	StatusCancelled:             {},
 	StatusReturned:              {},
+	StatusLost:                  {},
 }
 
 func CanTransition(from, to Status) bool {
@@ -50,7 +55,7 @@ func CanTransition(from, to Status) bool {
 
 // Final statuses never change again.
 func (s Status) Final() bool {
-	return s == StatusDelivered || s == StatusCancelled || s == StatusReturned
+	return s == StatusDelivered || s == StatusCancelled || s == StatusReturned || s == StatusLost
 }
 
 var cancellableStatuses = map[Status]bool{
@@ -91,6 +96,7 @@ type Shipment struct {
 	ShippedAt            *time.Time
 	DeliveredAt          *time.Time
 	ReturnedAt           *time.Time
+	LostAt               *time.Time
 	CancelledAt          *time.Time
 	TrackingUpdatedAt    *time.Time
 	FailedAttempts       int
@@ -99,8 +105,12 @@ type Shipment struct {
 	InterceptRequestedAt *time.Time
 	InterceptResolvedAt  *time.Time
 	AddressRedactedAt    *time.Time
-	CreatedAt            time.Time
-	UpdatedAt            time.Time
+	// AttemptNo counts fulfillment attempts of the vendor order (AF-04): a
+	// redelivery is attempt 2 with OriginalShipmentID set to attempt 1.
+	AttemptNo          int
+	OriginalShipmentID *string
+	CreatedAt          time.Time
+	UpdatedAt          time.Time
 }
 
 var trackingPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{2,63}$`)

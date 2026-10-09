@@ -63,3 +63,7 @@ Log khác: `shipment_quote_unavailable` (kèm lý do: chưa có phương thức,
 ## Fence bàn giao và lệnh dừng (AF-03)
 
 Từ bản AF-03, "Đã giao cho vận chuyển" luôn claim quyền bàn giao ở Order (`POST /internal/orders/fulfillment-grants/:id/claims`); Order từ chối khi gói có yêu cầu hủy đang mở (409 `cancellation_pending`). Order dừng gói bằng `POST /internal/shipments/by-vendor-order/:id/stops` (`stopped` / `handed_over` / `delivered`). Deploy Order trước Shipment. Chi tiết: `deploy/paid-cancellation-runbook.md`.
+
+## Giao thất bại, thất lạc và giao lại (AF-04)
+
+Migration `000009` thêm trạng thái `lost`, số lần giao (`attempt_no`, `original_shipment_id`) và cho một gói có nhiều lần giao (tối đa một lần giao đang chạy). Với `FEATURE_DELIVERY_RESOLUTION_ENABLED`, Shipment báo Order qua `shipment.exception_detected` khi đủ `SHIPMENT_DELIVERY_ATTEMPT_LIMIT` lần giao thất bại, khi hàng hoàn về, hoặc khi admin xác nhận thất lạc (`POST /api/shipments/admin/shipments/:id/failure-reports {kind: lost}`); Order tạo lần giao lại qua `POST /internal/shipments/replacement-attempts`. Lần giao cũ không bao giờ bị đặt lại về `shipped`. Chi tiết: `deploy/delivery-exception-runbook.md`.

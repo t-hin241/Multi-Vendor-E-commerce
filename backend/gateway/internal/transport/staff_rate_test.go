@@ -34,6 +34,13 @@ func TestSupportIntakesUseTheSupportBudget(t *testing.T) {
 	if got := firstRule(http.MethodPost, "/api/orders/vendor-orders/00000000-0000-4000-8000-000000000001/cancellation-requests", "application/json"); got != "support" {
 		t.Fatalf("cancellation request uses %q", got)
 	}
+	// AF-04: redelivery answers and goods receipts too.
+	if got := firstRule(http.MethodPost, "/api/orders/delivery-exceptions/00000000-0000-4000-8000-000000000001/redelivery-consents", "application/json"); got != "support" {
+		t.Fatalf("redelivery consent uses %q", got)
+	}
+	if got := firstRule(http.MethodPost, "/api/orders/vendor/delivery-exceptions/00000000-0000-4000-8000-000000000001/receipts", "application/json"); got != "support" {
+		t.Fatalf("goods receipt uses %q", got)
+	}
 }
 
 // AF-06: refund destinations have their own small budget.

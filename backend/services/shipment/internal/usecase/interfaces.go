@@ -16,6 +16,8 @@ type Transactor interface {
 
 type ShipmentRepositoryPort interface {
 	Create(ctx context.Context, s *domain.Shipment) error
+	CreateReplacement(ctx context.Context, s *domain.Shipment, operationID string) error
+	FindByReplacementOperation(ctx context.Context, operationID string) (*domain.Shipment, error)
 	FindByID(ctx context.Context, id string) (*domain.Shipment, error)
 	LockByID(ctx context.Context, id string) (*domain.Shipment, error)
 	FindByVendorOrderID(ctx context.Context, vendorOrderID string) (*domain.Shipment, error)
@@ -39,6 +41,7 @@ type TrackingEventRepositoryPort interface {
 // OutboxPort tells Order about shipped/delivered/returned, durably.
 type OutboxPort interface {
 	Enqueue(ctx context.Context, e repository.OutboxEvent) error
+	EnqueueLegacyReturned(ctx context.Context, limit int) (int64, error)
 	Requeue(ctx context.Context, id string) error
 	Problems(ctx context.Context, limit int) ([]repository.OutboxProblem, error)
 	Counts(ctx context.Context) (pending, review int64, err error)

@@ -79,7 +79,7 @@ func (c *HTTPShipmentClient) post(ctx context.Context, path string, payload, out
 		}
 		return domain.ShippingUnavailable(msg)
 	}
-	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusAccepted {
 		return apperror.Internal(fmt.Errorf("shipment service returned status %d", resp.StatusCode))
 	}
 	if out == nil {
@@ -157,4 +157,32 @@ func (c *HTTPShipmentClient) StopFulfillment(ctx context.Context, vendorOrderID,
 		return out.Data.Result, nil
 	}
 	return "", apperror.Internal(fmt.Errorf("unknown stop result %q", out.Data.Result))
+}
+
+// ReplacementAttempt is Order's request for a redelivery (AF-04).
+type ReplacementAttempt struct {
+	OperationID        string             `json:"operation_id"`
+	VendorOrderID      string             `json:"vendor_order_id"`
+	OriginalShipmentID string             `json:"original_shipment_id"`
+	AttemptNo          int                `json:"attempt_no"`
+	EligibilityRef     string             `json:"eligibility_ref"`
+	Destination        domain.Destination `json:"destination"`
+}
+
+// CreateReplacementAttempt asks Shipment for attempt n+1 of a vendor
+// order; a retry with the same operation id answers the same shipment. A
+// 409 (active attempt, not redeliverable, disabled) is a refusal.
+func (c *HTTPShipmentClient) CreateReplacementAttempt(ctx context.Context, r ReplacementAttempt) (string, error) {
+	var out struct {
+		Data struct {
+			ShipmentID string `json:"shipment_id"`
+		} `json:"data"`
+	}
+	if err := c.post(ctx, "/internal/shipments/replacement-attempts", r, &out); err != nil {
+		return "", err
+	}
+	if out.Data.ShipmentID == "" {
+		return "", apperror.Internal(fmt.Errorf("shipment service answered no shipment id"))
+	}
+	return out.Data.ShipmentID, nil
 }

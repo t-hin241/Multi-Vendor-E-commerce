@@ -75,11 +75,13 @@ var rateRules = []rateRule{
 	{"auth", 30, func(m, p, _ string) bool { return m == http.MethodPost && strings.HasPrefix(p, "/api/auth/") }},
 	{"checkout", 20, func(m, p, _ string) bool { return m == http.MethodPost && strings.HasPrefix(p, "/api/orders/checkout") }},
 	{"webhook", 600, func(_, p, _ string) bool { return strings.HasPrefix(p, "/api/webhooks") }},
-	// Support cases and their messages (AF-01): people type them, so a
-	// flood is abuse; attachments fall under the upload rule below.
+	// Support cases and their messages (AF-01), cancellation requests
+	// (AF-03) and delivery exception answers/receipts (AF-04): people type
+	// them, so a flood is abuse; attachments fall under the upload rule.
 	{"support", 60, func(m, p, ct string) bool {
 		return m == http.MethodPost && strings.HasPrefix(p, "/api/orders/") &&
-			(strings.Contains(p, "/support-cases") || strings.Contains(p, "/support-intakes") || strings.Contains(p, "/cancellation-requests")) &&
+			(strings.Contains(p, "/support-cases") || strings.Contains(p, "/support-intakes") || strings.Contains(p, "/cancellation-requests") ||
+				strings.Contains(p, "/delivery-exceptions/")) &&
 			!strings.HasPrefix(ct, "multipart/")
 	}},
 	// Shop staff invitations (AF-17): sending and accepting are rare,

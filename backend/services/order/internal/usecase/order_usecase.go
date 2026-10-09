@@ -48,6 +48,12 @@ type Deps struct {
 	Stops            FulfillmentStopper
 	Recoveries       StockRecoverer
 	PaidCancellation bool
+	// DeliveryExceptions and Replacements run AF-04 (failed delivery);
+	// DeliveryRedelivery is FEATURE_DELIVERY_RESOLUTION_ENABLED (new
+	// redelivery offers). Cases are always recorded and resolvable.
+	DeliveryExceptions DeliveryExceptionPort
+	Replacements       ReplacementCreator
+	DeliveryRedelivery bool
 	// Policies is the read model of published policies (AF-02).
 	Policies PolicyVersionPort
 

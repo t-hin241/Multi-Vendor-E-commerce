@@ -67,6 +67,23 @@ func ShipmentChangedHandler(orders *usecase.OrderUseCase) eventbus.Handler {
 	}
 }
 
+// ShipmentExceptionHandler: delivery failed for good (AF-04); the case
+// is opened or updated in the inbox transaction.
+func ShipmentExceptionHandler(orders *usecase.OrderUseCase) eventbus.Handler {
+	return func(ctx context.Context, tx pgx.Tx, env eventbus.Envelope) error {
+		var x events.ShipmentException
+		if err := env.Decode(&x); err != nil {
+			return err
+		}
+		if x.ShipmentID == "" || x.VendorOrderID == "" || !domain.ValidExceptionFact(x.ExceptionType) {
+			return apperror.Validation("Invalid shipment exception")
+		}
+		return orders.ApplyShipmentException(repository.WithTx(ctx, tx), usecase.ShipmentExceptionFact{EventID: x.EventID, ShipmentID: x.ShipmentID,
+			VendorOrderID: x.VendorOrderID, Type: x.ExceptionType, AttemptNo: x.AttemptNo, FailedAttempts: x.FailedAttempts, Reason: x.Reason,
+			OccurredAt: x.OccurredAt})
+	}
+}
+
 // PaymentOutcomeHandler: a payment was captured or failed. When Order
 // refuses it (amount mismatch, order no longer payable), nothing of the
 // attempt is kept and Payment is told through a durable effect, so the

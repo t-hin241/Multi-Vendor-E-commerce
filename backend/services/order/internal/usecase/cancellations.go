@@ -572,6 +572,10 @@ func (uc *OrderUseCase) ClaimHandover(ctx context.Context, vendorOrderID, shipme
 		if err != nil {
 			return err
 		}
+		// AF-04: with a delivery exception open, only its redelivery ships.
+		if handled, err := uc.deliveryHandoverAllowed(ctx, current.ID, shipmentID); handled || err != nil {
+			return err
+		}
 		order, err := uc.findOrder(ctx, current.OrderID)
 		if err != nil {
 			return err

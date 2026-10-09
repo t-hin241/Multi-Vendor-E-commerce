@@ -20,7 +20,7 @@ const someID = "00000000-0000-0000-0000-000000000001"
 
 func testRouter() (http.Handler, *authjwt.Manager) {
 	jwt := authjwttest.Manager()
-	return NewRouter("test", zerolog.Nop(), jwt, &OrderHandler{}, &BuyerAddressHandler{}, &AdminHandler{}, &InternalHandler{}, &ReturnHandler{}, &SupportHandler{}, &CancellationHandler{}, adminaccesstest.Guard(AdminRoutes),
+	return NewRouter("test", zerolog.Nop(), jwt, &OrderHandler{}, &BuyerAddressHandler{}, &AdminHandler{}, &InternalHandler{}, &ReturnHandler{}, &SupportHandler{}, &CancellationHandler{}, &DeliveryExceptionHandler{}, adminaccesstest.Guard(AdminRoutes),
 		serviceauth.SharedKey("fake-test-service-key-not-a-real-secret")), jwt
 }
 
@@ -58,6 +58,7 @@ func TestEveryInternalOrderRouteRequiresTheServiceKey(t *testing.T) {
 		{"POST", "/internal/refund-events"},
 		{"POST", "/internal/settlements/holds"},
 		{"POST", "/internal/shipment-events"},
+		{"POST", "/internal/shipment-exceptions"},
 		{"GET", "/internal/policy-rules/readiness?key=order.returns_window&value=window-7d"},
 		{"POST", "/internal/policy-published"},
 	}
@@ -240,6 +241,42 @@ func TestCancellationRoutesCheckRolesAndInput(t *testing.T) {
 		{"POST", "/api/orders/vendor-orders/" + someID + "/cancellation-requests", `{"reason_code":"other"}`, "buyer"},
 		{"POST", "/api/orders/admin/cancellation-requests/" + someID + "/decisions", `{"decision":"cancel","reason":"x","expected_version":1}`, "admin"},
 		{"GET", "/api/orders/admin/cancellation-requests?status=unknown", "", "admin"},
+	}
+	for _, tc := range invalid {
+		if code := do(r, tc.method, tc.path, tc.body, as(t, jwt, tc.role)); code != http.StatusBadRequest {
+			t.Errorf("%s %s %s: expected 400, got %d", tc.method, tc.path, tc.body, code)
+		}
+	}
+}
+
+// AF-04: buyers answer redelivery offers, shops record goods, admins
+// decide; Shipment alone reports exceptions.
+func TestDeliveryExceptionRoutesCheckRolesAndInput(t *testing.T) {
+	r, jwt := testRouter()
+	forbidden := []struct{ method, path, role string }{
+		{"POST", "/api/orders/delivery-exceptions/" + someID + "/redelivery-consents", "admin"},
+		{"GET", "/api/orders/" + someID + "/delivery-exceptions", "vendor"},
+		{"GET", "/api/orders/admin/delivery-exceptions", "buyer"},
+		{"GET", "/api/orders/admin/delivery-exceptions", "vendor"},
+		{"POST", "/api/orders/admin/delivery-exceptions/" + someID + "/decisions", "buyer"},
+		{"POST", "/api/orders/admin/delivery-exceptions/" + someID + "/decisions", "vendor"},
+		{"POST", "/api/orders/admin/delivery-exceptions/" + someID + "/receipts", "vendor"},
+	}
+	for _, tc := range forbidden {
+		if code := do(r, tc.method, tc.path, `{}`, as(t, jwt, tc.role)); code != http.StatusForbidden {
+			t.Errorf("%s %s as %s: expected 403, got %d", tc.method, tc.path, tc.role, code)
+		}
+	}
+	if code := do(r, "POST", "/api/orders/delivery-exceptions/"+someID+"/redelivery-consents", `{}`, nil); code != http.StatusUnauthorized {
+		t.Errorf("anonymous consent: %d", code)
+	}
+	invalid := []struct{ method, path, body, role string }{
+		{"POST", "/api/orders/delivery-exceptions/not-a-uuid/redelivery-consents", `{"accept":true,"expected_version":1}`, "buyer"},
+		{"POST", "/api/orders/delivery-exceptions/" + someID + "/redelivery-consents", `{"expected_version":1}`, "buyer"},
+		{"POST", "/api/orders/delivery-exceptions/" + someID + "/redelivery-consents", `{"accept":true,"address_id":"x","expected_version":1}`, "buyer"},
+		{"POST", "/api/orders/vendor/delivery-exceptions/" + someID + "/receipts", `{"received_lines":[{"item_id":"` + someID + `","quantity":1,"condition":"lost"}],"expected_version":1}`, "vendor"},
+		{"POST", "/api/orders/admin/delivery-exceptions/" + someID + "/decisions", `{"resolution":"cancel","reason":"x","expected_version":1}`, "admin"},
+		{"GET", "/api/orders/admin/delivery-exceptions?status=unknown", "", "admin"},
 	}
 	for _, tc := range invalid {
 		if code := do(r, tc.method, tc.path, tc.body, as(t, jwt, tc.role)); code != http.StatusBadRequest {

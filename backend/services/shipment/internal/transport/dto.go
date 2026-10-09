@@ -28,6 +28,10 @@ type shipmentResponse struct {
 	ID                   string     `json:"id"`
 	VendorOrderID        string     `json:"vendor_order_id"`
 	Status               string     `json:"status"`
+	Version              int64      `json:"version"`
+	AttemptNo            int        `json:"attempt_no"`
+	OriginalShipmentID   *string    `json:"original_shipment_id,omitempty"`
+	LostAt               *time.Time `json:"lost_at,omitempty"`
 	CarrierID            *string    `json:"carrier_id,omitempty"`
 	TrackingNumber       *string    `json:"tracking_number,omitempty"`
 	ZoneName             *string    `json:"zone_name,omitempty"`
@@ -56,6 +60,7 @@ type shipmentResponse struct {
 func toShipmentResponse(s *domain.Shipment) shipmentResponse {
 	return shipmentResponse{ActionDueAt: s.ActionDueAt, WaitingOn: s.WaitingOn,
 		ID: s.ID, VendorOrderID: s.VendorOrderID, Status: string(s.Status),
+		Version: s.Version, AttemptNo: s.AttemptNo, OriginalShipmentID: s.OriginalShipmentID, LostAt: s.LostAt,
 		CarrierID: s.CarrierID, TrackingNumber: s.TrackingNumber,
 		ZoneName: s.ZoneName, FeeAmount: s.FeeAmount, PackageWeightGrams: s.PackageWeightGrams,
 		RecipientName: s.RecipientName, Phone: s.Phone, Province: s.Province,
@@ -107,6 +112,13 @@ type reasonRequest struct {
 type updateTrackingRequest struct {
 	TrackingNumber string `json:"tracking_number" binding:"required,max=64"`
 	Reason         string `json:"reason" binding:"required,max=500"`
+}
+
+// failureReportRequest: AF-04, delivery failed for good.
+type failureReportRequest struct {
+	Kind            string `json:"kind" binding:"required,oneof=returned lost"`
+	Reason          string `json:"reason" binding:"required,max=500"`
+	ExpectedVersion int64  `json:"expected_version" binding:"required,min=1"`
 }
 
 type interceptionDecisionRequest struct {

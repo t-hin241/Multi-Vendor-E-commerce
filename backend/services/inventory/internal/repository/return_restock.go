@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"errors"
+	"strings"
 
 	"github.com/jackc/pgx/v5"
 
@@ -18,13 +19,19 @@ func (r *InventoryItemRepository) RestockReturn(ctx context.Context, returnID, p
 	return r.restock(ctx, "return:"+returnID, "return_restock", returnID, productID, variantID, quantity)
 }
 
-// RestockRecovery puts back units that never left the warehouse (AF-03: a
-// paid vendor order cancelled before handover) with a
-// 'cancellation_restock' movement, once per recovery id. The id names the
-// source and item ("cancellation:<request>:<item>"), so a cancellation and a
-// later return of the same item can never both restock it.
+// RestockRecovery puts back recovered units once per recovery id: units
+// that never left the warehouse (AF-03, "cancellation:<request>:<item>",
+// a 'cancellation_restock' movement) or units of a failed delivery the shop
+// received back as sellable (AF-04, "delivery_exception:<case>:<item>", a
+// 'delivery_return_restock' movement). The id names the source and item,
+// so a cancellation and a later return of the same item can never both
+// restock it.
 func (r *InventoryItemRepository) RestockRecovery(ctx context.Context, recoveryID, productID string, variantID *string, quantity int64) (replayed bool, err error) {
-	return r.restock(ctx, "recovery:"+recoveryID, "cancellation_restock", recoveryID, productID, variantID, quantity)
+	reason := "cancellation_restock"
+	if strings.HasPrefix(recoveryID, "delivery_exception:") {
+		reason = "delivery_return_restock"
+	}
+	return r.restock(ctx, "recovery:"+recoveryID, reason, recoveryID, productID, variantID, quantity)
 }
 
 func (r *InventoryItemRepository) restock(ctx context.Context, key, reason, referenceID, productID string, variantID *string, quantity int64) (replayed bool, err error) {

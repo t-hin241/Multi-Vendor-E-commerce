@@ -207,7 +207,8 @@ var shipmentPaths = map[string]map[domain.Status][]domain.Status{
 // ApplyShipmentEvent is how a vendor order becomes shipped or completed:
 // Order decides from Shipment's facts, in its own transaction. A repeated
 // or out-of-order event converges on the same state; "returned" changes no
-// status (money and stock are decided by an operator through a refund).
+// status (AF-04: the delivery exception decides money and stock). A
+// delivery during an open delivery exception is recorded on the case.
 func (uc *OrderUseCase) ApplyShipmentEvent(ctx context.Context, e ShipmentEvent) error {
 	vo, err := uc.VendorOrders.FindByID(ctx, e.VendorOrderID)
 	if err != nil {
@@ -226,6 +227,12 @@ func (uc *OrderUseCase) ApplyShipmentEvent(ctx context.Context, e ShipmentEvent)
 		current, err := uc.VendorOrders.FindByID(ctx, vo.ID)
 		if err != nil {
 			return err
+		}
+		if e.Type == "delivered" {
+			skip, err := uc.noteDeliveredForException(ctx, current, e.ShipmentID)
+			if err != nil || skip {
+				return err
+			}
 		}
 		steps, ok := paths[current.Status]
 		if !ok {

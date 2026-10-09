@@ -40,6 +40,11 @@ type Deps struct {
 	Wake func()
 	Log  zerolog.Logger
 	Now  func() time.Time
+	// DeliveryResolution (AF-04, FEATURE_DELIVERY_RESOLUTION_ENABLED):
+	// tell Order about failed deliveries, accept failure reports and
+	// redelivery attempts. AttemptLimit failed attempts open a case.
+	DeliveryResolution bool
+	AttemptLimit       int
 }
 
 type ShipmentUseCase struct{ Deps }
@@ -47,6 +52,9 @@ type ShipmentUseCase struct{ Deps }
 func NewShipmentUseCase(d Deps) *ShipmentUseCase {
 	if d.Now == nil {
 		d.Now = time.Now
+	}
+	if d.AttemptLimit <= 0 {
+		d.AttemptLimit = domain.DefaultAttemptLimit
 	}
 	return &ShipmentUseCase{d}
 }
@@ -333,6 +341,11 @@ func (uc *ShipmentUseCase) transition(ctx context.Context, s *domain.Shipment, t
 			return err
 		}
 	}
+	if kind, ok := domain.ExceptionFor(to); ok {
+		if err := uc.enqueueException(ctx, s, kind, note); err != nil {
+			return err
+		}
+	}
 	uc.Log.Info().Str("shipment_id", s.ID).Str("vendor_order_id", s.VendorOrderID).Str("status", string(to)).
 		Str("actor_role", string(actor.Role)).Msg("shipment_status_changed")
 	return nil
@@ -433,6 +446,13 @@ func (uc *ShipmentUseCase) RecordFailedAttempt(ctx context.Context, actor Actor,
 		note := "Delivery attempt failed: " + *why
 		if _, err := uc.Events.Insert(ctx, &domain.TrackingEvent{ShipmentID: s.ID, Status: s.Status, Note: &note, ActorID: &actor.ID, ActorRole: actor.Role}); err != nil {
 			return err
+		}
+		// AF-04: past the limit an operator takes the case; the buyer is
+		// not assumed to have refused the package.
+		if s.FailedAttempts >= uc.AttemptLimit {
+			if err := uc.enqueueException(ctx, s, domain.ExceptionAttemptsExhausted, why); err != nil {
+				return err
+			}
 		}
 		return uc.auditAdmin(ctx, actor, "delivery_attempt_failed", domain.AuditShipment, s.ID, why,
 			map[string]any{"failed_attempts": s.FailedAttempts})

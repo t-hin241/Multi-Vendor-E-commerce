@@ -22,6 +22,7 @@ const shipmentColumns = `id, vendor_order_id, vendor_id, buyer_id, status, versi
 	recipient_name, phone, province, district, ward, street_address,
 	shipped_at, delivered_at, returned_at, cancelled_at, tracking_updated_at, failed_attempts, last_attempt_reason,
 	intercept_provider_ref, intercept_requested_at, intercept_resolved_at, address_redacted_at,
+	lost_at, attempt_no, original_shipment_id,
 	created_at, updated_at, (SELECT due_at FROM case_sla_work_items w WHERE w.resource_type='interception' AND w.resource_id=shipments.id AND w.active), COALESCE((SELECT payload->>'waiting_on' FROM case_sla_work_items w WHERE w.resource_type='interception' AND w.resource_id=shipments.id AND w.active),'')`
 
 type ShipmentRepository struct {
@@ -40,6 +41,7 @@ func scanShipment(row pgx.Row) (*domain.Shipment, error) {
 		&s.RecipientName, &s.Phone, &s.Province, &s.District, &s.Ward, &s.StreetAddress,
 		&s.ShippedAt, &s.DeliveredAt, &s.ReturnedAt, &s.CancelledAt, &s.TrackingUpdatedAt, &s.FailedAttempts, &s.LastAttemptReason,
 		&s.InterceptProviderRef, &s.InterceptRequestedAt, &s.InterceptResolvedAt, &s.AddressRedactedAt,
+		&s.LostAt, &s.AttemptNo, &s.OriginalShipmentID,
 		&s.CreatedAt, &s.UpdatedAt, &s.ActionDueAt, &s.WaitingOn,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -51,25 +53,53 @@ func scanShipment(row pgx.Row) (*domain.Shipment, error) {
 	return &s, nil
 }
 
+// ErrActiveAttemptExists: the vendor order already has an attempt in
+// progress (AF-04: one active attempt per vendor order).
+var ErrActiveAttemptExists = errors.New("repository: an active attempt exists for this vendor order")
+
 // Create persists a shipment with every snapshot field already resolved by
-// the usecase; one per vendor order (unique index).
+// the usecase; one per vendor order and attempt (unique index), at most
+// one active per vendor order.
 func (r *ShipmentRepository) Create(ctx context.Context, s *domain.Shipment) error {
+	return r.create(ctx, s, nil)
+}
+
+// CreateReplacement persists a redelivery attempt under Order's operation
+// id (AF-04); a retry of the operation finds it.
+func (r *ShipmentRepository) CreateReplacement(ctx context.Context, s *domain.Shipment, operationID string) error {
+	return r.create(ctx, s, &operationID)
+}
+
+func (r *ShipmentRepository) create(ctx context.Context, s *domain.Shipment, replacementOperation *string) error {
+	if s.AttemptNo == 0 {
+		s.AttemptNo = 1
+	}
 	err := connection(ctx, r.pool).QueryRow(ctx, `
 		INSERT INTO shipments (
 			vendor_order_id, vendor_id, buyer_id, status, carrier_id,
 			zone_id, zone_name, fee_rule_id, fee_amount, package_weight_grams,
-			recipient_name, phone, province, district, ward, street_address
+			recipient_name, phone, province, district, ward, street_address,
+			attempt_no, original_shipment_id, replacement_operation_id
 		)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
 		RETURNING id, version, created_at, updated_at`,
 		s.VendorOrderID, s.VendorID, s.BuyerID, s.Status, s.CarrierID,
 		s.ZoneID, s.ZoneName, s.FeeRuleID, s.FeeAmount, s.PackageWeightGrams,
 		s.RecipientName, s.Phone, s.Province, s.District, s.Ward, s.StreetAddress,
+		s.AttemptNo, s.OriginalShipmentID, replacementOperation,
 	).Scan(&s.ID, &s.Version, &s.CreatedAt, &s.UpdatedAt)
-	if isUniqueViolation(err, "") {
+	switch {
+	case isUniqueViolation(err, "shipments_vendor_order_active_key"):
+		return ErrActiveAttemptExists
+	case isUniqueViolation(err, ""):
 		return ErrShipmentAlreadyExists
 	}
 	return err
+}
+
+// FindByReplacementOperation is the attempt Order's operation created.
+func (r *ShipmentRepository) FindByReplacementOperation(ctx context.Context, operationID string) (*domain.Shipment, error) {
+	return scanShipment(connection(ctx, r.pool).QueryRow(ctx, `SELECT `+shipmentColumns+` FROM shipments WHERE replacement_operation_id = $1`, operationID))
 }
 
 func (r *ShipmentRepository) FindByID(ctx context.Context, id string) (*domain.Shipment, error) {
@@ -81,8 +111,10 @@ func (r *ShipmentRepository) LockByID(ctx context.Context, id string) (*domain.S
 	return scanShipment(connection(ctx, r.pool).QueryRow(ctx, `SELECT `+shipmentColumns+` FROM shipments WHERE id = $1 FOR UPDATE`, id))
 }
 
+// FindByVendorOrderID is the vendor order's latest attempt.
 func (r *ShipmentRepository) FindByVendorOrderID(ctx context.Context, vendorOrderID string) (*domain.Shipment, error) {
-	return scanShipment(connection(ctx, r.pool).QueryRow(ctx, `SELECT `+shipmentColumns+` FROM shipments WHERE vendor_order_id = $1`, vendorOrderID))
+	return scanShipment(connection(ctx, r.pool).QueryRow(ctx, `SELECT `+shipmentColumns+` FROM shipments WHERE vendor_order_id = $1
+		ORDER BY attempt_no DESC LIMIT 1`, vendorOrderID))
 }
 
 func (r *ShipmentRepository) ListByVendor(ctx context.Context, vendorID string, limit, offset int) ([]*domain.Shipment, error) {
@@ -119,6 +151,7 @@ type Change struct {
 	ShippedAt         *time.Time
 	DeliveredAt       *time.Time
 	ReturnedAt        *time.Time
+	LostAt            *time.Time
 	CancelledAt       *time.Time
 	InterceptRef      *string
 	InterceptAt       *time.Time
@@ -143,11 +176,12 @@ func (r *ShipmentRepository) Transition(ctx context.Context, s *domain.Shipment,
 			intercept_provider_ref = COALESCE($10, intercept_provider_ref),
 			intercept_requested_at = COALESCE($11, intercept_requested_at),
 			intercept_resolved_at = COALESCE($12, intercept_resolved_at),
+			lost_at = COALESCE($14, lost_at),
 			updated_at = now()
 		WHERE id = $1 AND status = $2 AND version = $13
 		RETURNING version, updated_at`,
 		s.ID, s.Status, to, c.TrackingNumber, trackingChanged, c.ShippedAt, c.DeliveredAt, c.ReturnedAt, c.CancelledAt,
-		c.InterceptRef, c.InterceptAt, c.InterceptResolved, s.Version).Scan(&s.Version, &s.UpdatedAt)
+		c.InterceptRef, c.InterceptAt, c.InterceptResolved, s.Version, c.LostAt).Scan(&s.Version, &s.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return ErrStaleState
 	}
@@ -155,6 +189,12 @@ func (r *ShipmentRepository) Transition(ctx context.Context, s *domain.Shipment,
 		return err
 	}
 	s.Status = to
+	if c.ReturnedAt != nil {
+		s.ReturnedAt = c.ReturnedAt
+	}
+	if c.LostAt != nil {
+		s.LostAt = c.LostAt
+	}
 	if c.InterceptAt != nil {
 		s.InterceptRequestedAt = c.InterceptAt
 	}
@@ -253,7 +293,7 @@ func (r *ShipmentRepository) RedactAddresses(ctx context.Context, retention time
 	tag, err := connection(ctx, r.pool).Exec(ctx, `
 		UPDATE shipments SET recipient_name = NULL, phone = NULL, street_address = NULL, ward = NULL, address_redacted_at = now()
 		WHERE id IN (SELECT id FROM shipments
-		             WHERE address_redacted_at IS NULL AND status IN ('delivered', 'cancelled', 'returned')
+		             WHERE address_redacted_at IS NULL AND status IN ('delivered', 'cancelled', 'returned', 'lost')
 		               AND updated_at < now() - $1::interval
 		             ORDER BY updated_at LIMIT $2)`, retention.String(), limit)
 	if err != nil {

@@ -108,6 +108,22 @@ func (h *OpsHandler) MarkReturned(c *gin.Context) {
 	h.respond(c, s, err)
 }
 
+// FailureReport: an admin records a returned or lost package (AF-04);
+// lost needs the carrier's confirmation.
+func (h *OpsHandler) FailureReport(c *gin.Context) {
+	if !validShipmentID(c) {
+		return
+	}
+	var req failureReportRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		httpresponse.Error(c, http.StatusBadRequest, "validation_error", "kind (returned or lost), reason and expected_version are required")
+		return
+	}
+	s, err := h.shipments.ReportFailure(c.Request.Context(), admin(c), c.Param("id"),
+		usecase.FailureReport{Kind: req.Kind, Reason: req.Reason, ExpectedVersion: req.ExpectedVersion})
+	h.respond(c, s, err)
+}
+
 func (h *OpsHandler) UpdateTracking(c *gin.Context) {
 	if !validShipmentID(c) {
 		return

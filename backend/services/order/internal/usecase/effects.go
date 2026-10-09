@@ -112,6 +112,12 @@ func (uc *OrderUseCase) executeEffect(ctx context.Context, e *domain.Effect) err
 	case domain.EffectSettleVendorOrder:
 		return uc.settleVendorOrder(ctx, e)
 	case domain.EffectAcquireSettlementHold:
+		if id, ok := strings.CutPrefix(e.Target, deliveryTarget); ok {
+			if uc.DeliveryExceptions == nil || uc.Holds == nil {
+				return errHoldsNotWired
+			}
+			return uc.acquireDeliveryHold(ctx, id)
+		}
 		if id, ok := strings.CutPrefix(e.Target, cancellationTarget); ok {
 			if uc.Cancellations == nil || uc.Holds == nil {
 				return errHoldsNotWired
@@ -120,6 +126,12 @@ func (uc *OrderUseCase) executeEffect(ctx context.Context, e *domain.Effect) err
 		}
 		return uc.acquireCaseHold(ctx, e)
 	case domain.EffectReleaseSettlementHold:
+		if id, ok := strings.CutPrefix(e.Target, deliveryTarget); ok {
+			if uc.DeliveryExceptions == nil || uc.Holds == nil {
+				return errHoldsNotWired
+			}
+			return uc.releaseDeliveryHoldEffect(ctx, id)
+		}
 		if id, ok := strings.CutPrefix(e.Target, cancellationTarget); ok {
 			if uc.Cancellations == nil || uc.Holds == nil {
 				return errHoldsNotWired
@@ -131,6 +143,10 @@ func (uc *OrderUseCase) executeEffect(ctx context.Context, e *domain.Effect) err
 		return uc.stopFulfillment(ctx, e)
 	case domain.EffectRecoverCancelledStock:
 		return uc.recoverCancelledStock(ctx, e)
+	case domain.EffectCreateReplacementAttempt:
+		return uc.createReplacementAttempt(ctx, e)
+	case domain.EffectRecoverDeliveryStock:
+		return uc.recoverDeliveryStock(ctx, e)
 	case domain.EffectReportRejectedOutcome:
 		var p domain.RejectedOutcomePayload
 		if err := json.Unmarshal(e.Payload, &p); err != nil {

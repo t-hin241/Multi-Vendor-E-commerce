@@ -26,6 +26,11 @@ const (
 	// units back at Inventory once per item. Target is the request id.
 	EffectStopFulfillment       EffectKind = "stop_fulfillment"
 	EffectRecoverCancelledStock EffectKind = "recover_cancelled_stock"
+	// AF-04: ask Shipment for a redelivery attempt the buyer agreed to,
+	// and put a failed delivery's sellable units back once per item.
+	// Target is the delivery exception id.
+	EffectCreateReplacementAttempt EffectKind = "create_replacement_attempt"
+	EffectRecoverDeliveryStock     EffectKind = "recover_delivery_stock"
 )
 
 // RejectedOutcomePayload is what a report_rejected_outcome effect sends.

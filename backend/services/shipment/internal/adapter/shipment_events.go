@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"shopee/backend/pkg/apperror"
+	"shopee/backend/pkg/events"
 	"shopee/backend/pkg/serviceauth"
 )
 
@@ -52,4 +53,34 @@ func (c *HTTPOrderClient) SendShipmentEvent(ctx context.Context, e ShipmentEvent
 		return apperror.Conflict(fmt.Sprintf("Order refused the %s event (status %d)", e.Type, resp.StatusCode))
 	}
 	return apperror.Internal(fmt.Errorf("order service returned status %d for a shipment event", resp.StatusCode))
+}
+
+// SendShipmentException tells Order a delivery failed for good (AF-04,
+// rollback mode without the event bus). Same answer mapping as
+// SendShipmentEvent: an Order without the route (404) parks it for review.
+func (c *HTTPOrderClient) SendShipmentException(ctx context.Context, e events.ShipmentException) error {
+	body, err := json.Marshal(e)
+	if err != nil {
+		return apperror.Internal(err)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/internal/shipment-exceptions", bytes.NewReader(body))
+	if err != nil {
+		return apperror.Internal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	serviceauth.SetRequestHeaders(req, c.key)
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return apperror.Internal(fmt.Errorf("order service unreachable: %w", err))
+	}
+	defer resp.Body.Close()
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<16))
+	switch {
+	case resp.StatusCode == http.StatusOK:
+		return nil
+	case resp.StatusCode >= 400 && resp.StatusCode < 500 && resp.StatusCode != http.StatusUnauthorized &&
+		resp.StatusCode != http.StatusForbidden && resp.StatusCode != http.StatusTooManyRequests:
+		return apperror.Conflict(fmt.Sprintf("Order refused the %s exception (status %d)", e.ExceptionType, resp.StatusCode))
+	}
+	return apperror.Internal(fmt.Errorf("order service returned status %d for a shipment exception", resp.StatusCode))
 }

@@ -28,6 +28,7 @@ const (
 	VendorOrderSettleable       = "order.vendor_order_settleable"
 	PaymentOutcomeRejected      = "order.payment_outcome_rejected"
 	ShipmentChanged             = "shipment.status_changed"
+	ShipmentExceptionDetected   = "shipment.exception_detected"
 	PaymentOutcome              = "payment.outcome"
 	RefundOutcome               = "payment.refund_outcome"
 )
@@ -181,6 +182,26 @@ type ShipmentFact struct {
 
 func ShipmentChangedEvent(f ShipmentFact) (eventbus.Envelope, error) {
 	return eventbus.New(f.EventID, ShipmentChanged, V1, f.VendorOrderID, 0, f)
+}
+
+// ShipmentException: delivery of a package failed for good (AF-04,
+// Shipment → Order): the attempt limit was reached, the package came back
+// to the shop, or the carrier confirmed it lost. Order opens one delivery
+// exception per shipment and decides redelivery or refund. Reason is the
+// operator's note, never the buyer's address.
+type ShipmentException struct {
+	EventID        string    `json:"event_id"`
+	ShipmentID     string    `json:"shipment_id"`
+	VendorOrderID  string    `json:"vendor_order_id"`
+	ExceptionType  string    `json:"exception_type"` // attempts_exhausted | returned | lost
+	AttemptNo      int       `json:"attempt_no"`
+	FailedAttempts int       `json:"failed_attempts"`
+	Reason         string    `json:"reason,omitempty"`
+	OccurredAt     time.Time `json:"occurred_at"`
+}
+
+func ShipmentExceptionEvent(e ShipmentException) (eventbus.Envelope, error) {
+	return eventbus.New(e.EventID, ShipmentExceptionDetected, V1, e.VendorOrderID, 0, e)
 }
 
 // PaymentResult: a payment for an order was captured or failed (Payment

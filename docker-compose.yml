@@ -476,6 +476,9 @@ services:
       # Shipment claims the handover grant, Inventory has /recoveries and
       # Notification knows the cancellation templates.
       FEATURE_PAID_CANCELLATION_ENABLED: ${FEATURE_PAID_CANCELLATION_ENABLED:-false}
+      # AF-04: offer redeliveries of failed packages (cases from Shipment are
+      # always recorded and refundable). Turn on after Shipment's 000009.
+      FEATURE_DELIVERY_RESOLUTION_ENABLED: ${ORDER_FEATURE_DELIVERY_RESOLUTION_ENABLED:-false}
       SUPPORT_ATTACHMENT_RETENTION_DAYS: ${SUPPORT_ATTACHMENT_RETENTION_DAYS:-180}
       # Private evidence bucket: no bucket policy, read only through Order.
       SUPPORT_ATTACHMENT_STORAGE_ENDPOINT: minio:9000
@@ -563,6 +566,10 @@ services:
       dockerfile: services/shipment/Dockerfile
     environment:
       FEATURE_CASE_SLA_ENABLED: ${SHIPMENT_FEATURE_CASE_SLA_ENABLED:-false}
+      # AF-04: report failed deliveries to Order and run redelivery attempts.
+      # Order (with migration 000022) must be deployed first.
+      FEATURE_DELIVERY_RESOLUTION_ENABLED: ${SHIPMENT_FEATURE_DELIVERY_RESOLUTION_ENABLED:-false}
+      SHIPMENT_DELIVERY_ATTEMPT_LIMIT: ${SHIPMENT_DELIVERY_ATTEMPT_LIMIT:-2}
       SLA_POLL_INTERVAL: ${SLA_POLL_INTERVAL:-60s}
       SLA_ON_CALL_ADMIN_IDS: ${SLA_ON_CALL_ADMIN_IDS:-}
       SLA_ESCALATION_ADMIN_IDS: ${SLA_ESCALATION_ADMIN_IDS:-}

@@ -1955,7 +1955,9 @@ export type ShipmentStatus =
   | "delivered"
   | "cancelled"
   | "interception_requested"
-  | "returned";
+  | "returned"
+  // AF-04: the carrier confirmed the package lost.
+  | "lost";
 
 export type Shipment = {
   action_due_at?: string | null;
@@ -1963,6 +1965,12 @@ export type Shipment = {
   id: string;
   vendor_order_id: string;
   status: ShipmentStatus;
+  // AF-04: compare-and-set version and fulfillment attempt (a redelivery
+  // is attempt 2 of the same package).
+  version: number;
+  attempt_no: number;
+  original_shipment_id?: string;
+  lost_at?: string;
   carrier_id?: string;
   tracking_number?: string;
   zone_name?: string;
@@ -2080,6 +2088,21 @@ export function markShipmentDelivered(token: string, shipmentId: string, note = 
 
 export function markShipmentReturned(token: string, shipmentId: string, reason: string) {
   return shipmentAction(token, `/api/shipments/${shipmentId}/return`, { reason });
+}
+
+// reportShipmentFailure (AF-04): the package came back (shop or admin) or
+// the carrier confirmed it lost (admin only), on the version read.
+export function reportShipmentFailure(
+  token: string,
+  scope: "vendor" | "admin",
+  shipmentId: string,
+  input: { kind: "returned" | "lost"; reason: string; expected_version: number },
+): Promise<Shipment> {
+  const path =
+    scope === "vendor"
+      ? `/api/shipments/${shipmentId}/failure-reports`
+      : `/api/shipments/admin/shipments/${shipmentId}/failure-reports`;
+  return shipmentAction(token, path, input);
 }
 
 // resolveInterception records the carrier's answer after calling it.
@@ -4083,6 +4106,151 @@ export function decideCancellation(
   },
 ): Promise<CancellationRequest> {
   return request<CancellationRequest>(`/api/orders/admin/cancellation-requests/${id}/decisions`, {
+    method: "POST",
+    token,
+    json: input,
+  });
+}
+
+// ----- AF-04 failed delivery and returned goods -----
+
+export type DeliveryExceptionStatus =
+  | "investigating"
+  | "awaiting_goods"
+  | "awaiting_buyer"
+  | "redelivery_pending"
+  | "refund_pending"
+  | "needs_review"
+  | "resolved";
+
+export type GoodsCondition = "sellable" | "damaged" | "missing";
+
+export type DeliveryDestination = {
+  recipient_name: string;
+  phone: string;
+  province: string;
+  district: string;
+  ward: string;
+  street_address: string;
+  address_id?: string;
+};
+
+export type DeliveryException = {
+  id: string;
+  order_id: string;
+  vendor_order_id: string;
+  vendor_id: string;
+  shipment_id: string;
+  exception_type: "attempts_exhausted" | "returned" | "lost";
+  current_shipment_id: string;
+  attempt_no: number;
+  carrier_outcome: "attempts_exhausted" | "returned" | "lost" | "delivered";
+  failed_attempts: number;
+  detection_reason?: string;
+  status: DeliveryExceptionStatus;
+  resolution?: "redelivery" | "refund" | "closed";
+  policy_version: string;
+  redelivery_limit: number;
+  hold_status?: CaseHoldStatus;
+  hold_note?: string;
+  redelivery_count: number;
+  replacement_shipment_id?: string;
+  redelivery_address?: DeliveryDestination;
+  consented_at?: string;
+  refund_id?: string;
+  stock_recovered: boolean;
+  decided_at?: string;
+  decision_reason?: string;
+  review_reason?: string;
+  late_delivery_at?: string;
+  resolved_at?: string;
+  receipt?: {
+    version: number;
+    actor_role: string;
+    note?: string;
+    lines: { order_item_id: string; condition: GoodsCondition; quantity: number }[];
+    created_at: string;
+  };
+  action_due_at?: string;
+  waiting_on?: string;
+  version: number;
+  created_at: string;
+  updated_at: string;
+};
+
+export type DeliveryExceptionEvent = CancellationEvent;
+
+export function listOrderDeliveryExceptions(token: string, orderId: string): Promise<DeliveryException[]> {
+  return request<DeliveryException[]>(`/api/orders/${orderId}/delivery-exceptions`, { token });
+}
+
+export function listVendorDeliveryExceptions(
+  token: string,
+  vendorId: string,
+  status = "open",
+): Promise<DeliveryException[]> {
+  return request<DeliveryException[]>("/api/orders/vendor/delivery-exceptions", {
+    token,
+    query: { vendor_id: vendorId, status: status || undefined },
+  });
+}
+
+export function listDeliveryExceptions(token: string, status = "open"): Promise<DeliveryException[]> {
+  return request<DeliveryException[]>("/api/orders/admin/delivery-exceptions", { token, query: { status } });
+}
+
+export function getDeliveryException(
+  token: string,
+  scope: "buyer" | "vendor" | "admin",
+  id: string,
+): Promise<{ exception: DeliveryException; events: DeliveryExceptionEvent[] }> {
+  const prefix = scope === "buyer" ? "/api/orders" : `/api/orders/${scope}`;
+  return request(`${prefix}/delivery-exceptions/${id}`, { token });
+}
+
+// consentRedelivery: the buyer accepts the redelivery (to the order's
+// address, or a saved address_id) or declines it.
+export function consentRedelivery(
+  token: string,
+  id: string,
+  input: { accept: boolean; address_id?: string; expected_version: number },
+): Promise<DeliveryException> {
+  return request<DeliveryException>(`/api/orders/delivery-exceptions/${id}/redelivery-consents`, {
+    method: "POST",
+    token,
+    json: input,
+  });
+}
+
+// recordGoodsReceipt: what came back, every unit sellable/damaged/missing.
+// An admin's call corrects the shop's receipt (a note is required).
+export function recordGoodsReceipt(
+  token: string,
+  scope: "vendor" | "admin",
+  id: string,
+  input: {
+    received_lines: { item_id: string; quantity: number; condition: GoodsCondition }[];
+    note?: string;
+    expected_version: number;
+  },
+): Promise<DeliveryException> {
+  return request<DeliveryException>(`/api/orders/${scope}/delivery-exceptions/${id}/receipts`, {
+    method: "POST",
+    token,
+    json: input,
+  });
+}
+
+export function decideDeliveryException(
+  token: string,
+  id: string,
+  input: {
+    resolution: "redeliver" | "refund" | "close" | "retry_refund";
+    reason: string;
+    expected_version: number;
+  },
+): Promise<DeliveryException> {
+  return request<DeliveryException>(`/api/orders/admin/delivery-exceptions/${id}/decisions`, {
     method: "POST",
     token,
     json: input,

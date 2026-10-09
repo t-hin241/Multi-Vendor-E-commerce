@@ -107,6 +107,18 @@ func (h *ShipmentHandler) MarkReturned(c *gin.Context) {
 	h.respond(c, s, err)
 }
 
+// FailureReport: the shop reports the package came back (AF-04).
+func (h *ShipmentHandler) FailureReport(c *gin.Context) {
+	var req failureReportRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		httpresponse.Error(c, http.StatusBadRequest, "validation_error", "kind (returned or lost), reason and expected_version are required")
+		return
+	}
+	s, err := h.shipments.ReportFailure(c.Request.Context(), vendor(c), c.Param("id"),
+		usecase.FailureReport{Kind: req.Kind, Reason: req.Reason, ExpectedVersion: req.ExpectedVersion})
+	h.respond(c, s, err)
+}
+
 func (h *ShipmentHandler) ResolveInterception(c *gin.Context) {
 	var req interceptionDecisionRequest
 	if err := c.ShouldBindJSON(&req); err != nil {

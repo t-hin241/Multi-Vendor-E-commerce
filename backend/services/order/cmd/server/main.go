@@ -173,7 +173,11 @@ func main() {
 		VersionedPolicies: cfg.VersionedPolicies,
 		SupportConfig: usecase.SupportConfig{Enabled: cfg.Support.Enabled, PilotVendorIDs: pilotVendors,
 			AttachmentRetention: time.Duration(cfg.Support.AttachmentRetentionDays) * 24 * time.Hour, HoldLedger: cfg.Support.HoldLedger},
-		Log: log,
+		// AF-04: failed deliveries.
+		DeliveryExceptions: repository.DeliveryExceptionRepository{Pool: dbPool},
+		Replacements:       shipmentClient,
+		DeliveryRedelivery: cfg.DeliveryRedelivery,
+		Log:                log,
 	})
 	workerCtx, stopWorker := context.WithCancel(ctx)
 	defer stopWorker()
@@ -185,10 +189,11 @@ func main() {
 	returnHandler := transport.NewReturnHandler(orderUseCase, log)
 	supportHandler := transport.NewSupportHandler(orderUseCase, log)
 	cancellationHandler := transport.NewCancellationHandler(orderUseCase, log)
+	deliveryHandler := transport.NewDeliveryExceptionHandler(orderUseCase, log)
 	// AF-19: every admin route needs the bundle named in transport.AdminRoutes.
 	adminGuard := adminaccess.Guard(adminaccess.Client{URL: internalServices.IdentityURL, Key: internalServices.Key}, transport.AdminRoutes, log)
 	router := transport.NewRouter(cfg.Base.Env, log, jwtManager, orderHandler, addressHandler, adminHandler, internalHandler, returnHandler,
-		supportHandler, cancellationHandler, adminGuard, internalServices.Verifier, checkers...,
+		supportHandler, cancellationHandler, deliveryHandler, adminGuard, internalServices.Verifier, checkers...,
 	)
 
 	salesStore := vendorsales.Store{Pool: dbPool}
@@ -204,6 +209,7 @@ func main() {
 		eventbus.Subscription{Durable: "order-product-status", Types: []string{events.ProductStatusChanged}, Handle: (productsales.Store{Pool: dbPool}).EventHandler()},
 		eventbus.Subscription{Durable: "order-reservation-expiry", Types: []string{events.ReservationExpired}, Handle: transport.ReservationExpiredHandler(orderUseCase)},
 		eventbus.Subscription{Durable: "order-shipment-facts", Types: []string{events.ShipmentChanged}, Handle: transport.ShipmentChangedHandler(orderUseCase)},
+		eventbus.Subscription{Durable: "order-shipment-exceptions", Types: []string{events.ShipmentExceptionDetected}, Handle: transport.ShipmentExceptionHandler(orderUseCase)},
 		eventbus.Subscription{Durable: "order-payment-outcomes", Types: []string{events.PaymentOutcome}, Handle: transport.PaymentOutcomeHandler(orderUseCase)},
 		eventbus.Subscription{Durable: "order-refund-outcomes", Types: []string{events.RefundOutcome}, Handle: transport.RefundOutcomeHandler(orderUseCase)},
 		eventbus.Subscription{Durable: "order-policy-versions", Types: []string{events.VendorPolicyPublished}, Handle: transport.PolicyPublishedHandler(orderUseCase)},

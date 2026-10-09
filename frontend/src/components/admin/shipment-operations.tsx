@@ -110,6 +110,17 @@ export function ShipmentOperations({ focusID }: { focusID?: string }) {
               (token, reason) => api.adminShipmentAction(token, s.id, "return", { reason }),
               true,
             )}
+            {action(
+              "Lost",
+              "The carrier confirmed the package lost? Note the carrier's reference; Order opens a failed-delivery case.",
+              (token, reason) =>
+                api.reportShipmentFailure(token, "admin", s.id, {
+                  kind: "lost",
+                  reason,
+                  expected_version: s.version,
+                }),
+              true,
+            )}
           </>
         )}
         {s.status === "interception_requested" && (

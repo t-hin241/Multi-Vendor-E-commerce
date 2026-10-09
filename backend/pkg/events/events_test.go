@@ -91,6 +91,11 @@ func TestEventContracts(t *testing.T) {
 	pin(t, env, err, ShipmentChanged, vo, `{"event_id":"s-1","shipment_id":"sh-1","vendor_order_id":"`+vo+`","type":"delivered",
 		"occurred_at":"2026-10-02T08:00:00Z","tracking_number":"VN123"}`)
 
+	env, err = ShipmentExceptionEvent(ShipmentException{EventID: "x-1", ShipmentID: "sh-1", VendorOrderID: vo, ExceptionType: "returned",
+		AttemptNo: 1, FailedAttempts: 2, Reason: "Nobody home twice", OccurredAt: at})
+	pin(t, env, err, ShipmentExceptionDetected, vo, `{"event_id":"x-1","shipment_id":"sh-1","vendor_order_id":"`+vo+`","exception_type":"returned",
+		"attempt_no":1,"failed_attempts":2,"reason":"Nobody home twice","occurred_at":"2026-10-02T08:00:00Z"}`)
+
 	env, err = PaymentOutcomeEvent(PaymentResult{PaymentID: "p-1", OrderID: order, Outcome: "captured", Amount: 115000, Currency: "VND"})
 	pin(t, env, err, PaymentOutcome, order, `{"payment_id":"p-1","order_id":"`+order+`","outcome":"captured","amount":115000,"currency":"VND"}`)
 	if env.EventID != "payment-p-1-captured" {

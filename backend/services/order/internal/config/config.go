@@ -34,6 +34,10 @@ type Config struct {
 	// PaidCancellation is FEATURE_PAID_CANCELLATION_ENABLED (AF-03): accept
 	// new cancellation requests on paid packages; off keeps open ones going.
 	PaidCancellation bool
+	// DeliveryRedelivery is FEATURE_DELIVERY_RESOLUTION_ENABLED (AF-04):
+	// offer redeliveries of failed packages. Delivery exception cases are
+	// always recorded and resolvable (refund) once Shipment reports them.
+	DeliveryRedelivery bool
 }
 
 // SupportConfig is the rollout of order support cases (AF-01).
@@ -112,6 +116,12 @@ func Load() (Config, error) {
 			return Config{}, fmt.Errorf("config: FEATURE_PAID_CANCELLATION_ENABLED must be true or false")
 		}
 	}
+	deliveryRedelivery := false
+	if raw := os.Getenv("FEATURE_DELIVERY_RESOLUTION_ENABLED"); raw != "" {
+		if deliveryRedelivery, err = strconv.ParseBool(raw); err != nil {
+			return Config{}, fmt.Errorf("config: FEATURE_DELIVERY_RESOLUTION_ENABLED must be true or false")
+		}
+	}
 	versionedPolicies := false
 	if raw := os.Getenv("FEATURE_VERSIONED_POLICIES_ENABLED"); raw != "" {
 		if versionedPolicies, err = strconv.ParseBool(raw); err != nil {
@@ -123,6 +133,7 @@ func Load() (Config, error) {
 		Support:                support,
 		VersionedPolicies:      versionedPolicies,
 		PaidCancellation:       paidCancellation,
+		DeliveryRedelivery:     deliveryRedelivery,
 		Base:                   base,
 		CartServiceURL:         cartServiceURL,
 		CatalogServiceURL:      catalogServiceURL,

@@ -21,6 +21,12 @@ type Config struct {
 	// AddressRetention: how long a final shipment keeps the buyer's contact
 	// details; zero keeps them.
 	AddressRetention time.Duration
+	// DeliveryResolution (AF-04, FEATURE_DELIVERY_RESOLUTION_ENABLED,
+	// default off): tell Order about failed deliveries, accept failure
+	// reports and redelivery attempts. AttemptLimit failed attempts
+	// (SHIPMENT_DELIVERY_ATTEMPT_LIMIT, default 2) open a case.
+	DeliveryResolution bool
+	AttemptLimit       int
 }
 
 func Load() (Config, error) {
@@ -60,10 +66,20 @@ func Load() (Config, error) {
 		return Config{}, fmt.Errorf("config: SHIPMENT_ADDRESS_RETENTION_DAYS must be 0 (keep) or between 30 and 3650")
 	}
 
+	deliveryResolution, err := strconv.ParseBool(getEnv("FEATURE_DELIVERY_RESOLUTION_ENABLED", "false"))
+	if err != nil {
+		return Config{}, fmt.Errorf("config: FEATURE_DELIVERY_RESOLUTION_ENABLED must be true or false")
+	}
+	attemptLimit, err := strconv.Atoi(getEnv("SHIPMENT_DELIVERY_ATTEMPT_LIMIT", "2"))
+	if err != nil || attemptLimit < 1 || attemptLimit > 5 {
+		return Config{}, fmt.Errorf("config: SHIPMENT_DELIVERY_ATTEMPT_LIMIT must be between 1 and 5")
+	}
+
 	return Config{
 		Base: base, VendorServiceURL: vendorServiceURL, OrderServiceURL: orderServiceURL,
 		CarrierProvider: carrierProvider, CarrierMockWebhookSecret: carrierMockWebhookSecret,
-		AddressRetention: time.Duration(retentionDays) * 24 * time.Hour,
+		AddressRetention:   time.Duration(retentionDays) * 24 * time.Hour,
+		DeliveryResolution: deliveryResolution, AttemptLimit: attemptLimit,
 	}, nil
 }
 

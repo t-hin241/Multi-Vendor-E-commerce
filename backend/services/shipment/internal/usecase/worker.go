@@ -24,6 +24,7 @@ func (w Worker) Run(ctx context.Context) {
 	lastRedaction := time.Time{}
 	for {
 		w.report(ctx)
+		w.backfillExceptions(ctx)
 		if w.Retention > 0 && time.Since(lastRedaction) >= time.Hour {
 			lastRedaction = time.Now()
 			if n, err := w.Shipments.RedactAddresses(ctx, w.Retention); err != nil && ctx.Err() == nil {
@@ -37,6 +38,25 @@ func (w Worker) Run(ctx context.Context) {
 			return
 		case <-tick.C:
 		}
+	}
+}
+
+// backfillExceptions (AF-04): packages returned before the feature get
+// their exception fact once, in batches, so admins take them as cases.
+func (w Worker) backfillExceptions(ctx context.Context) {
+	if !w.Shipments.DeliveryResolution {
+		return
+	}
+	n, err := w.Shipments.Outbox.EnqueueLegacyReturned(ctx, 200)
+	if err != nil {
+		if ctx.Err() == nil {
+			w.Log.Error().Err(err).Msg("shipment_exception_backfill_failed")
+		}
+		return
+	}
+	if n > 0 {
+		w.Log.Warn().Int64("shipments", n).Msg("shipment_exception_backfilled")
+		w.Shipments.wake()
 	}
 }
 

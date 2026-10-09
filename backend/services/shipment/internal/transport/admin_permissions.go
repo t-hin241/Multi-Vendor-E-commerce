@@ -19,6 +19,7 @@ var AdminRoutes = adminaccess.Routes{
 	"POST /api/shipments/admin/shipments/:id/deliver":               adminaccess.SupportManage,
 	"POST /api/shipments/admin/shipments/:id/failed-attempts":       adminaccess.SupportManage,
 	"POST /api/shipments/admin/shipments/:id/return":                adminaccess.SupportManage,
+	"POST /api/shipments/admin/shipments/:id/failure-reports":       adminaccess.SupportManage,
 	"POST /api/shipments/admin/shipments/:id/tracking":              adminaccess.SupportManage,
 	"POST /api/shipments/admin/shipments/:id/interception-decision": adminaccess.SupportManage,
 	"POST /api/shipments/admin/order-events/:id/retry":              adminaccess.PlatformConfigure,
