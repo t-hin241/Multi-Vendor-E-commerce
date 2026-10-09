@@ -51,10 +51,15 @@ const (
 	TypeDeliveryExceptionResolved Type = "delivery_exception_resolved"
 	// Return shipping (Order, AF-05); the reference is the order id.
 	TypeReturnShippingInstructions Type = "return_shipping_instructions"
+	// PW-009: reminder before the return dispatch deadline.
+	TypeReturnDispatchReminder Type = "return_dispatch_reminder"
 	// Policies (Vendor, AF-02); the reference is the shop id.
 	TypeMarketplacePolicyUpdated Type = "marketplace_policy_updated"
 	TypeShopPolicyApproved       Type = "shop_policy_approved"
 	TypeShopPolicyRejected       Type = "shop_policy_rejected"
+	// Return destination decisions (Vendor, PW-009); the reference is the shop id.
+	TypeReturnDestinationVerified Type = "return_destination_verified"
+	TypeReturnDestinationRejected Type = "return_destination_rejected"
 )
 
 // DefaultMaxAttempts bounds transient retries (about four hours of backoff).

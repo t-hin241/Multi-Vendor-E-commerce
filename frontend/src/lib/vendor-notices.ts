@@ -11,6 +11,11 @@ export const VENDOR_NOTICE_CATEGORIES: {
   { value: "orders", label: "Đơn hàng", hint: "Đơn mới đã thanh toán, yêu cầu hủy gói hàng" },
   { value: "returns", label: "Trả hàng", hint: "Yêu cầu trả hàng mới, hàng trả đang gửi về" },
   { value: "finance", label: "Thanh toán cho shop", hint: "Kết quả chuyển khoản payout" },
+  {
+    value: "support",
+    label: "Hỗ trợ khách hàng",
+    hint: "Yêu cầu hỗ trợ mới, sàn chờ shop phản hồi",
+  },
 ];
 
 // toggleCategory adds or removes one category, keeping the server's order.
@@ -45,6 +50,10 @@ const ACTION_LABELS: Record<string, string> = {
   return_dispatched: "Return parcel sent",
   payout_succeeded: "Payout sent",
   payout_failed: "Payout failed",
+  support_case_opened: "Support case opened",
+  support_waiting_shop: "Waiting for the shop",
+  delivery_goods_returned: "Failed delivery coming back",
+  redelivery_accepted: "Redelivery accepted",
 };
 
 export function vendorActionLabel(kind: string): string {

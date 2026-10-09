@@ -25,6 +25,10 @@ func TestVendorActionAllowlist(t *testing.T) {
 		{"order", "return_dispatched", domain.PurposeReturns, domain.TypeVendorReturnDispatched},
 		{"payment", "payout_succeeded", domain.PurposeFinance, domain.TypeVendorPayoutSucceeded},
 		{"payment", "payout_failed", domain.PurposeFinance, domain.TypeVendorPayoutFailed},
+		{"order", "support_case_opened", domain.PurposeSupport, domain.TypeVendorSupportCaseOpened},
+		{"order", "support_waiting_shop", domain.PurposeSupport, domain.TypeVendorSupportWaitingShop},
+		{"order", "delivery_goods_returned", domain.PurposeOrders, domain.TypeVendorDeliveryGoodsReturned},
+		{"order", "redelivery_accepted", domain.PurposeOrders, domain.TypeVendorRedeliveryAccepted},
 	}
 	for _, c := range cases {
 		a, err := domain.NewVendorAction(domain.VendorActionRequest{Source: c.source, EventID: "effect-1", VendorID: shop, ActionKind: c.kind, ReferenceID: "ref-1"}, now)
@@ -78,7 +82,8 @@ func TestSelectRecipients(t *testing.T) {
 // an account or a full URL.
 func TestVendorNoticesRender(t *testing.T) {
 	for _, typ := range []domain.Type{domain.TypeVendorNewOrder, domain.TypeVendorCancellationRequested, domain.TypeVendorReturnRequested,
-		domain.TypeVendorReturnDispatched, domain.TypeVendorPayoutSucceeded, domain.TypeVendorPayoutFailed} {
+		domain.TypeVendorReturnDispatched, domain.TypeVendorPayoutSucceeded, domain.TypeVendorPayoutFailed, domain.TypeVendorSupportCaseOpened,
+		domain.TypeVendorSupportWaitingShop, domain.TypeVendorDeliveryGoodsReturned, domain.TypeVendorRedeliveryAccepted} {
 		n, err := domain.NewNotification(domain.Request{EventID: "effect-1", Source: "order", UserID: user, Type: typ, ReferenceID: "0123456789abcdef"}, time.Now())
 		if err != nil {
 			t.Fatal(err)

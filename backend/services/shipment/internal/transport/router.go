@@ -15,9 +15,11 @@ import (
 	"shopee/backend/pkg/authjwt"
 	"shopee/backend/pkg/health"
 	"shopee/backend/pkg/middleware"
+	"shopee/backend/pkg/policyrules"
 	"shopee/backend/pkg/serviceauth"
 	"shopee/backend/pkg/shopaccess"
 	"shopee/backend/pkg/telemetry"
+	"shopee/backend/services/shipment/internal/domain"
 )
 
 func NewRouter(
@@ -113,6 +115,9 @@ func NewRouter(
 		adminGroup.POST("/shipments/:id/interception-decision", opsHandler.ResolveInterception)
 		adminGroup.POST("/order-events/:id/retry", opsHandler.RetryOrderEvent)
 	}
+
+	// AF-02/PW-010: Vendor asks before citing a Shipment rule in a policy.
+	r.GET("/internal/policy-rules/readiness", internal.Allow("vendor"), policyrules.Handler(domain.RuleReadiness))
 
 	internalGroup := r.Group("/internal/shipments", internal.Allow("order"))
 	{

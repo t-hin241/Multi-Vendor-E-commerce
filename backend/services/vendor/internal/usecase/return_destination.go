@@ -110,7 +110,18 @@ func (u *ReturnDestinationUseCase) Decide(ctx context.Context, adminID, vendorID
 		if verify {
 			action = "return_destination_verified"
 		}
-		return u.Audit.Create(ctx, vendorID, adminID, action, &why, version)
+		if err := u.Audit.Create(ctx, vendorID, adminID, action, &why, version); err != nil {
+			return err
+		}
+		// PW-009: the owner hears the decision (once per version and decision).
+		if u.Ops.Notices == nil {
+			return nil
+		}
+		v, err := u.Vendors.FindByID(ctx, vendorID)
+		if err != nil {
+			return err
+		}
+		return u.Ops.Notices.Queue(ctx, vendorID, v.UserID, action, version)
 	})
 	if errors.Is(err, repository.ErrStaleVendor) {
 		return nil, apperror.Conflict("The return destination changed since you loaded it; reload and check it again")

@@ -12,6 +12,7 @@ import (
 
 	"shopee/backend/pkg/adminaccess"
 	"shopee/backend/pkg/apperror"
+	"shopee/backend/pkg/events"
 	"shopee/backend/pkg/shopaccess"
 	"shopee/backend/services/order/internal/domain"
 	"shopee/backend/services/order/internal/repository"
@@ -204,6 +205,10 @@ func (uc *OrderUseCase) CreateSupportCase(ctx context.Context, buyerID string, i
 		notice := domain.NewNotifyEffect(order.ID, buyerID, notifySupportCaseOpened)
 		notice.Target = notifySupportCaseOpened + ":" + c.ID
 		if err := uc.Effects.Enqueue(ctx, notice); err != nil {
+			return err
+		}
+		// PW-009: the shop hears about the case too.
+		if err := uc.noticeVendor(ctx, order.ID, c.VendorID, c.VendorOrderID, events.VendorActionSupportCaseOpened, c.ID); err != nil {
 			return err
 		}
 		result = c
@@ -574,7 +579,14 @@ func (uc *OrderUseCase) ChangeSupportCaseStatus(ctx context.Context, adminID, ca
 		if c.Status == domain.CaseResolutionPending || c.Status == domain.CaseResolved {
 			return apperror.Conflict("A " + string(c.Status) + " case changes status only through its resolution")
 		}
-		return uc.moveCase(ctx, c, to, "admin", &adminID, "status_changed", reason)
+		if err := uc.moveCase(ctx, c, to, "admin", &adminID, "status_changed", reason); err != nil {
+			return err
+		}
+		if to != domain.CaseWaitingVendor {
+			return nil
+		}
+		// PW-009: the shop is told the first time the case waits for it.
+		return uc.noticeVendor(ctx, c.OrderID, c.VendorID, c.VendorOrderID, events.VendorActionSupportWaitingShop, c.ID)
 	})
 }
 

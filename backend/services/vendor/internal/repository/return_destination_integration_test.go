@@ -59,6 +59,12 @@ func TestReturnDestinationNeedsVerificationOfTheCurrentVersion(t *testing.T) {
 	if d, err = uc.Decide(ctx, f.admin, v.ID, 2, true, "Đã kiểm lại"); err != nil || !d.Verified() || d.Address.StreetAddress != "New street" {
 		t.Fatalf("the new version verified: %+v %v", d, err)
 	}
+	// PW-009: the owner is told about each version's decision, once.
+	var notices int
+	if err := f.db.QueryRow(ctx, `SELECT count(*) FROM vendor_notification_outbox WHERE vendor_id = $1 AND user_id = $2
+		AND type = 'return_destination_verified'`, v.ID, f.owner).Scan(&notices); err != nil || notices != 2 {
+		t.Fatalf("expected a notice per verified version, got %d %v", notices, err)
+	}
 	if err := f.addresses.Delete(ctx, f.owner, v.ID, pickup.ID); err == nil {
 		t.Fatal("the destination's address cannot be deleted")
 	}

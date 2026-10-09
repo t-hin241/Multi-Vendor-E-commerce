@@ -80,15 +80,18 @@ type MarketplacePolicy struct {
 }
 
 // ruleCatalog lists the rule references a policy may cite in this version:
-// which kind of policy describes it and which service enforces it. A rule
-// owned by a service without a readiness contract yet (Payment, Shipment)
-// cannot be cited: the text could promise what no code enforces.
+// which kind of policy describes it and which service enforces it. Each
+// owner answers /internal/policy-rules/readiness (Order; Payment and
+// Shipment since PW-010), so a policy never promises what no code enforces.
 var ruleCatalog = map[string]struct {
 	Kind  PolicyKind
 	Owner string
 }{
 	"order.returns_window":         {PolicyReturns, "order"},
 	"order.return_shipping_refund": {PolicyReturns, "order"},
+	"shipment.fee_basis":           {PolicyShipping, "shipment"},
+	"shipment.quote_validity":      {PolicyShipping, "shipment"},
+	"payment.payout_method":        {PolicyTerms, "payment"},
 }
 
 // requiredRules must be cited by a policy of that kind, so the published

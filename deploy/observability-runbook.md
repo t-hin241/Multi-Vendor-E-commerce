@@ -67,6 +67,42 @@ Không đặt giới hạn CPU: throttling sẽ che mất chỗ đang tốn th�
 - **DB:** Database → "Time waiting for a connection" (pool thiếu) và "Statements by total time" (câu nặng). Pool thiếu thì xem lại tổng `DB_MAX_CONNS` trước khi tăng.
 - **Hết RAM / restart:** Resources → "Memory used / limit" và "Restarts".
 
+## Hàng việc cần người xử lý (PW-008)
+
+Mỗi service tự khai báo các hàng việc của các tính năng AF trong `internal/repository/work_queues.go`. Prometheus đọc chúng mỗi lần scrape, mỗi truy vấn giới hạn 2 giây. Metric:
+
+- `work_queue_attention_items{queue, severity}`: số việc **đã quá ngưỡng của chính hàng đó**;
+- `work_queue_oldest_attention_seconds`: tuổi của việc cũ nhất;
+- `work_queue_probe_success`: 1 khi đọc được hàng.
+
+Alert ở `alerts.yml`, nhóm `work_queues`:
+
+- `WorkQueueCritical`: hàng tiền/kho có việc, kéo dài 10 phút;
+- `WorkQueueWarning`: hàng khác có việc, kéo dài 30 phút;
+- `WorkQueueUnreadable`: không đọc được hàng.
+
+| Service | Hàng (mức) | Xử lý |
+|---|---|---|
+| Order | `order_effects_parked` (critical) | Admin → effect parked: sửa nguyên nhân rồi retry |
+| Order | `settlement_holds_needs_review`, `settlement_holds_preparing_1h` (critical) | `order-runbook.md` (sổ hold): kiểm Payment; claim chưa chuyển thì Cancel payout item |
+| Order | `cancellations_stuck` (critical) | `paid-cancellation-runbook.md` |
+| Order | `delivery_exceptions_stuck` (critical) | `delivery-exception-runbook.md` |
+| Order | `return_shipping_review` (warning) | `return-shipping-runbook.md` |
+| Order, Payment, Shipment | `case_sla_overdue` (warning) | `/admin/work-items` (`case-sla-runbook.md`) |
+| Payment | `manual_refund_unknown`, `manual_refund_submitted_24h` (critical) | `manual-refund-runbook.md`: đối chiếu sao kê |
+| Payment | `refund_destination_unverified_24h`, `approvals_expiring` (warning) | Xác minh tài khoản; duyệt hoặc từ chối yêu cầu trước khi hết hạn |
+| Payment | `settlement_holds_payout_claimed` (critical) | Hold đến sau claim: Cancel payout item nếu chưa chuyển, hoặc ghi khoản phải thu |
+| Payment | `outcome_sync_review` (critical), `vendor_notices_review` (warning) | Kết quả thanh toán/hoàn tiền hoặc thông báo payout không tới được Order/Notification: admin → review |
+| Shipment | `return_shipments_stale` (warning) | Kiện trả đi quá 10 ngày: hỏi hãng |
+| Notification | `vendor_actions_need_review`, `notifications_parked` (warning) | `vendor-action-notices-runbook.md`, `notification-runbook.md` |
+| Vendor | `staff_invitations_parked`, `return_destinations_unverified_24h` (warning) | `shop-staff-runbook.md`, `return-shipping-runbook.md` |
+
+Thêm một hàng mới:
+
+1. Khai báo truy vấn đã có sẵn ngưỡng, ví dụ `... AND updated_at < now() - interval '24 hours'`.
+2. Test `TestWorkQueuesReadOnTheSchema` của service phải đạt.
+3. Thêm một dòng vào bảng trên.
+
 ## Còn thiếu
 
 - Kênh gửi cảnh báo thật (Alertmanager → email/Telegram) và lịch trực: cần chọn kênh và người nhận.

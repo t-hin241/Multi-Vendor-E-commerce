@@ -56,6 +56,8 @@ var templates = map[Type]Template{
 		"Sự cố giao hàng của đơn #%s đã có kết quả. Xem chi tiết trong trang đơn hàng; khoản hoàn tiền (nếu có) được báo riêng khi đã xác nhận."},
 	TypeReturnShippingInstructions: {"v1", "Hướng dẫn gửi trả hàng cho đơn #%s",
 		"Yêu cầu trả hàng của đơn #%s đã được chấp nhận. Mở trang Trả hàng để xem địa chỉ nhận, mã trả hàng và hạn gửi; sau khi gửi, nhập mã vận đơn. Tiền hoàn chỉ được báo khi người bán đã nhận hàng và khoản hoàn được xác nhận."},
+	TypeReturnDispatchReminder: {"v1", "Sắp hết hạn gửi hàng trả cho đơn #%s",
+		"Yêu cầu trả hàng của đơn #%s sắp hết hạn gửi. Mở trang chi tiết đơn hàng để xem địa chỉ nhận và báo đã gửi kèm mã vận đơn. Gửi trễ vẫn được xem xét, nhưng có thể chậm hoàn tiền."},
 	// AF-08 shop work notices: the reference is the vendor order, the
 	// request or the payout item. Never the buyer's address, an amount or
 	// an account; the link only opens the console, where access is checked.
@@ -71,6 +73,19 @@ var templates = map[Type]Template{
 		"Khoản thanh toán #%s đã được ghi nhận là chuyển thành công tới tài khoản nhận tiền của shop. Xem chi tiết ở trang tổng quan /vendor."},
 	TypeVendorPayoutFailed: {"v1", "Khoản thanh toán cho shop chưa chuyển được (#%s)",
 		"Khoản thanh toán #%s chưa chuyển được và sẽ được đưa vào đợt sau. Kiểm tra tài khoản nhận tiền tại /vendor/payout-accounts; sàn không bao giờ hỏi mật khẩu hay mã OTP qua email."},
+	// PW-009: more shop work, same rules (reference only, console link).
+	TypeVendorSupportCaseOpened: {"v1", "Người mua mở yêu cầu hỗ trợ (#%s)",
+		"Người mua đã mở yêu cầu hỗ trợ #%s cho một gói hàng của shop. Mở /vendor/support để xem và trả lời trong hạn."},
+	TypeVendorSupportWaitingShop: {"v1", "Sàn đang chờ shop phản hồi (#%s)",
+		"Yêu cầu hỗ trợ #%s đang chờ shop cung cấp thông tin. Mở /vendor/support để trả lời; quá hạn, sàn sẽ quyết định với thông tin đang có."},
+	TypeVendorDeliveryGoodsReturned: {"v1", "Hàng giao thất bại đang về shop (#%s)",
+		"Một kiện hàng giao thất bại (#%s) đang được trả về shop. Khi nhận được, mở /vendor/orders để ghi phiếu nhận hàng theo tình trạng từng sản phẩm."},
+	TypeVendorRedeliveryAccepted: {"v1", "Người mua đồng ý giao lại (#%s)",
+		"Người mua đã xác nhận giao lại cho hồ sơ #%s. Mở /vendor/orders để chuẩn bị lần giao mới; địa chỉ nhận do đơn vị vận chuyển cung cấp."},
+	TypeReturnDestinationVerified: {"v1", "Địa chỉ nhận hàng trả của cửa hàng %s đã được xác minh",
+		"Địa chỉ nhận hàng trả của cửa hàng (mã %s) đã được sàn xác minh. Hướng dẫn gửi trả hàng mới sẽ dùng địa chỉ này."},
+	TypeReturnDestinationRejected: {"v1", "Địa chỉ nhận hàng trả của cửa hàng %s chưa được xác minh",
+		"Địa chỉ nhận hàng trả của cửa hàng (mã %s) chưa được xác minh. Xem lý do ở trang Vận chuyển (/vendor/shipping), chọn lại địa chỉ hoặc giờ nhận rồi chờ sàn xác minh."},
 	TypeMarketplacePolicyUpdated: {"v1", "Chính sách sàn có phiên bản mới (cửa hàng %s)",
 		"Sàn đã công bố phiên bản chính sách mới áp dụng cho cửa hàng (mã %s). Đơn đã đặt giữ chính sách cũ; xem nội dung tại trang Chính sách."},
 	TypeShopPolicyApproved: {"v1", "Chính sách cửa hàng %s đã được duyệt",

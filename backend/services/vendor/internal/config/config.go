@@ -20,6 +20,8 @@ type Config struct {
 	Base                             config.Base
 	Internal                         config.InternalServices
 	CatalogURL, OrderURL, PaymentURL string
+	// ShipmentURL answers rule readiness for shipping policies (PW-010).
+	ShipmentURL string
 	NotificationServiceURL           string
 	ObjectStorage                    objectstorage.Config
 	// VersionedPolicies is FEATURE_VERSIONED_POLICIES_ENABLED (AF-02).
@@ -91,7 +93,7 @@ func Load() (Config, error) {
 		AdminReauth: adminReauth,
 		ShopStaff:   staff, StaffInvitesPaused: paused, StaffFingerprintKey: staffKey, StaffAcceptURL: acceptURL,
 		VersionedPolicies: versioned,
-		PaymentURL:        envDefault("PAYMENT_SERVICE_URL", "http://payment:8087"), PayoutKey: payoutKey, PayoutServiceKey: payoutServiceKey, Internal: internal, CatalogURL: envDefault("CATALOG_SERVICE_URL", "http://catalog:8083"), OrderURL: envDefault("ORDER_SERVICE_URL", "http://order:8086"),
+		PaymentURL:        envDefault("PAYMENT_SERVICE_URL", "http://payment:8087"), PayoutKey: payoutKey, PayoutServiceKey: payoutServiceKey, Internal: internal, CatalogURL: envDefault("CATALOG_SERVICE_URL", "http://catalog:8083"), OrderURL: envDefault("ORDER_SERVICE_URL", "http://order:8086"), ShipmentURL: envDefault("SHIPMENT_SERVICE_URL", "http://shipment:8088"),
 		Base:                   base,
 		NotificationServiceURL: notificationServiceURL,
 		ObjectStorage:          objectStorageCfg,

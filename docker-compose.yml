@@ -306,6 +306,8 @@ services:
       CATALOG_SERVICE_URL: http://catalog:8083
       ORDER_SERVICE_URL: http://order:8086
       PAYMENT_SERVICE_URL: http://payment:8087
+      # PW-010: Shipment answers rule readiness for shipping policies.
+      SHIPMENT_SERVICE_URL: http://shipment:8088
       VENDOR_PAYOUT_ENCRYPTION_KEY: ${VENDOR_PAYOUT_ENCRYPTION_KEY:?set VENDOR_PAYOUT_ENCRYPTION_KEY in .env}
       VENDOR_PAYOUT_SERVICE_KEY: ${VENDOR_PAYOUT_SERVICE_KEY:?set VENDOR_PAYOUT_SERVICE_KEY in .env}
       DATABASE_URL: postgres://vendor_app:${VENDOR_DB_PASSWORD:?set VENDOR_DB_PASSWORD in .env}@postgres:5432/vendor_db?sslmode=disable

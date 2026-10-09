@@ -10,6 +10,18 @@ export const APP = "http://localhost:3100";
 
 type Json = Record<string, unknown>;
 export type MockUser = { id: string; email: string; full_name: string; role: string };
+export type InboxEntry = {
+  id: string;
+  type: string;
+  title: string;
+  body: string;
+  reference_type: string;
+  reference_id: string;
+  link: string;
+  read_at: string | null;
+  hidden: boolean;
+  created_at: string;
+};
 
 // Distinct in the first 8 characters too (the UI shows "#" + 8 characters).
 const uuid = (n: number) =>
@@ -32,6 +44,11 @@ export class MockApi {
   changeTotalOnce = false;
   products = new Map<string, Json>();
   reviews = new Map<string, Json[]>();
+  // AF-09 inbox: items per user id, newest first; switches for one test.
+  inbox = new Map<string, InboxEntry[]>();
+  inboxEnabled = true;
+  inboxFails = false;
+  readMarkers: string[] = [];
   private nextId = 100;
 
   constructor() {
@@ -111,6 +128,90 @@ export class MockApi {
     };
     this.orders.set(id, order);
     return order;
+  }
+
+  // addNotice puts a notice at the top of user's inbox.
+  addNotice(user: MockUser, title: string, link: string) {
+    const id = uuid(this.nextId++);
+    const list = this.inbox.get(user.id) ?? [];
+    const entry: InboxEntry = {
+      id,
+      type: "order_paid",
+      title,
+      body: "Nội dung chỉ là văn bản.",
+      reference_type: "order",
+      reference_id: id,
+      link,
+      read_at: null,
+      hidden: false,
+      created_at: new Date(Date.now() - list.length * 60_000).toISOString(),
+    };
+    list.unshift(entry);
+    this.inbox.set(user.id, list);
+    return entry;
+  }
+
+  private visibleInbox(user: MockUser) {
+    return (this.inbox.get(user.id) ?? []).filter((n) => !n.hidden);
+  }
+
+  private unread(user: MockUser) {
+    return this.visibleInbox(user).filter((n) => !n.read_at).length;
+  }
+
+  private handleInbox(
+    route: Route,
+    me: MockUser,
+    path: string,
+    method: string,
+    url: URL,
+    body: Json,
+  ) {
+    if (!this.inboxEnabled) {
+      return this.fail(route, 404, "feature_disabled", "The notification inbox is not enabled");
+    }
+    if (this.inboxFails) return this.fail(route, 500, "internal_error", "Something went wrong");
+    if (path === "/api/notifications/inbox/unread-count") {
+      return this.ok(route, { unread_count: this.unread(me) });
+    }
+    if (path === "/api/notifications/inbox" && method === "GET") {
+      const unreadOnly = url.searchParams.get("unread_only") === "true";
+      const limit = Number(url.searchParams.get("limit") ?? 20);
+      const start = Number(url.searchParams.get("cursor") ?? 0);
+      const all = this.visibleInbox(me).filter((n) => !unreadOnly || !n.read_at);
+      const page = all.slice(start, start + limit);
+      return this.ok(route, {
+        items: page.map(({ hidden: _hidden, ...n }) => n),
+        next_cursor: start + limit < all.length ? String(start + limit) : null,
+        as_of: new Date().toISOString(),
+      });
+    }
+    if (path === "/api/notifications/inbox/read-markers" && method === "POST") {
+      const list = this.visibleInbox(me);
+      const through = list.findIndex((n) => n.id === body.through_id);
+      if (through < 0) return this.fail(route, 404, "not_found", "Notice not found");
+      this.readMarkers.push(String(body.through_id));
+      let affected = 0;
+      for (const n of list.slice(through)) {
+        if (!n.read_at) {
+          n.read_at = new Date().toISOString();
+          affected++;
+        }
+      }
+      return this.ok(route, { affected, unread_count: this.unread(me) });
+    }
+    const one = path.match(/^\/api\/notifications\/inbox\/([0-9a-f-]{36})(\/read)?$/);
+    const item = one ? (this.inbox.get(me.id) ?? []).find((n) => n.id === one[1]) : undefined;
+    if (!item) return this.fail(route, 404, "not_found", "Notice not found");
+    if (one?.[2] && method === "PUT") {
+      item.read_at = item.read_at ?? new Date().toISOString();
+      return this.ok(route, { id: item.id, read_at: item.read_at });
+    }
+    if (method === "DELETE") {
+      item.hidden = true;
+      return this.ok(route, { id: item.id, hidden_at: new Date().toISOString() });
+    }
+    return this.fail(route, 404, "not_found", "Not found in mock");
   }
 
   private cart() {
@@ -223,6 +324,14 @@ export class MockApi {
 
     const me = this.caller(route);
     const signedIn = me !== null;
+    if (path.startsWith("/api/notifications/inbox")) {
+      return me
+        ? this.handleInbox(route, me, path, method, url, body)
+        : this.fail(route, 401, "unauthorized", "Sign in");
+    }
+    if (path === "/api/notifications/preferences") {
+      return this.fail(route, 404, "feature_disabled", "Notification preferences are not enabled");
+    }
     if (path === "/api/cart" && method === "GET") {
       return signedIn
         ? this.ok(route, this.cart())

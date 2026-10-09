@@ -24,6 +24,16 @@ const (
 	// VendorActionReturnDispatched: the buyer sent a return parcel to the
 	// shop (AF-05); the shop records the goods receipt on arrival.
 	VendorActionReturnDispatched = "return_dispatched"
+	// PW-009: a buyer opened a support case on the shop's package, or the
+	// marketplace is waiting for the shop's answer on one (ReferenceID is
+	// the case id).
+	VendorActionSupportCaseOpened  = "support_case_opened"
+	VendorActionSupportWaitingShop = "support_waiting_shop"
+	// PW-009 (AF-04): a failed delivery came back to the shop, which must
+	// record the goods receipt; the buyer accepted a redelivery, which the
+	// shop prepares (ReferenceID is the delivery exception id).
+	VendorActionDeliveryGoodsReturned = "delivery_goods_returned"
+	VendorActionRedeliveryAccepted    = "redelivery_accepted"
 )
 
 // Payout outcomes (Payment → Notification).

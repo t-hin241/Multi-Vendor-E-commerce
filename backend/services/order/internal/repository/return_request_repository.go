@@ -236,6 +236,18 @@ func (r *ReturnRequestRepository) ListDispatchOverdue(ctx context.Context, now t
 		ORDER BY rr.dispatch_deadline, rr.id LIMIT $2`, now, limit)
 }
 
+// ListDispatchDueSoon lists returns waiting for the buyer's parcel whose
+// deadline falls before until and whose reminder was not queued yet
+// (PW-009: one reminder per return).
+func (r *ReturnRequestRepository) ListDispatchDueSoon(ctx context.Context, now, until time.Time, limit int) ([]*domain.ReturnRequest, error) {
+	return r.list(ctx, `SELECT `+returnRequestColumns+` FROM return_requests rr WHERE rr.status = 'approved'
+		AND rr.shipping_status = 'awaiting_dispatch' AND rr.dispatch_overdue_at IS NULL
+		AND rr.dispatch_deadline >= $1 AND rr.dispatch_deadline < $2
+		AND NOT EXISTS (SELECT 1 FROM order_effects e WHERE e.order_id = rr.order_id AND e.kind = 'notify'
+			AND e.target = 'return_dispatch_reminder:' || rr.id::text)
+		ORDER BY rr.dispatch_deadline, rr.id LIMIT $3`, now, until, limit)
+}
+
 // ShippingCounts feed the worker report.
 func (r *ReturnRequestRepository) ShippingCounts(ctx context.Context) (missing, overdue, inTransit, disputed int64, err error) {
 	err = connection(ctx, r.pool).QueryRow(ctx, `SELECT

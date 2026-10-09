@@ -286,3 +286,23 @@ func TestNoticePreferences(t *testing.T) {
 		t.Fatal("event recorded while the feature is off")
 	}
 }
+
+// PW-009: support notices use their own purpose (support.reply at Vendor)
+// and staff may opt into the category.
+func TestSupportNoticesHaveTheirOwnCategory(t *testing.T) {
+	e := newShopEnv(t)
+	uc := e.useCase(roles{})
+	cats := []string{"support"}
+	if _, err := uc.UpdatePreferences(t.Context(), e.clerk, usecase.PreferenceChange{VendorCategories: &cats}); err != nil {
+		t.Fatal(err)
+	}
+	a, _, err := uc.Record(t.Context(), domain.VendorActionRequest{Source: "order", EventID: "effect-support", VendorID: e.shop,
+		ActionKind: "support_case_opened", ReferenceID: uuid.NewString()})
+	if err != nil || a.Purpose != domain.PurposeSupport {
+		t.Fatalf("support notice: %+v %v", a, err)
+	}
+	e.resolve(t)
+	if n := e.count(t, `SELECT count(*) FROM notifications WHERE type = 'vendor_support_case_opened' AND user_id IN ($1, $2)`, e.owner, e.clerk); n != 2 {
+		t.Fatalf("owner and the opted-in clerk, got %d", n)
+	}
+}

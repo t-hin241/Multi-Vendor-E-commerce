@@ -59,6 +59,10 @@ func main() {
 	if err := telemetry.RegisterOutboxes(dbPool, repository.Backlogs...); err != nil {
 		log.Fatal().Err(err).Msg("outbox metrics failed")
 	}
+	// PW-008: operator queues past their threshold, for alerting.
+	if err := telemetry.RegisterWorkQueues(dbPool, repository.WorkQueues...); err != nil {
+		log.Fatal().Err(err).Msg("work queue metrics failed")
+	}
 	// Plan 14: the runtime role reads and writes rows of this database only.
 	if problems, err := postgres.CheckRuntimeRole(ctx, dbPool, cfg.Base.Env == "production"); err != nil {
 		log.Fatal().Err(err).Msg("database role check failed")
@@ -108,7 +112,7 @@ func main() {
 	vendorUseCase := usecase.NewVendorUseCase(vendorRepo, auditLogRepo, objectStore, log, ops)
 	policyRepo := repository.PolicyRepository{Pool: dbPool}
 	policyUseCase := &usecase.PolicyUseCase{Policies: policyRepo, Vendors: vendorRepo, Audit: auditLogRepo, Notices: notices,
-		Rules: adapter.NewRuleReadinessClient(map[string]string{"order": cfg.OrderURL}, cfg.Internal.Key), Ops: ops,
+		Rules: adapter.NewRuleReadinessClient(map[string]string{"order": cfg.OrderURL, "payment": cfg.PaymentURL, "shipment": cfg.ShipmentURL}, cfg.Internal.Key), Ops: ops,
 		Enabled: cfg.VersionedPolicies, Log: log}
 	sendPolicy := adapter.BusPolicySender(bus.Bus)
 	if !bus.Publish {

@@ -2883,7 +2883,7 @@ export function retryNotification(
 
 // ---------- AF-08: shop work notices ----------
 
-export type VendorNoticeCategory = "orders" | "returns" | "finance";
+export type VendorNoticeCategory = "orders" | "returns" | "finance" | "support";
 
 // A person's own choices. The owner of a shop receives every category
 // whatever is stored; staff receive only what they opted into. Shop

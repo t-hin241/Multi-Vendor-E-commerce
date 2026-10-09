@@ -15,8 +15,10 @@ import (
 	"shopee/backend/pkg/authjwt"
 	"shopee/backend/pkg/health"
 	"shopee/backend/pkg/middleware"
+	"shopee/backend/pkg/policyrules"
 	"shopee/backend/pkg/serviceauth"
 	"shopee/backend/pkg/telemetry"
+	"shopee/backend/services/payment/internal/domain"
 )
 
 type Handlers struct {
@@ -104,6 +106,9 @@ func NewRouter(env string, log zerolog.Logger, jwtManager *authjwt.Manager, h Ha
 		adminGroup.POST("/approval-requests/:id/cancellation", h.Approval.Cancel)
 		adminGroup.POST("/approval-requests/:id/decisions", h.Approval.Decide)
 	}
+
+	// AF-02/PW-010: Vendor asks before citing a Payment rule in a policy.
+	r.GET("/internal/policy-rules/readiness", internal.Allow("vendor"), policyrules.Handler(domain.RuleReadiness))
 
 	internalGroup := r.Group("/internal", internal.Allow("order"))
 	{

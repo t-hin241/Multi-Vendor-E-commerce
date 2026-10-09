@@ -24,6 +24,7 @@ type ReturnShippingPort interface {
 	AddReceipt(ctx context.Context, g *domain.ReturnReceipt) error
 	LatestReceipt(ctx context.Context, returnID string) (*domain.ReturnReceipt, error)
 	ListDispatchOverdue(ctx context.Context, now time.Time, limit int) ([]*domain.ReturnRequest, error)
+	ListDispatchDueSoon(ctx context.Context, now, until time.Time, limit int) ([]*domain.ReturnRequest, error)
 	ShippingCounts(ctx context.Context) (missing, overdue, inTransit, disputed int64, err error)
 }
 
@@ -41,7 +42,13 @@ type ReturnParcelGateway interface {
 	ReturnShipmentException(ctx context.Context, shipmentID, reason string) error
 }
 
-const notifyReturnShippingInstructions = "return_shipping_instructions"
+const (
+	notifyReturnShippingInstructions = "return_shipping_instructions"
+	// PW-009: the buyer is reminded once, returnDispatchReminder before the
+	// deadline, if the parcel was not reported sent.
+	notifyReturnDispatchReminder = "return_dispatch_reminder"
+	returnDispatchReminder       = 48 * time.Hour
+)
 
 // returnShippingOn: new authorizations need the flag and the wiring;
 // returns already authorized keep going after the flag is turned off.
@@ -667,6 +674,41 @@ func (uc *OrderUseCase) FlagOverdueReturns(ctx context.Context) {
 			continue
 		}
 		uc.Log.Warn().Str("return_id", found.ID).Msg("order_return_dispatch_overdue")
+	}
+}
+
+// RemindReturnDispatch queues one reminder per return whose dispatch
+// deadline is near and whose parcel was not reported sent (PW-009). The
+// notify effect's target makes a second reminder impossible.
+func (uc *OrderUseCase) RemindReturnDispatch(ctx context.Context) {
+	if uc.ReturnShipping == nil {
+		return
+	}
+	now := uc.Now().UTC()
+	due, err := uc.ReturnShipping.ListDispatchDueSoon(ctx, now, now.Add(returnDispatchReminder), 100)
+	if err != nil {
+		if ctx.Err() == nil {
+			uc.Log.Error().Err(err).Msg("order_return_reminder_scan_failed")
+		}
+		return
+	}
+	for _, found := range due {
+		err := uc.withOrder(ctx, found.OrderID, func(ctx context.Context) error {
+			rr, err := uc.Returns.FindByID(ctx, found.ID)
+			if err != nil || rr.Status != domain.ReturnApproved || rr.ShippingStatus == nil || *rr.ShippingStatus != domain.ShippingAwaitingDispatch {
+				return err
+			}
+			notice := domain.NewNotifyEffect(rr.OrderID, rr.BuyerID, notifyReturnDispatchReminder)
+			notice.Target = notifyReturnDispatchReminder + ":" + rr.ID
+			return uc.Effects.Enqueue(ctx, notice)
+		})
+		if err != nil {
+			if ctx.Err() == nil {
+				uc.Log.Error().Err(err).Str("return_id", found.ID).Msg("order_return_reminder_failed")
+			}
+			continue
+		}
+		uc.Log.Info().Str("return_id", found.ID).Msg("order_return_dispatch_reminded")
 	}
 }
 

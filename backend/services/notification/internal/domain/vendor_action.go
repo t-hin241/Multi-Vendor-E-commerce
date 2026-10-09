@@ -20,11 +20,14 @@ const (
 	PurposeOrders  = "orders"
 	PurposeReturns = "returns"
 	PurposeFinance = "finance"
+	// PurposeSupport (PW-009): support cases waiting for the shop
+	// (support.reply).
+	PurposeSupport = "support"
 )
 
 // VendorCategories are the optional categories a staff member may opt
 // into. The owner always receives every category.
-var VendorCategories = []string{PurposeOrders, PurposeReturns, PurposeFinance}
+var VendorCategories = []string{PurposeOrders, PurposeReturns, PurposeFinance, PurposeSupport}
 
 // Shop notice templates.
 const (
@@ -34,6 +37,11 @@ const (
 	TypeVendorReturnDispatched      Type = "vendor_return_dispatched"
 	TypeVendorPayoutSucceeded       Type = "vendor_payout_succeeded"
 	TypeVendorPayoutFailed          Type = "vendor_payout_failed"
+	// PW-009.
+	TypeVendorSupportCaseOpened     Type = "vendor_support_case_opened"
+	TypeVendorSupportWaitingShop    Type = "vendor_support_waiting_shop"
+	TypeVendorDeliveryGoodsReturned Type = "vendor_delivery_goods_returned"
+	TypeVendorRedeliveryAccepted    Type = "vendor_redelivery_accepted"
 )
 
 type vendorActionKind struct {
@@ -45,12 +53,16 @@ type vendorActionKind struct {
 // another producer sends is refused, so Payment cannot announce an order
 // and Order cannot announce a payout.
 var vendorActionKinds = map[string]vendorActionKind{
-	"order:new_order":              {PurposeOrders, TypeVendorNewOrder},
-	"order:cancellation_requested": {PurposeOrders, TypeVendorCancellationRequested},
-	"order:return_requested":       {PurposeReturns, TypeVendorReturnRequested},
-	"order:return_dispatched":      {PurposeReturns, TypeVendorReturnDispatched},
-	"payment:payout_succeeded":     {PurposeFinance, TypeVendorPayoutSucceeded},
-	"payment:payout_failed":        {PurposeFinance, TypeVendorPayoutFailed},
+	"order:new_order":               {PurposeOrders, TypeVendorNewOrder},
+	"order:cancellation_requested":  {PurposeOrders, TypeVendorCancellationRequested},
+	"order:return_requested":        {PurposeReturns, TypeVendorReturnRequested},
+	"order:return_dispatched":       {PurposeReturns, TypeVendorReturnDispatched},
+	"payment:payout_succeeded":      {PurposeFinance, TypeVendorPayoutSucceeded},
+	"payment:payout_failed":         {PurposeFinance, TypeVendorPayoutFailed},
+	"order:support_case_opened":     {PurposeSupport, TypeVendorSupportCaseOpened},
+	"order:support_waiting_shop":    {PurposeSupport, TypeVendorSupportWaitingShop},
+	"order:delivery_goods_returned": {PurposeOrders, TypeVendorDeliveryGoodsReturned},
+	"order:redelivery_accepted":     {PurposeOrders, TypeVendorRedeliveryAccepted},
 }
 
 type VendorActionStatus string
@@ -181,7 +193,7 @@ func NormalizeVendorCategories(in []string) ([]string, error) {
 	for _, c := range in {
 		c = strings.TrimSpace(c)
 		if !slices.Contains(VendorCategories, c) {
-			return nil, fmt.Errorf("unknown category %q; use orders, returns or finance", c)
+			return nil, fmt.Errorf("unknown category %q; use orders, returns, finance or support", c)
 		}
 		if !slices.Contains(out, c) {
 			out = append(out, c)

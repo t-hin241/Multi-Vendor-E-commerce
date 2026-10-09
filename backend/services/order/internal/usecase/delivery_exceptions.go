@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 
 	"shopee/backend/pkg/apperror"
+	"shopee/backend/pkg/events"
 	"shopee/backend/pkg/shopaccess"
 	"shopee/backend/services/order/internal/adapter"
 	"shopee/backend/services/order/internal/domain"
@@ -142,6 +143,9 @@ func (uc *OrderUseCase) ApplyShipmentException(ctx context.Context, f ShipmentEx
 		if err := uc.notifyDelivery(ctx, d, notifyDeliveryExceptionOpened, d.ID); err != nil {
 			return err
 		}
+		if err := uc.noticeGoodsReturned(ctx, d, f.Type); err != nil {
+			return err
+		}
 		opened = d
 		return nil
 	})
@@ -173,6 +177,9 @@ func (uc *OrderUseCase) applyFactToOpen(ctx context.Context, d *domain.DeliveryE
 			Action: "fact_other_shipment", ToStatus: string(d.Status), Note: ptr("Shipment " + f.ShipmentID + " reported " + f.Type)})
 	}
 	d.CarrierOutcome, d.FailedAttempts = f.Type, max(d.FailedAttempts, f.FailedAttempts)
+	if err := uc.noticeGoodsReturned(ctx, d, f.Type); err != nil {
+		return err
+	}
 	to := d.Status
 	switch d.Status {
 	case domain.DXInvestigating, domain.DXRedeliveryPending:
@@ -243,6 +250,15 @@ func (uc *OrderUseCase) moveDelivery(ctx context.Context, d *domain.DeliveryExce
 	fromStatus := string(from)
 	return uc.DeliveryExceptions.AddEvent(ctx, &domain.DeliveryExceptionEvent{ExceptionID: d.ID, ActorID: actor, ActorRole: role, Action: action,
 		FromStatus: &fromStatus, ToStatus: string(to), Note: note})
+}
+
+// noticeGoodsReturned tells the shop (PW-009) that a failed delivery is
+// coming back and needs a goods receipt; once per case.
+func (uc *OrderUseCase) noticeGoodsReturned(ctx context.Context, d *domain.DeliveryException, fact string) error {
+	if fact != domain.FactReturned {
+		return nil
+	}
+	return uc.noticeVendor(ctx, d.OrderID, d.VendorID, d.VendorOrderID, events.VendorActionDeliveryGoodsReturned, d.ID)
 }
 
 func (uc *OrderUseCase) notifyDelivery(ctx context.Context, d *domain.DeliveryException, kind, ref string) error {
@@ -839,6 +855,10 @@ func (uc *OrderUseCase) ConsentRedelivery(ctx context.Context, buyerID, id strin
 		d.RedeliveryCount++
 		d.ReplacementShipmentID = nil
 		if err := uc.moveDelivery(ctx, d, domain.DXRedeliveryPending, "buyer", &buyerID, "redelivery_accepted", nil); err != nil {
+			return err
+		}
+		// PW-009: the shop prepares the redelivery.
+		if err := uc.noticeVendor(ctx, d.OrderID, d.VendorID, d.VendorOrderID, events.VendorActionRedeliveryAccepted, d.ID); err != nil {
 			return err
 		}
 		if err := uc.Effects.Enqueue(ctx, domain.Effect{OrderID: d.OrderID, Kind: domain.EffectCreateReplacementAttempt,

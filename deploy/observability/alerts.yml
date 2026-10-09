@@ -84,6 +84,32 @@ groups:
         annotations:
           summary: "Notification jobs wait {{ $value | humanizeDuration }} for a worker"
 
+  - name: work_queues
+    # PW-008: operator queues of the add-features (holds needing review,
+    # stuck cancellations and delivery exceptions, unknown refund
+    # transfers, parked effects and notices, overdue SLA items). Each
+    # queue counts only items already past their own threshold, so a
+    # non-zero value needs a person (deploy/*-runbook.md of the feature).
+    rules:
+      - alert: WorkQueueCritical
+        expr: max by (service, queue) (work_queue_attention_items{severity="critical"}) > 0
+        for: 10m
+        labels: {severity: critical}
+        annotations:
+          summary: "{{ $labels.service }} {{ $labels.queue }}: {{ $value }} item(s) need a person (money or stock at risk)"
+      - alert: WorkQueueWarning
+        expr: max by (service, queue) (work_queue_attention_items{severity="warning"}) > 0
+        for: 30m
+        labels: {severity: warning}
+        annotations:
+          summary: "{{ $labels.service }} {{ $labels.queue }}: {{ $value }} item(s) wait for a person"
+      - alert: WorkQueueUnreadable
+        expr: work_queue_probe_success == 0
+        for: 10m
+        labels: {severity: warning}
+        annotations:
+          summary: "{{ $labels.service }} cannot read work queue {{ $labels.queue }} for metrics"
+
   - name: budgets
     rules:
       - alert: HostDiskAlmostFull

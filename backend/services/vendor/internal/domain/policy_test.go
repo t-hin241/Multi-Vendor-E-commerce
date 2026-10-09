@@ -92,3 +92,28 @@ func TestShopPolicyCannotLowerProtection(t *testing.T) {
 		t.Fatal("too long")
 	}
 }
+
+// PW-010: shipping and terms policies may cite the rules Shipment and
+// Payment acknowledge, each only in its own kind of policy.
+func TestPaymentAndShipmentRulesAreCitable(t *testing.T) {
+	shipping := returnsInput()
+	shipping.Kind = "shipping"
+	shipping.RuleRefs = map[string]string{"shipment.fee_basis": "checkout-quote", "shipment.quote_validity": "quote-15m"}
+	p, err := domain.NewMarketplacePolicy(shipping, "admin")
+	if err != nil || domain.RuleOwner("shipment.fee_basis") != "shipment" {
+		t.Fatalf("shipping policy citing Shipment rules: %v", err)
+	}
+	if len(p.RuleRefs) != 2 {
+		t.Fatalf("rule refs kept: %v", p.RuleRefs)
+	}
+	terms := returnsInput()
+	terms.Kind = "terms"
+	terms.RuleRefs = map[string]string{"payment.payout_method": "manual-bank-transfer"}
+	if _, err := domain.NewMarketplacePolicy(terms, "admin"); err != nil || domain.RuleOwner("payment.payout_method") != "payment" {
+		t.Fatalf("terms policy citing a Payment rule: %v", err)
+	}
+	terms.RuleRefs = map[string]string{"shipment.fee_basis": "checkout-quote"}
+	if _, err := domain.NewMarketplacePolicy(terms, "admin"); err == nil {
+		t.Fatal("a terms policy cannot cite a shipping rule")
+	}
+}

@@ -23,6 +23,8 @@ var recipientPurposes = map[string]string{
 	"orders":  shopaccess.OrdersFulfill,
 	"returns": shopaccess.ReturnsHandle,
 	"finance": shopaccess.FinanceRead,
+	// PW-009: support cases waiting for the shop.
+	"support": shopaccess.SupportReply,
 }
 
 // NoticeRecipient is one person who may be told about a shop's work.
@@ -51,7 +53,7 @@ type NoticeRecipients struct {
 func (uc *StaffUseCase) NotificationRecipients(ctx context.Context, vendorID, purpose string) (*NoticeRecipients, error) {
 	permission, ok := recipientPurposes[purpose]
 	if !ok {
-		return nil, apperror.Validation("purpose must be orders, returns or finance")
+		return nil, apperror.Validation("purpose must be orders, returns, finance or support")
 	}
 	if _, err := uuid.Parse(vendorID); err != nil {
 		return nil, apperror.Validation("Invalid shop ID")

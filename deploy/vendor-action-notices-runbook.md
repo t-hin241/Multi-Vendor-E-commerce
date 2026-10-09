@@ -102,3 +102,16 @@ Không backfill tự động. Đơn đã thanh toán trước khi bật cờ kh�
 1. Tắt cờ Order và Payment: không ghi việc mới; việc đã ghi vẫn gửi xong.
 2. Nếu cần dừng gửi: tắt cờ Notification. Event nằm lại trong stream. Email đã ghi vẫn được gửi, trừ khi bật `NOTIFICATION_DELIVERY_PAUSED`.
 3. Không chạy migration down khi đã có dữ liệu (các down tự từ chối).
+
+## Bổ sung PW-009
+
+| Việc | Nguồn | Khi nào | Nhóm |
+|---|---|---|---|
+| Người mua mở yêu cầu hỗ trợ | Order (AF-01) | Hồ sơ hỗ trợ được tạo cho một gói hàng của shop | `support` (quyền `support.reply`) |
+| Sàn chờ shop phản hồi | Order (AF-01) | Lần đầu admin chuyển hồ sơ sang `waiting_vendor` (một lần mỗi hồ sơ) | `support` |
+| Hàng giao thất bại đang về | Order (AF-04) | Shipment báo `returned` (một lần mỗi hồ sơ giao thất bại) | `orders` |
+| Người mua đồng ý giao lại | Order (AF-04) | Buyer xác nhận giao lại | `orders` |
+
+- Nhóm `support` mới: Notification migration `000007` mở rộng ràng buộc; nhân viên chọn nhóm "Hỗ trợ khách hàng" ở `/vendor`.
+- Vendor cũng gửi chủ shop thông báo khi địa chỉ nhận trả được xác minh/từ chối (Vendor migration `000013`, loại `return_destination_verified` / `return_destination_rejected`, qua outbox thông báo hiện có).
+- Buyer được nhắc một lần trước hạn gửi hàng trả 48 giờ (`return_dispatch_reminder`, worker của Order) nếu chưa báo đã gửi.

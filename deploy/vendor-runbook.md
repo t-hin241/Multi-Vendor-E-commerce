@@ -148,7 +148,11 @@ giữ tiền hoặc phát sinh giao dịch tiền thật.
 Luồng: admin tạo draft ở `/admin/policies` (nội dung cố định khi tạo) → Publish kèm lý do → Vendor hỏi Order `GET /internal/policy-rules/readiness` cho từng rule được dẫn (`order.returns_window=window-<N>d`, `order.return_shipping_refund=none`). Thiếu ACK thì version ở `preparing`, bản cũ vẫn hiệu lực, worker hỏi lại mỗi 30 giây. Đủ ACK thì `published`, ghi `policy_outbox` (event `vendor.policy_published`), thông báo chủ shop và audit (`policy_audit_logs`, xem trong tra cứu audit admin).
 
 - Version đã publish không sửa/xóa được (trigger). Sửa nội dung = draft mới. Không publish draft có `effective_at` trong quá khứ.
-- Rule của Payment/Shipment chưa có contract readiness nên chưa thể dẫn trong chính sách; nội dung không được hứa hoàn phí vận chuyển cho tới khi Order hỗ trợ.
+- Rule của Payment/Shipment có contract readiness từ PW-010 (`GET /internal/policy-rules/readiness` ở hai service, chỉ Vendor gọi được; Vendor đọc `PAYMENT_SERVICE_URL`, `SHIPMENT_SERVICE_URL`):
+  - chính sách `shipping` dẫn được `shipment.fee_basis=checkout-quote` (buyer trả đúng phí báo giá lúc checkout) và `shipment.quote_validity=quote-15m`;
+  - chính sách `terms` dẫn được `payment.payout_method=manual-bank-transfer`.
+
+  Giá trị khác bị trả "not ready", nên version ở `preparing`. Nội dung vẫn không được hứa hoàn phí vận chuyển cho tới khi Order hỗ trợ.
 - Chính sách shop: chủ shop đề xuất, admin duyệt/từ chối (có lý do). Nội dung chứa cụm từ bớt quyền người mua ("không đổi trả", "không hoàn tiền", ...) bị từ chối ngay (422 `policy_reduces_protection`). Migration chuyển `policy_text` cũ thành đề xuất `legacy` chờ duyệt, không tự duyệt.
 - Theo dõi: log `vendor_policy_preparing_overdue` (preparing quá 1 giờ), `vendor_policy_propagation_pending`, backlog `policy_outbox`.
 

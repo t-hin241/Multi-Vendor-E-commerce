@@ -67,6 +67,10 @@ func main() {
 	if err := telemetry.RegisterDBPool(dbPool); err != nil {
 		log.Fatal().Err(err).Msg("database pool metrics failed")
 	}
+	// PW-008: operator queues past their threshold, for alerting.
+	if err := telemetry.RegisterWorkQueues(dbPool, repository.WorkQueues...); err != nil {
+		log.Fatal().Err(err).Msg("work queue metrics failed")
+	}
 	// Plan 14: the runtime role reads and writes rows of this database only.
 	if problems, err := postgres.CheckRuntimeRole(ctx, dbPool, cfg.Base.Env == "production"); err != nil {
 		log.Fatal().Err(err).Msg("database role check failed")
