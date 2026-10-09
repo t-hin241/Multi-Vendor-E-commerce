@@ -92,6 +92,7 @@ func NewRouter(env string, log zerolog.Logger, jwtManager *authjwt.Manager, h Ha
 		adminGroup.POST("/payouts/batches", h.Admin.CreateBatch)
 		adminGroup.GET("/payouts/batches/:id", h.Admin.GetBatch)
 		adminGroup.POST("/payouts/items/:id/resolve", h.Admin.ResolvePayoutItem)
+		adminGroup.POST("/payouts/items/:id/cancellation", h.Admin.CancelPayoutItem)
 		adminGroup.GET("/settlement-holds", h.Holds.AdminList)
 
 		// AF-19 maker-checker: draft -> submission (maker, password proof)

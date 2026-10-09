@@ -40,6 +40,9 @@ type Deps struct {
 	// Payment's ledger (PW-001); nil keeps only the legacy hold query.
 	CaseHolds SupportHoldPort
 	Holds     SettlementHoldGateway
+	// SourceHolds are returns' and refunds' holds in the same ledger
+	// (PW-001), under the same flag.
+	SourceHolds SourceHoldPort
 	// Intakes are buyers' requests without an order id (PW-012).
 	Intakes SupportIntakePort
 	// Cancellations, Stops and Recoveries run AF-03 (paid cancellation);

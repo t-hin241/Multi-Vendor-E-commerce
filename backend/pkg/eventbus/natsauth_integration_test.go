@@ -204,3 +204,67 @@ func TestEventFlowsWithServiceCredentials(t *testing.T) {
 		return w.count(t, `SELECT count(*) FROM applied WHERE event_id = $1`, env.EventID) == 1
 	})
 }
+
+// PW-004: the event flows added by AF-02, AF-04 and AF-08 work end to end
+// on the production broker configuration: the producer publishes its type,
+// the consumer service reads it through its own durable and applies it
+// once through the inbox (a redelivery with the same id is a duplicate),
+// and events published while the consumer is down arrive after it starts
+// again.
+func TestAddFeatureEventFlowsWithServiceCredentials(t *testing.T) {
+	url, password := authBroker(t)
+	flows := []struct{ producer, consumer, durable, typ string }{
+		{"vendor", "order", "order-policy-versions", "vendor.policy_published"},
+		{"shipment", "order", "order-shipment-exceptions", "shipment.exception_detected"},
+		{"order", "notification", "notification-vendor-actions", "order.vendor_action_required"},
+		{"payment", "notification", "notification-vendor-actions", "payment.vendor_action_required"},
+	}
+	for _, f := range flows {
+		t.Run(f.typ, func(t *testing.T) {
+			producer, _ := connectAs(t, f.producer)
+			w := newWorldOn(t, url, Credentials{Service: f.consumer, Password: password})
+			w.typ = f.typ
+			run := func() (stop func()) {
+				ctx, cancel := context.WithCancel(context.Background())
+				done := make(chan struct{})
+				go func() {
+					w.bus.Consume(ctx, w.inbox, Subscription{Durable: f.durable, Types: []string{f.typ}, Handle: apply})
+					close(done)
+				}()
+				return func() { cancel(); <-done }
+			}
+			t.Cleanup(func() {
+				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				_ = w.bus.js.DeleteConsumer(ctx, StreamName, f.durable)
+			})
+
+			stop := run()
+			first := w.event(t, "first")
+			for range 2 { // a relay retry republishes the same event id
+				if err := producer.Publish(t.Context(), first); err != nil {
+					t.Fatalf("%s publishing %s: %v", f.producer, f.typ, err)
+				}
+			}
+			eventually(t, f.typ+" applied through "+f.durable, func() bool {
+				return w.count(t, `SELECT count(*) FROM applied WHERE event_id = $1`, first.EventID) == 1
+			})
+			stop()
+
+			later := []Envelope{w.event(t, "later-1"), w.event(t, "later-2")}
+			for _, env := range later {
+				if err := producer.Publish(t.Context(), env); err != nil {
+					t.Fatal(err)
+				}
+			}
+			stop = run()
+			defer stop()
+			eventually(t, "the backlog after the consumer restarts", func() bool {
+				return w.count(t, `SELECT count(*) FROM applied WHERE event_id = ANY($1)`, []string{later[0].EventID, later[1].EventID}) == 2
+			})
+			if n := w.count(t, `SELECT count(*) FROM applied WHERE event_id = $1`, first.EventID); n != 1 {
+				t.Fatalf("the first event was applied %d times", n)
+			}
+		})
+	}
+}

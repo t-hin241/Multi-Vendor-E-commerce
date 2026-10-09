@@ -39,6 +39,9 @@ type Config struct {
 	// VendorActionNotices is FEATURE_VENDOR_ACTION_NOTICES_ENABLED (AF-08):
 	// payout results are told to the shop (needs the event bus).
 	VendorActionNotices bool
+	// SkipOrderHoldQuery is SETTLEMENT_ORDER_HOLD_QUERY=off (PW-001): payout
+	// batches rely on the hold ledger only. Default on (Order is asked too).
+	SkipOrderHoldQuery bool
 }
 
 // ManualRefundConfig: FEATURE_MANUAL_REFUND_WORKFLOW_ENABLED, the keys that
@@ -113,6 +116,10 @@ func Load() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	orderHoldQuery := getEnv("SETTLEMENT_ORDER_HOLD_QUERY", "on")
+	if orderHoldQuery != "on" && orderHoldQuery != "off" {
+		return Config{}, fmt.Errorf("config: SETTLEMENT_ORDER_HOLD_QUERY must be on or off")
+	}
 	vendorNotices, err := strconv.ParseBool(getEnv("FEATURE_VENDOR_ACTION_NOTICES_ENABLED", "false"))
 	if err != nil {
 		return Config{}, fmt.Errorf("config: FEATURE_VENDOR_ACTION_NOTICES_ENABLED must be true or false")
@@ -122,7 +129,7 @@ func Load() (Config, error) {
 		AdminApprovals:   approvals,
 		ManualRefunds:    manual,
 		VendorServiceURL: getEnv("VENDOR_SERVICE_URL", "http://vendor:8082"), WebhookRatePerMinute: rate,
-		Base: base, OrderServiceURL: orderServiceURL, VendorActionNotices: vendorNotices,
+		Base: base, OrderServiceURL: orderServiceURL, VendorActionNotices: vendorNotices, SkipOrderHoldQuery: orderHoldQuery == "off",
 		Provider: provider, MockWebhookSecret: mockWebhookSecret, PayOSClientID: payosClientID, PayOSAPIKey: payosAPIKey, PayOSChecksumKey: payosChecksumKey, PayOSBaseURL: getEnv("PAYOS_API_URL", "https://api-merchant.payos.vn"), PayOSReturnURL: payosReturnURL, PayOSCancelURL: payosCancelURL,
 	}, nil
 }

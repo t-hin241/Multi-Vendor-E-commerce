@@ -1900,7 +1900,8 @@ export type PayoutItem = {
   destination_account_id: string;
   destination_version: number;
   destination_mask: string;
-  status: "pending" | "succeeded" | "failed";
+  // cancelled: claimed but never transferred, taken back by an operator.
+  status: "pending" | "succeeded" | "failed" | "cancelled";
   evidence_reference?: string;
   note?: string;
   failure_reason?: string;
@@ -1974,6 +1975,21 @@ export function resolvePayoutItem(
     method: "POST",
     token,
     json: input,
+  });
+}
+
+// cancelPayoutItem takes back a claimed item that was not transferred
+// (e.g. a hold arrived after the claim); its amount is payable again once
+// no hold keeps it. No money moves; the reason is audited.
+export function cancelPayoutItem(
+  token: string,
+  itemId: string,
+  reason: string,
+): Promise<PayoutItem> {
+  return request<PayoutItem>(`/api/payments/admin/payouts/items/${itemId}/cancellation`, {
+    method: "POST",
+    token,
+    json: { reason },
   });
 }
 

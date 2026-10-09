@@ -168,7 +168,23 @@ const (
 	PayoutItemPending   PayoutItemStatus = "pending"
 	PayoutItemSucceeded PayoutItemStatus = "succeeded"
 	PayoutItemFailed    PayoutItemStatus = "failed"
+	// PayoutItemCancelled: claimed but never transferred; an operator took
+	// it back (PW-001), and its entries are unpaid again.
+	PayoutItemCancelled PayoutItemStatus = "cancelled"
 )
+
+// CancelPayoutItem takes back a pending item before any transfer. The
+// reason is required; a cancelled item cannot be resolved afterwards.
+func CancelPayoutItem(item *PayoutItem, reason, actor string, now time.Time) error {
+	if reason == "" || len(reason) > 500 {
+		return apperror.Validation("A reason of at most 500 characters is required")
+	}
+	if item.Status != PayoutItemPending {
+		return apperror.Conflict("Only a pending payout item can be cancelled; it is " + string(item.Status))
+	}
+	item.Status, item.ResolvedBy, item.ResolvedAt, item.Note = PayoutItemCancelled, &actor, &now, &reason
+	return nil
+}
 
 // PayoutItem is one vendor's transfer inside a manual payout batch.
 type PayoutItem struct {

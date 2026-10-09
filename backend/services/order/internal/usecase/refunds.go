@@ -189,6 +189,10 @@ func (uc *OrderUseCase) createRefund(ctx context.Context, refund *domain.Refund)
 	if err := uc.Refunds.Create(ctx, refund); err != nil {
 		return err
 	}
+	// PW-001: the payout stays held from the moment the refund exists.
+	if err := uc.prepareRefundHold(ctx, refund); err != nil {
+		return err
+	}
 	return uc.Effects.Enqueue(ctx, domain.Effect{OrderID: refund.OrderID, Kind: domain.EffectRequestRefund, Target: refund.ID})
 }
 

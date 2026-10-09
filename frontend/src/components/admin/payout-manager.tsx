@@ -264,6 +264,22 @@ export function PayoutManager() {
                             await refresh();
                           }}
                         />
+                        <ReasonDialog
+                          trigger={
+                            <Button size="sm" variant="ghost">
+                              Cancel
+                            </Button>
+                          }
+                          title="Cancel this payout item?"
+                          description="Use only when no transfer was made (for example a return or refund hold arrived after the batch). The amount is unpaid again and is paid in a later batch once no hold keeps it."
+                          confirmLabel="Cancel item"
+                          onConfirm={async (reason) => {
+                            await callWithAuth((token) =>
+                              api.cancelPayoutItem(token, item.id, reason),
+                            );
+                            await refresh();
+                          }}
+                        />
                       </span>
                     )}
                   </div>

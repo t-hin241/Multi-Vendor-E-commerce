@@ -57,6 +57,9 @@ func (w OrderWorker) Run(ctx context.Context) {
 			if _, err := uc.EnsureSupportHolds(ctx, batch); err != nil && ctx.Err() == nil {
 				uc.Log.Error().Err(err).Msg("order_support_hold_sweep_failed")
 			}
+			if _, err := uc.EnsureSourceHolds(ctx, batch); err != nil && ctx.Err() == nil {
+				uc.Log.Error().Err(err).Msg("order_source_hold_sweep_failed")
+			}
 		}
 		select {
 		case <-ctx.Done():
@@ -111,6 +114,7 @@ func (w OrderWorker) report(ctx context.Context) {
 		uc.Log.Error().Err(err).Msg("order_effect_stats_failed")
 	}
 	uc.reportSupportHolds(ctx)
+	uc.reportSourceHolds(ctx)
 	uc.reportCancellations(ctx)
 	uc.reportDeliveryExceptions(ctx)
 	uc.FlagOverdueReturns(ctx)

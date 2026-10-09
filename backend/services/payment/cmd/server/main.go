@@ -173,8 +173,11 @@ func main() {
 	settlementUseCase := usecase.NewSettlementUseCase(usecase.SettlementDeps{
 		Tx: tx, Settlement: repository.NewSettlementRepository(dbPool), Payouts: repository.NewPayoutRepository(dbPool),
 		Audit: repository.NewAuditRepository(dbPool), Roles: roles, Orders: orderClient, Vendors: vendorClient, Log: log,
-		RequireApprovals: cfg.AdminApprovals,
+		RequireApprovals: cfg.AdminApprovals, SkipOrderHoldQuery: cfg.SkipOrderHoldQuery,
 	})
+	if cfg.SkipOrderHoldQuery {
+		log.Warn().Msg("settlement_order_hold_query_off")
+	}
 	// AF-08: payout results for the shop, relayed to the event bus.
 	vendorNotices := repository.VendorNotices{Pool: dbPool}
 	if cfg.VendorActionNotices {

@@ -548,6 +548,9 @@ services:
       # AF-08: tell shops their payout results (needs the event bus). Turn on
       # after Notification's flag.
       FEATURE_VENDOR_ACTION_NOTICES_ENABLED: ${PAYMENT_FEATURE_VENDOR_ACTION_NOTICES_ENABLED:-false}
+      # PW-001: off stops asking Order for held vendor orders (only the hold
+      # ledger counts). Only after Order's backfill reports missing=0.
+      SETTLEMENT_ORDER_HOLD_QUERY: ${SETTLEMENT_ORDER_HOLD_QUERY:-on}
       REFUND_DESTINATION_KEY: ${REFUND_DESTINATION_KEY:-}
       REFUND_DESTINATION_KEY_VERSION: ${REFUND_DESTINATION_KEY_VERSION:-1}
       REFUND_DESTINATION_PREVIOUS_KEYS: ${REFUND_DESTINATION_PREVIOUS_KEYS:-}

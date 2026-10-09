@@ -38,6 +38,7 @@ var AdminRoutes = adminaccess.Routes{
 	"POST /api/payments/admin/payouts/batches":                      adminaccess.FinancePrepare,
 	"GET /api/payments/admin/payouts/batches/:id":                   adminaccess.FinanceRead,
 	"POST /api/payments/admin/payouts/items/:id/resolve":            adminaccess.FinancePrepare,
+	"POST /api/payments/admin/payouts/items/:id/cancellation":       adminaccess.FinancePrepare,
 	"GET /api/payments/admin/settlement-holds":                      adminaccess.FinanceRead,
 	"GET /api/payments/admin/approval-requests":                     adminaccess.FinanceRead,
 	"GET /api/payments/admin/approval-requests/:id":                 adminaccess.FinanceRead,

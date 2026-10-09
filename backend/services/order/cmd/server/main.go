@@ -150,6 +150,7 @@ func main() {
 		Returns:           repository.NewReturnRequestRepository(dbPool),
 		Support:           repository.NewSupportCaseRepository(dbPool),
 		CaseHolds:         repository.SupportHoldRepository{Pool: dbPool},
+		SourceHolds:       repository.SourceHoldRepository{Pool: dbPool},
 		Intakes:           repository.SupportIntakeRepository{Pool: dbPool},
 		Cancellations:     repository.CancellationRepository{Pool: dbPool},
 		Stops:             shipmentClient,

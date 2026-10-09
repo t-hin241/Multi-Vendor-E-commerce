@@ -112,6 +112,9 @@ func (uc *OrderUseCase) executeEffect(ctx context.Context, e *domain.Effect) err
 	case domain.EffectSettleVendorOrder:
 		return uc.settleVendorOrder(ctx, e)
 	case domain.EffectAcquireSettlementHold:
+		if sourceType, id, ok := sourceHoldTarget(e.Target); ok {
+			return uc.acquireSourceHold(ctx, sourceType, id)
+		}
 		if id, ok := strings.CutPrefix(e.Target, deliveryTarget); ok {
 			if uc.DeliveryExceptions == nil || uc.Holds == nil {
 				return errHoldsNotWired
@@ -126,6 +129,9 @@ func (uc *OrderUseCase) executeEffect(ctx context.Context, e *domain.Effect) err
 		}
 		return uc.acquireCaseHold(ctx, e)
 	case domain.EffectReleaseSettlementHold:
+		if sourceType, id, ok := sourceHoldTarget(e.Target); ok {
+			return uc.releaseSourceHold(ctx, sourceType, id)
+		}
 		if id, ok := strings.CutPrefix(e.Target, deliveryTarget); ok {
 			if uc.DeliveryExceptions == nil || uc.Holds == nil {
 				return errHoldsNotWired

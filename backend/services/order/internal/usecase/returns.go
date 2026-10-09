@@ -65,12 +65,16 @@ func (uc *OrderUseCase) CreateReturn(ctx context.Context, buyerID string, in Ret
 		if err := uc.Returns.Create(ctx, rr); err != nil {
 			return err
 		}
+		// PW-001: the payout stays held from the moment the return exists.
+		if err := uc.prepareSourceHold(ctx, domain.HoldSourceReturn, rr.ID, order.ID, vo.VendorID, vo.ID); err != nil {
+			return err
+		}
 		if err := uc.noticeVendor(ctx, order.ID, vo.VendorID, vo.ID, events.VendorActionReturnRequested, rr.ID); err != nil {
 			return err
 		}
 		return uc.Returns.AddEvent(ctx, &domain.ReturnEvent{ReturnID: rr.ID, ActorUserID: &buyerID, ActorRole: "buyer", Action: "requested", ToStatus: string(rr.Status)})
 	})
-	if err == nil && uc.VendorActionNotices {
+	if err == nil && (uc.VendorActionNotices || uc.sourceHoldLedger()) {
 		uc.runEffectsSoon(ctx, in.OrderID)
 	}
 	return rr, err

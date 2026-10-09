@@ -162,6 +162,32 @@ Migration Order `000019_settlement_hold_ledger`, Payment `000014_settlement_hold
   4. Đóng case, kiểm hold `released`.
 - **Tắt cờ:** case mới không cấp hold nữa; hold đã có vẫn được nhả khi case đóng. Truy vấn cũ `/internal/settlements/holds` vẫn giữ payout cho case mở, nên tắt cờ không mở payout. Không chạy down `000019`/`000014` khi đã có hold (down tự từ chối).
 
+#### Trả hàng và refund trong sổ hold (PW-001, phần còn lại)
+
+Migration Order `000025_source_settlement_holds`, Payment `000016_payout_item_cancellation`. Dùng chung cờ `FEATURE_SETTLEMENT_HOLD_LEDGER_ENABLED`.
+
+- **Cách giữ:**
+  - Mỗi yêu cầu trả hàng, và mỗi refund gắn với một vendor order, nhận một hold `preparing` trong cùng transaction tạo ra nó (bảng `source_settlement_holds`).
+  - Effect `acquire_settlement_hold` (target `return:<id>` / `refund:<id>`) gửi tới Payment với `source_type` là `return_request` / `order_refund`, `reason_code` là `return_open` / `refund_open`.
+  - Refund cấp đơn hàng (không có vendor order) không giữ payout, như trước.
+- **Nhả:** vòng quét của Order (mỗi phút) gửi nhả hold khi nguồn đã kết thúc:
+  - trả hàng: `rejected`, `refunded`;
+  - refund: `succeeded`, `failed`, `rejected`.
+- **Backfill:** khi cờ bật, cùng vòng quét cấp hold cho trả hàng/refund đang mở mà chưa có hold. Log `order_source_hold_backlog`: `preparing`, `needs_review`, `releasing`, `missing` (nguồn đang mở chưa có hold); mức `warn` khi có `needs_review`, hoặc khi `missing > 0` lúc cờ bật.
+- **`needs_review` (payout đã claim trước hold):**
+  - Hold vẫn được Payment ghi lại (`payout_claimed`). Nếu chưa chuyển khoản, finance mở lô payout và bấm **Cancel** trên item: `POST /api/payments/admin/payouts/items/:id/cancellation {reason}`, quyền `finance.prepare`, có audit `payout_item_cancelled`.
+  - Không có tiền nào di chuyển. Bút toán trở lại chưa trả và chỉ được trả ở lô sau khi không còn hold nào giữ.
+  - Đừng ghi `failed` cho trường hợp này.
+- **Bỏ truy vấn cũ** (sau khi đối soát):
+  1. Bật cờ hold, chờ vòng quét chạy hết backfill.
+  2. Tạm dừng tạo payout batch (thỏa thuận vận hành, không có công tắc).
+  3. Kiểm `missing = 0` trong `order_source_hold_backlog`, và không còn hồ sơ hỗ trợ / hủy / giao thất bại mở nào thiếu hold (`order_support_hold_backlog`, các backlog AF-03/04).
+  4. Đặt `SETTLEMENT_ORDER_HOLD_QUERY=off` ở Payment và deploy lại Payment. Payment ngừng gọi `/internal/settlements/holds` và chỉ dựa vào sổ hold; log `settlement_order_hold_query_off` lúc khởi động.
+  5. Tạo lại payout batch như bình thường.
+
+  Quay lại: đặt `on` và deploy lại; không cần đổi dữ liệu.
+- **Down:** `000025` từ chối khi còn hold chưa nhả; `000016` từ chối khi đã có item `cancelled`.
+
 ### Mở refund từ trang case (PW-014)
 
 `POST /api/orders/admin/support-cases/:caseID/refunds {amount, reason, expected_version}` với header `Idempotency-Key` bắt buộc, quyền `finance.prepare`.

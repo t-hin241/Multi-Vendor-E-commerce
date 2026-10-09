@@ -389,6 +389,28 @@ func (h *AdminHandler) ResolvePayoutItem(c *gin.Context) {
 	httpresponse.OK(c, http.StatusOK, toPayoutItem(item))
 }
 
+type cancelPayoutRequest struct {
+	Reason string `json:"reason" binding:"required,max=500"`
+}
+
+// CancelPayoutItem takes back a claimed, untransferred payout item.
+func (h *AdminHandler) CancelPayoutItem(c *gin.Context) {
+	if !validUUID(c, c.Param("id")) {
+		return
+	}
+	var req cancelPayoutRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		httpresponse.Error(c, http.StatusBadRequest, "validation_error", "A reason of at most 500 characters is required")
+		return
+	}
+	item, err := h.settlement.CancelPayoutItem(c.Request.Context(), middleware.GetUserID(c), c.Param("id"), req.Reason)
+	if err != nil {
+		httpresponse.HandleError(c, h.log, err)
+		return
+	}
+	httpresponse.OK(c, http.StatusOK, toPayoutItem(item))
+}
+
 // ----- internal intake from Order -----
 
 type settlementIntakeRequest struct {

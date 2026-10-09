@@ -33,7 +33,7 @@ func newInboxEnv(t *testing.T) *inboxEnv {
 }
 
 func (e *inboxEnv) notices() *usecase.NotificationUseCase {
-	uc := e.env.useCase(roles{})
+	uc := e.useCase(roles{})
 	uc.Inbox = e.repo
 	return uc
 }
@@ -217,7 +217,7 @@ func TestInboxRetentionAndFlag(t *testing.T) {
 		t.Fatal("purge must remove only expired inbox items")
 	}
 
-	plain := e.env.useCase(roles{}) // flag off: no inbox writer
+	plain := e.useCase(roles{}) // flag off: no inbox writer
 	if _, _, err := plain.Accept(ctx, domain.Request{EventID: "effect-off", Source: "order", UserID: e.buyer, Type: domain.TypeOrderPaid, ReferenceID: "o"}); err != nil {
 		t.Fatal(err)
 	}

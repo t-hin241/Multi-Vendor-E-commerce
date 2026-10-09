@@ -29,6 +29,10 @@ type SettlementDeps struct {
 	// RequireApprovals (AF-19): adjustments and payout results go through
 	// an approved maker-checker request only.
 	RequireApprovals bool
+	// SkipOrderHoldQuery (SETTLEMENT_ORDER_HOLD_QUERY=off) stops asking
+	// Order which vendor orders are held, once every source holds through
+	// the ledger and Order's backfill is reconciled (PW-001). Default: ask.
+	SkipOrderHoldQuery bool
 	// VendorNotices (AF-08, FEATURE_VENDOR_ACTION_NOTICES_ENABLED) records
 	// each payout result for the shop in the same transaction; nil is off.
 	VendorNotices VendorNoticeOutbox
@@ -270,9 +274,11 @@ func (uc *SettlementUseCase) addVendorItem(ctx context.Context, batch *domain.Pa
 			ids = append(ids, *e.VendorOrderID)
 		}
 	}
-	held, err := uc.Orders.HeldVendorOrders(ctx, ids)
-	if err != nil {
-		return "", err
+	held := map[string]string{}
+	if !uc.SkipOrderHoldQuery {
+		if held, err = uc.Orders.HeldVendorOrders(ctx, ids); err != nil {
+			return "", err
+		}
 	}
 	openRefunds, err := uc.Settlement.OpenRefundVendorOrders(ctx, ids)
 	if err != nil {
@@ -349,7 +355,7 @@ func (uc *SettlementUseCase) resolvePayoutItem(ctx context.Context, adminID, ite
 		if err := uc.Payouts.SaveResolution(ctx, item); err != nil {
 			return err
 		}
-		if uc.VendorNotices != nil {
+		if uc.VendorNotices != nil && (item.Status == domain.PayoutItemSucceeded || item.Status == domain.PayoutItemFailed) {
 			if err := uc.VendorNotices.Enqueue(ctx, item.VendorID, item.ID, string(item.Status)); err != nil {
 				return err
 			}
@@ -367,6 +373,37 @@ func (uc *SettlementUseCase) resolvePayoutItem(ctx context.Context, adminID, ite
 		return nil, asAppError(err)
 	}
 	uc.Log.Info().Str("payout_item_id", item.ID).Str("vendor_id", item.VendorID).Str("status", string(item.Status)).Msg("payout_item_resolved")
+	return item, nil
+}
+
+// CancelPayoutItem takes back a payout item that was claimed but not
+// transferred (PW-001): typically a settlement hold Payment recorded with
+// payout_already_claimed. Its entries become unpaid again (the next batch
+// skips those still held). It needs a verified admin and a reason, and is
+// audited; no money moves, so it does not need a second approver.
+func (uc *SettlementUseCase) CancelPayoutItem(ctx context.Context, adminID, itemID, reason string) (*domain.PayoutItem, error) {
+	if err := uc.requireAdmin(ctx, adminID); err != nil {
+		return nil, err
+	}
+	reason = strings.TrimSpace(reason)
+	var item *domain.PayoutItem
+	err := uc.Tx.Run(ctx, func(ctx context.Context) error {
+		var err error
+		if item, err = uc.Payouts.LockItem(ctx, itemID); err != nil {
+			return err
+		}
+		if err := domain.CancelPayoutItem(item, reason, adminID, uc.Now().UTC()); err != nil {
+			return err
+		}
+		if err := uc.Payouts.SaveResolution(ctx, item); err != nil {
+			return err
+		}
+		return uc.Audit.Record(ctx, adminID, "payout_item_cancelled", "payout_item", item.ID, reason)
+	})
+	if err != nil {
+		return nil, asAppError(err)
+	}
+	uc.Log.Warn().Str("payout_item_id", item.ID).Str("vendor_id", item.VendorID).Msg("payout_item_cancelled")
 	return item, nil
 }
 
