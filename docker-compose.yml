@@ -714,6 +714,10 @@ services:
       # (before Order and Payment).
       FEATURE_VENDOR_ACTION_NOTICES_ENABLED: ${NOTIFICATION_FEATURE_VENDOR_ACTION_NOTICES_ENABLED:-false}
       VENDOR_SERVICE_URL: http://vendor:8082
+      # AF-09: every new notice also lands in the person's inbox (bell in the
+      # header, /notifications). Email delivery is unchanged either way.
+      FEATURE_NOTIFICATION_INBOX_ENABLED: ${FEATURE_NOTIFICATION_INBOX_ENABLED:-false}
+      INBOX_RETENTION_DAYS: ${INBOX_RETENTION_DAYS:-90}
       PORT: "8090"
       DATABASE_URL: postgres://notification_app:${NOTIFICATION_DB_PASSWORD:?set NOTIFICATION_DB_PASSWORD in .env}@postgres:5432/notification_db?sslmode=disable
       IDENTITY_SERVICE_URL: http://identity:8081

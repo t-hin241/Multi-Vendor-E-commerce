@@ -104,3 +104,36 @@ func TestVendorActionRoutesAreProtected(t *testing.T) {
 		}
 	}
 }
+
+// AF-09: the inbox needs a session (any role), answers feature_disabled
+// while off, and is never cached.
+func TestInboxRoutesNeedASession(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	jwt := authjwttest.Manager()
+	router := gin.New()
+	transport.RegisterInbox(router, jwt, transport.InboxRoutes{UseCase: &usecase.InboxUseCase{}, Log: zerolog.Nop()})
+	routes := [][2]string{{"GET", "/api/notifications/inbox"}, {"GET", "/api/notifications/inbox/unread-count"},
+		{"POST", "/api/notifications/inbox/read-markers"}, {"PUT", "/api/notifications/inbox/11111111-1111-1111-1111-111111111111/read"},
+		{"DELETE", "/api/notifications/inbox/11111111-1111-1111-1111-111111111111"}}
+	admin, _, _ := jwt.IssueAccessToken("11111111-1111-1111-1111-111111111111", "admin", time.Minute)
+	for _, route := range routes {
+		for _, auth := range []string{"", "Bearer " + admin} {
+			req := httptest.NewRequest(route[0], route[1], strings.NewReader(`{"through_id":"11111111-1111-1111-1111-111111111111"}`))
+			if auth != "" {
+				req.Header.Set("Authorization", auth)
+			}
+			w := httptest.NewRecorder()
+			router.ServeHTTP(w, req)
+			want := http.StatusUnauthorized
+			if auth != "" {
+				want = http.StatusNotFound
+				if w.Header().Get("Cache-Control") != "private, no-store" {
+					t.Fatalf("%v is cacheable", route)
+				}
+			}
+			if w.Code != want {
+				t.Fatalf("%v signed in=%v: %d", route, auth != "", w.Code)
+			}
+		}
+	}
+}

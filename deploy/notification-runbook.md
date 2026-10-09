@@ -77,3 +77,7 @@ Reset mật khẩu thất bại sau 5 lần nằm ở Identity: `SELECT count(*)
 ## Thông báo công việc cho shop (AF-08)
 
 Migration `000005` thêm `vendor_action_events` (sự việc cần báo cho shop, ghi một lần theo source và event id) và `notification_preferences` (nhóm việc mà nhân viên chọn nhận). Khi bật `FEATURE_VENDOR_ACTION_NOTICES_ENABLED` (cần `VENDOR_SERVICE_URL`), consumer `notification-vendor-actions` nhận `order.vendor_action_required` và `payment.vendor_action_required`. Worker hỏi Vendor ai được nhận rồi ghi một thông báo cho mỗi người; các thông báo này được gửi như mọi thông báo khác. Admin xem các sự việc chưa xác định được người nhận ở `/admin/notifications`. Chi tiết: `deploy/vendor-action-notices-runbook.md`.
+
+## Hộp thông báo (AF-09)
+
+Migration `000006` thêm `inbox_items` (mỗi người một bản cho mỗi thông báo, ghi cùng transaction với bản ghi gửi email) và cột đồng ý nhận marketing + `notification_consent_audit`. Bật `FEATURE_NOTIFICATION_INBOX_ENABLED` thì chuông trên header và trang `/notifications` hiện ra; email không đổi. Tin quá `INBOX_RETENTION_DAYS` (mặc định 90) bị xóa theo lô mỗi giờ. Chi tiết: `deploy/notification-inbox-runbook.md`.

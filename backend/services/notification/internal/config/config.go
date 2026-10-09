@@ -37,6 +37,11 @@ type Config struct {
 	// (VendorServiceURL) and sent; staff may opt into categories.
 	VendorActionNotices bool
 	VendorServiceURL    string
+	// Inbox is FEATURE_NOTIFICATION_INBOX_ENABLED (AF-09): every new notice
+	// also gets an inbox item and people read their inbox; email delivery
+	// is unchanged. InboxRetention is INBOX_RETENTION_DAYS (7-3650, 90).
+	Inbox          bool
+	InboxRetention time.Duration
 }
 
 func Load() (Config, error) {
@@ -105,6 +110,15 @@ func Load() (Config, error) {
 		return Config{}, fmt.Errorf("config: FEATURE_VENDOR_ACTION_NOTICES_ENABLED needs VENDOR_SERVICE_URL")
 	}
 
+	inbox := os.Getenv("FEATURE_NOTIFICATION_INBOX_ENABLED") == "true"
+	inboxDays := 90
+	if raw := os.Getenv("INBOX_RETENTION_DAYS"); raw != "" {
+		inboxDays, err = strconv.Atoi(raw)
+		if err != nil || inboxDays < 7 || inboxDays > 3650 {
+			return Config{}, fmt.Errorf("config: INBOX_RETENTION_DAYS must be between 7 and 3650")
+		}
+	}
+
 	return Config{
 		Base: base, IdentityServiceURL: identityServiceURL, IdentityServiceKey: internal.Key, InternalVerifier: internal.Verifier,
 		ResetDeliveryKey: key, SMTPHost: smtpHost, SMTPPort: port, SMTPUsername: os.Getenv("SMTP_USERNAME"),
@@ -112,6 +126,7 @@ func Load() (Config, error) {
 		EmailProvider: provider, AttemptRetention: time.Duration(days) * 24 * time.Hour,
 		DeliveryPaused: os.Getenv("NOTIFICATION_DELIVERY_PAUSED") == "true", WorkerConcurrency: concurrency,
 		VendorActionNotices: vendorNotices, VendorServiceURL: vendorURL,
+		Inbox: inbox, InboxRetention: time.Duration(inboxDays) * 24 * time.Hour,
 	}, nil
 }
 

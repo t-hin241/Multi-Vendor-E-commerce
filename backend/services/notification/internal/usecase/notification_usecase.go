@@ -36,6 +36,14 @@ type Deps struct {
 	// Queue carries delivery jobs; without it nothing is delivered, but
 	// requests are still recorded (and queued by Recover once it is set).
 	Queue TaskQueue
+	// Inbox (AF-09, FEATURE_NOTIFICATION_INBOX_ENABLED) receives an item for
+	// every new notice, in the same transaction; nil writes none.
+	Inbox InboxWriter
+}
+
+// InboxWriter adds a person's inbox item once per source event and kind.
+type InboxWriter interface {
+	Add(ctx context.Context, item *domain.InboxItem) error
 }
 
 type NotificationUseCase struct{ Deps }
@@ -61,7 +69,13 @@ func (uc *NotificationUseCase) Accept(ctx context.Context, r domain.Request) (*d
 	if err != nil {
 		return nil, false, apperror.Validation(err.Error())
 	}
-	stored, created, err := uc.Store.Insert(ctx, n)
+	var stored *domain.Notification
+	var created bool
+	err = uc.inTx(ctx, func(ctx context.Context) error {
+		var err error
+		stored, created, err = uc.record(ctx, n)
+		return err
+	})
 	if err != nil {
 		return nil, false, apperror.Internal(err)
 	}
@@ -71,6 +85,30 @@ func (uc *NotificationUseCase) Accept(ctx context.Context, r domain.Request) (*d
 		uc.enqueue(ctx, stored.ID, stored.Attempts+1, stored.NextAttemptAt)
 	}
 	return stored, !created, nil
+}
+
+// record stores a notice once and, the first time, its inbox item in the
+// same transaction (the caller's when there is one): the inbox never shows
+// a notice that was not recorded, and a repeat never adds a second item.
+func (uc *NotificationUseCase) record(ctx context.Context, n *domain.Notification) (*domain.Notification, bool, error) {
+	stored, created, err := uc.Store.Insert(ctx, n)
+	if err != nil || !created || uc.Inbox == nil {
+		return stored, created, err
+	}
+	item, ok, err := domain.NewInboxItem(stored)
+	if err != nil || !ok {
+		return stored, created, err
+	}
+	return stored, created, uc.Inbox.Add(ctx, item)
+}
+
+// inTx runs fn in a transaction when the inbox needs one (two writes);
+// otherwise directly, as before AF-09.
+func (uc *NotificationUseCase) inTx(ctx context.Context, fn func(context.Context) error) error {
+	if uc.Inbox == nil || uc.Tx == nil {
+		return fn(ctx)
+	}
+	return uc.Tx.Run(ctx, fn)
 }
 
 // enqueue queues a delivery job. A failure is only logged: the record is

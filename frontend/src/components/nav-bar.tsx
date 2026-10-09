@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { toast } from "sonner";
 
+import { NotificationBell } from "@/components/notification-bell";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -108,6 +109,7 @@ export function NavBar() {
 
         {/* Desktop actions */}
         <div className="ml-auto hidden items-center gap-1 md:flex">
+          <NotificationBell />
           {user?.role === "buyer" && (
             <Button variant="ghost" size="icon" className="relative" asChild>
               <Link href="/cart" aria-label="Giỏ hàng">
@@ -166,9 +168,10 @@ export function NavBar() {
         </div>
 
         {/* Mobile nav */}
+        <NotificationBell className="ml-auto md:hidden" />
         <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
           <SheetTrigger asChild>
-            <Button variant="ghost" size="icon" className="ml-auto md:hidden" aria-label="Mở menu">
+            <Button variant="ghost" size="icon" className="md:hidden" aria-label="Mở menu">
               <Menu className="size-5" />
             </Button>
           </SheetTrigger>

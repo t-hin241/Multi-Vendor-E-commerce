@@ -28,7 +28,8 @@ type VendorActionStore interface {
 	RecordAudit(ctx context.Context, actorID, action, id string, reason *string, changes map[string]any) error
 	OptIns(ctx context.Context, userIDs []string) (map[string][]string, error)
 	Preference(ctx context.Context, userID string) (*repository.Preference, error)
-	SavePreference(ctx context.Context, userID string, categories []string, expectedVersion int64) (*repository.Preference, error)
+	SavePreference(ctx context.Context, userID string, p repository.Preference, expectedVersion int64) (*repository.Preference, error)
+	RecordConsent(ctx context.Context, userID string, granted bool, version int64) error
 }
 
 // RecipientDirectory asks Vendor who may receive a shop's notices.
@@ -47,10 +48,14 @@ type VendorActionUseCase struct {
 	Directory     RecipientDirectory
 	Tx            Transactor
 	// Enabled is FEATURE_VENDOR_ACTION_NOTICES_ENABLED. Off: nothing new is
-	// recorded or resolved and preferences answer feature_disabled.
+	// recorded or resolved and shop categories are not offered.
 	Enabled bool
-	Log     zerolog.Logger
-	Now     func() time.Time
+	// PreferencesEnabled (the AF-09 inbox flag) also serves preferences
+	// (marketing consent) when shop notices are off; with both off they
+	// answer feature_disabled.
+	PreferencesEnabled bool
+	Log                zerolog.Logger
+	Now                func() time.Time
 	// Wake, when set (buffered, size 1), starts a resolution round at once
 	// after a new event instead of at the next tick.
 	Wake chan struct{}
@@ -168,7 +173,7 @@ func (uc *VendorActionUseCase) finish(ctx context.Context, a *domain.VendorActio
 			if err != nil {
 				return err
 			}
-			stored, isNew, err := uc.Notifications.Store.Insert(ctx, n)
+			stored, isNew, err := uc.Notifications.record(ctx, n)
 			if err != nil {
 				return err
 			}
@@ -341,45 +346,93 @@ func (uc *VendorActionUseCase) Retry(ctx context.Context, adminID, id, reason st
 	return out, nil
 }
 
-// Preferences is a person's shop notice opt-ins.
+// Preferences is a person's notice choices.
 type Preferences struct {
-	Optional []string
-	Version  int64
+	Optional       []string
+	MarketingOptIn bool
+	Version        int64
+	// VendorNotices says whether shop work notices are on (the shop
+	// categories are offered only then).
+	VendorNotices bool
 }
 
-// GetPreferences returns userID's own opt-ins.
+// PreferenceChange is a PATCH: nil fields are kept.
+type PreferenceChange struct {
+	VendorCategories *[]string
+	MarketingOptIn   *bool
+	ExpectedVersion  int64
+}
+
+var errPreferenceConflict = &apperror.Error{Code: "preference_version_conflict", Status: http.StatusConflict,
+	Message: "Your preferences changed meanwhile; reload and try again"}
+
+func (uc *VendorActionUseCase) preferencesOn() bool { return uc.Enabled || uc.PreferencesEnabled }
+
+func (uc *VendorActionUseCase) view(p *repository.Preference) *Preferences {
+	return &Preferences{Optional: p.Categories, MarketingOptIn: p.MarketingOptIn, Version: p.Version, VendorNotices: uc.Enabled}
+}
+
+// GetPreferences returns userID's own choices.
 func (uc *VendorActionUseCase) GetPreferences(ctx context.Context, userID string) (*Preferences, error) {
-	if !uc.Enabled {
+	if !uc.preferencesOn() {
 		return nil, errNoticesDisabled
 	}
 	p, err := uc.Store.Preference(ctx, userID)
 	if err != nil {
 		return nil, apperror.Internal(err)
 	}
-	return &Preferences{Optional: p.Categories, Version: p.Version}, nil
+	return uc.view(p), nil
 }
 
-// UpdatePreferences replaces userID's own opt-ins if expectedVersion is
-// still current (0 for the first save). It changes what staff receive; the
-// owner receives every category whatever is stored.
-func (uc *VendorActionUseCase) UpdatePreferences(ctx context.Context, userID string, categories []string, expectedVersion int64) (*Preferences, error) {
-	if !uc.Enabled {
+// UpdatePreferences changes userID's own choices if ExpectedVersion is
+// still current (0 for the first save). Shop categories change what staff
+// receive (the owner receives every category whatever is stored); the
+// marketing consent never turns off transactional notices, and each change
+// of it is audited with the preference version.
+func (uc *VendorActionUseCase) UpdatePreferences(ctx context.Context, userID string, in PreferenceChange) (*Preferences, error) {
+	if !uc.preferencesOn() {
 		return nil, errNoticesDisabled
 	}
-	cats, err := domain.NormalizeVendorCategories(categories)
-	if err != nil {
-		return nil, apperror.Validation(err.Error())
+	if in.VendorCategories == nil && in.MarketingOptIn == nil {
+		return nil, apperror.Validation("Nothing to change")
 	}
-	if expectedVersion < 0 {
+	if in.ExpectedVersion < 0 {
 		return nil, apperror.Validation("expected_version must not be negative")
 	}
-	p, err := uc.Store.SavePreference(ctx, userID, cats, expectedVersion)
+	var cats []string
+	if in.VendorCategories != nil {
+		var err error
+		if cats, err = domain.NormalizeVendorCategories(*in.VendorCategories); err != nil {
+			return nil, apperror.Validation(err.Error())
+		}
+	}
+	var out *repository.Preference
+	err := uc.Tx.Run(ctx, func(ctx context.Context) error {
+		current, err := uc.Store.Preference(ctx, userID)
+		if err != nil {
+			return err
+		}
+		next := *current
+		if in.VendorCategories != nil {
+			next.Categories = cats
+		}
+		if in.MarketingOptIn != nil {
+			next.MarketingOptIn = *in.MarketingOptIn
+		}
+		if out, err = uc.Store.SavePreference(ctx, userID, next, in.ExpectedVersion); err != nil {
+			return err
+		}
+		if out.MarketingOptIn != current.MarketingOptIn {
+			return uc.Store.RecordConsent(ctx, userID, out.MarketingOptIn, out.Version)
+		}
+		return nil
+	})
 	if errors.Is(err, repository.ErrStale) {
-		return nil, apperror.Conflict("Your preferences changed meanwhile; reload and try again")
+		return nil, errPreferenceConflict
 	}
 	if err != nil {
 		return nil, apperror.Internal(err)
 	}
-	uc.Log.Info().Str("user_id", userID).Strs("categories", p.Categories).Msg("notification_preferences_updated")
-	return &Preferences{Optional: p.Categories, Version: p.Version}, nil
+	uc.Log.Info().Str("user_id", userID).Strs("categories", out.Categories).Bool("marketing_opt_in", out.MarketingOptIn).Msg("notification_preferences_updated")
+	return uc.view(out), nil
 }

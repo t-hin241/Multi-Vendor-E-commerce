@@ -42,4 +42,11 @@ export const queryKeys = {
   // AF-06: the buyer's refunds of one order and an admin's manual transfer view.
   myRefunds: (orderId: string) => ["my-refunds", orderId] as const,
   manualRefund: (refundId: string) => ["manual-refund", refundId] as const,
+  // AF-09: the signed-in person's inbox (cleared on logout with the cache).
+  inboxAll: () => ["inbox"] as const,
+  inboxUnread: (userId: string) => ["inbox", "unread", userId] as const,
+  inboxPages: (userId: string, unreadOnly: boolean) =>
+    ["inbox", "pages", userId, unreadOnly] as const,
+  inboxPreview: (userId: string) => ["inbox", "preview", userId] as const,
+  notificationPreferences: (userId: string) => ["notification-preferences", userId] as const,
 } as const;

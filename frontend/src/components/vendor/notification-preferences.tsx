@@ -9,6 +9,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import * as api from "@/lib/api-client";
 import { useAuth } from "@/lib/auth-context";
+import { queryKeys } from "@/lib/query-keys";
 import {
   noticesDisabled,
   preferencesErrorMessage,
@@ -23,7 +24,7 @@ import {
 export function NotificationPreferences({ owner }: { owner: boolean }) {
   const { callWithAuth, user } = useAuth();
   const queryClient = useQueryClient();
-  const key = ["notification-preferences", user?.id];
+  const key = queryKeys.notificationPreferences(user?.id ?? "");
   const prefs = useQuery({
     queryKey: key,
     queryFn: () => callWithAuth((token) => api.getNotificationPreferences(token)),
@@ -35,6 +36,7 @@ export function NotificationPreferences({ owner }: { owner: boolean }) {
   const [saved, setSaved] = useState(false);
 
   if (prefs.isPending || noticesDisabled(prefs.error)) return null;
+  if (prefs.data && !prefs.data.vendor_notices_enabled) return null;
   if (prefs.isError) {
     return <p className="text-sm text-destructive">Chưa tải được tùy chọn thông báo.</p>;
   }
@@ -47,7 +49,11 @@ export function NotificationPreferences({ owner }: { owner: boolean }) {
     setSaved(false);
     try {
       const next = await callWithAuth((token) =>
-        api.updateNotificationPreferences(token, current, prefs.data!.version),
+        api.updateNotificationPreferences(
+          token,
+          { optional_vendor_categories: current },
+          prefs.data!.version,
+        ),
       );
       queryClient.setQueryData(key, next);
       setDraft(null);

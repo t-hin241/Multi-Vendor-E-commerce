@@ -2869,30 +2869,107 @@ export function retryNotification(
 
 export type VendorNoticeCategory = "orders" | "returns" | "finance";
 
-// A person's own opt-ins. The owner of a shop receives every category
-// whatever is stored; staff receive only what they opted into.
+// A person's own choices. The owner of a shop receives every category
+// whatever is stored; staff receive only what they opted into. Shop
+// categories are offered only while vendor_notices_enabled (AF-08);
+// marketing consent (AF-09) never turns off transactional notices.
 export type NotificationPreferences = {
   optional_vendor_categories: VendorNoticeCategory[];
   available_vendor_categories: VendorNoticeCategory[];
+  vendor_notices_enabled: boolean;
+  marketing_opt_in: boolean;
   version: number;
   owner_receives_all: boolean;
+};
+
+export type NotificationPreferenceChange = {
+  optional_vendor_categories?: VendorNoticeCategory[];
+  marketing_opt_in?: boolean;
 };
 
 export function getNotificationPreferences(token: string): Promise<NotificationPreferences> {
   return request<NotificationPreferences>("/api/notifications/preferences", { token });
 }
 
-// updateNotificationPreferences replaces the opt-ins if expectedVersion is
-// still current (0 before the first save); otherwise 409.
+// updateNotificationPreferences changes the given fields (others are kept)
+// if expectedVersion is still current (0 before the first save); otherwise
+// 409 preference_version_conflict.
 export function updateNotificationPreferences(
   token: string,
-  categories: VendorNoticeCategory[],
+  change: NotificationPreferenceChange,
   expectedVersion: number,
 ): Promise<NotificationPreferences> {
   return request<NotificationPreferences>("/api/notifications/preferences", {
     method: "PATCH",
     token,
-    json: { optional_vendor_categories: categories, expected_version: expectedVersion },
+    json: { ...change, expected_version: expectedVersion },
+  });
+}
+
+// ---------- AF-09: notification inbox ----------
+
+// Plain text only; link is an app route ("/orders/..."), opened after
+// marking the item read. The owner page checks access again.
+export type InboxItem = {
+  id: string;
+  type: string;
+  title: string;
+  body: string;
+  reference_type: string;
+  reference_id: string;
+  link: string;
+  read_at: string | null;
+  created_at: string;
+};
+
+export type InboxPage = {
+  items: InboxItem[];
+  next_cursor: string | null;
+  as_of: string;
+};
+
+export function listInbox(
+  token: string,
+  params: { cursor?: string; unread_only?: boolean; limit?: number } = {},
+): Promise<InboxPage> {
+  return request<InboxPage>("/api/notifications/inbox", {
+    token,
+    query: {
+      cursor: params.cursor,
+      unread_only: params.unread_only ? "true" : undefined,
+      limit: params.limit,
+    },
+  });
+}
+
+export function getInboxUnreadCount(token: string): Promise<{ unread_count: number }> {
+  return request("/api/notifications/inbox/unread-count", { token });
+}
+
+export function markInboxItemRead(
+  token: string,
+  id: string,
+): Promise<{ id: string; read_at: string }> {
+  return request(`/api/notifications/inbox/${id}/read`, { method: "PUT", token });
+}
+
+export function hideInboxItem(
+  token: string,
+  id: string,
+): Promise<{ id: string; hidden_at: string }> {
+  return request(`/api/notifications/inbox/${id}`, { method: "DELETE", token });
+}
+
+// markInboxReadThrough marks read everything up to throughId (the newest
+// item the person has loaded); later items stay unread.
+export function markInboxReadThrough(
+  token: string,
+  throughId: string,
+): Promise<{ affected: number; unread_count: number }> {
+  return request("/api/notifications/inbox/read-markers", {
+    method: "POST",
+    token,
+    json: { through_id: throughId },
   });
 }
 

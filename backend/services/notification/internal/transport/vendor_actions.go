@@ -60,9 +60,11 @@ type vendorActionRequest struct {
 	CorrelationID string `json:"correlation_id" binding:"max=64"`
 }
 
+// preferencesRequest is a PATCH: absent fields are kept.
 type preferencesRequest struct {
-	OptionalVendorCategories []string `json:"optional_vendor_categories" binding:"required,max=10"`
-	ExpectedVersion          int64    `json:"expected_version"`
+	OptionalVendorCategories *[]string `json:"optional_vendor_categories" binding:"omitempty,max=10"`
+	MarketingOptIn           *bool     `json:"marketing_opt_in"`
+	ExpectedVersion          int64     `json:"expected_version"`
 }
 
 type vendorActionResponse struct {
@@ -142,7 +144,7 @@ func (h VendorActionRoutes) report(c *gin.Context) {
 
 func preferencesBody(p *usecase.Preferences) gin.H {
 	return gin.H{"optional_vendor_categories": p.Optional, "available_vendor_categories": domain.VendorCategories,
-		"version": p.Version, "owner_receives_all": true}
+		"vendor_notices_enabled": p.VendorNotices, "marketing_opt_in": p.MarketingOptIn, "version": p.Version, "owner_receives_all": true}
 }
 
 func (h VendorActionRoutes) preferences(c *gin.Context) {
@@ -157,10 +159,11 @@ func (h VendorActionRoutes) preferences(c *gin.Context) {
 func (h VendorActionRoutes) updatePreferences(c *gin.Context) {
 	var req preferencesRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		httpresponse.Error(c, http.StatusBadRequest, "validation_error", "optional_vendor_categories is required")
+		httpresponse.Error(c, http.StatusBadRequest, "validation_error", "optional_vendor_categories or marketing_opt_in is required")
 		return
 	}
-	p, err := h.UseCase.UpdatePreferences(c.Request.Context(), middleware.GetUserID(c), req.OptionalVendorCategories, req.ExpectedVersion)
+	p, err := h.UseCase.UpdatePreferences(c.Request.Context(), middleware.GetUserID(c), usecase.PreferenceChange{
+		VendorCategories: req.OptionalVendorCategories, MarketingOptIn: req.MarketingOptIn, ExpectedVersion: req.ExpectedVersion})
 	if err != nil {
 		httpresponse.HandleError(c, h.Log, err)
 		return

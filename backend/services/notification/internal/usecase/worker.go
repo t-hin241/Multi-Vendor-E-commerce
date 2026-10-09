@@ -16,6 +16,9 @@ type Maintenance struct {
 	// Retention of attempt rows; zero keeps them.
 	AttemptRetention time.Duration
 	Paused           bool
+	// Inbox, when set, has its expired items purged with the hourly run
+	// (AF-09).
+	Inbox *InboxUseCase
 }
 
 func (m *Maintenance) Run(ctx context.Context) {
@@ -42,6 +45,13 @@ func (m *Maintenance) Run(ctx context.Context) {
 		case <-report.C:
 			m.report(ctx)
 		case <-purge.C:
+			if m.Inbox != nil {
+				if n, err := m.Inbox.PurgeExpired(ctx); err != nil {
+					log.Error().Err(err).Msg("notification_inbox_purge_failed")
+				} else if n > 0 {
+					log.Info().Int64("rows", n).Msg("notification_inbox_purged")
+				}
+			}
 			if m.AttemptRetention > 0 {
 				if n, err := m.UseCase.PurgeAttempts(ctx, m.AttemptRetention); err != nil {
 					log.Error().Err(err).Msg("notification_attempts_purge_failed")

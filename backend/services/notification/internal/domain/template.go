@@ -82,13 +82,9 @@ var templates = map[Type]Template{
 // Render builds the subject and plain-text body. name comes from Identity
 // and is used only in the greeting.
 func Render(n *Notification, name string) (subject, body string, err error) {
-	t, ok := templates[n.Type]
-	if !ok || t.Version != n.TemplateVersion {
-		return "", "", fmt.Errorf("no template %s/%s", n.Type, n.TemplateVersion)
-	}
-	ref := n.ReferenceID
-	if len(ref) > 8 {
-		ref = ref[:8]
+	subject, text, err := renderText(n)
+	if err != nil {
+		return "", "", err
 	}
 	greeting := "Xin chào,"
 	if name = strings.TrimSpace(strings.Map(func(r rune) rune {
@@ -99,11 +95,25 @@ func Render(n *Notification, name string) (subject, body string, err error) {
 	}, name)); name != "" {
 		greeting = "Xin chào " + name + ","
 	}
+	return subject, greeting + "\n\n" + text + "\n\nĐây là email tự động, vui lòng không trả lời.\n", nil
+}
+
+// renderText is the subject and the plain message of a notice, shared by
+// the email (Render) and the inbox item (NewInboxItem).
+func renderText(n *Notification) (subject, text string, err error) {
+	t, ok := templates[n.Type]
+	if !ok || t.Version != n.TemplateVersion {
+		return "", "", fmt.Errorf("no template %s/%s", n.Type, n.TemplateVersion)
+	}
+	ref := n.ReferenceID
+	if len(ref) > 8 {
+		ref = ref[:8]
+	}
 	bodyRef := ref
 	if strings.HasPrefix(string(n.Type), "sla_") {
 		bodyRef = n.ReferenceID
 	}
-	return fmt.Sprintf(t.Subject, ref), greeting + "\n\n" + fmt.Sprintf(t.Body, bodyRef) + "\n\nĐây là email tự động, vui lòng không trả lời.\n", nil
+	return fmt.Sprintf(t.Subject, ref), fmt.Sprintf(t.Body, bodyRef), nil
 }
 
 // KnownType reports whether t has a template.

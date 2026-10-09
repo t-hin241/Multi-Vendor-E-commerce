@@ -120,6 +120,13 @@ func main() {
 		Store: notificationRepo, Tx: repository.Transactions{Pool: dbPool}, Identity: identityClient,
 		Sender: emailSender, Roles: roles, Log: log, SendTimeout: sendTimeout, Queue: jobs,
 	})
+	// AF-09: the inbox is written with each new notice while the flag is on;
+	// items already written stay readable only with it on and expire anyway.
+	inboxRepo := repository.InboxRepository{Pool: dbPool}
+	if cfg.Inbox {
+		notificationUseCase.Inbox = inboxRepo
+	}
+	inbox := &usecase.InboxUseCase{Store: inboxRepo, Enabled: cfg.Inbox, Retention: cfg.InboxRetention, Log: log}
 	stopJobs := func() {}
 	if !cfg.DeliveryPaused {
 		stopJobs, err = jobs.Start(notificationUseCase.Deliver, cfg.WorkerConcurrency, cfg.Base.ShutdownTimeout, log)
@@ -127,7 +134,7 @@ func main() {
 			log.Fatal().Err(err).Msg("notification_workers_start_failed")
 		}
 	}
-	maintenance := &usecase.Maintenance{UseCase: notificationUseCase, AttemptRetention: cfg.AttemptRetention, Paused: cfg.DeliveryPaused}
+	maintenance := &usecase.Maintenance{UseCase: notificationUseCase, AttemptRetention: cfg.AttemptRetention, Paused: cfg.DeliveryPaused, Inbox: inbox}
 	maintenanceCtx, stopMaintenance := context.WithCancel(ctx)
 	defer stopMaintenance()
 	go maintenance.Run(maintenanceCtx)
@@ -135,7 +142,7 @@ func main() {
 	// events wait in the stream (consumers are deployed before producers).
 	vendorActions := &usecase.VendorActionUseCase{Store: repository.VendorActionRepository{Pool: dbPool}, Notifications: notificationUseCase,
 		Directory: adapter.NewVendorClient(cfg.VendorServiceURL, cfg.IdentityServiceKey), Tx: repository.Transactions{Pool: dbPool},
-		Enabled: cfg.VendorActionNotices, Log: log, Wake: make(chan struct{}, 1)}
+		Enabled: cfg.VendorActionNotices, PreferencesEnabled: cfg.Inbox, Log: log, Wake: make(chan struct{}, 1)}
 	// PLT-03: notification requests arrive from the event bus (the internal
 	// HTTP route stays for producers in rollback mode).
 	subscriptions := []eventbus.Subscription{{Durable: "notification-requests",
@@ -157,6 +164,7 @@ func main() {
 		health.Checker{Name: "redis", Ping: func(ctx context.Context) error { return redisClient.Ping(ctx).Err() }},
 	)
 	transport.RegisterVendorActions(router, jwtManager, cfg.InternalVerifier, adminGuard, transport.VendorActionRoutes{UseCase: vendorActions, Log: log})
+	transport.RegisterInbox(router, jwtManager, transport.InboxRoutes{UseCase: inbox, Log: log})
 	adminGroup := router.Group("/api/notifications/admin", middleware.RequireAuth(jwtManager), middleware.RequireRole("admin"), adminGuard)
 	bus.RegisterAdmin(adminGroup, roles)
 	adminaudit.Register(adminGroup, "/audit-events",
@@ -176,7 +184,7 @@ func main() {
 	}
 
 	go func() {
-		log.Info().Str("port", cfg.Base.Port).Str("email_provider", cfg.EmailProvider).Bool("delivery_paused", cfg.DeliveryPaused).Bool("vendor_action_notices", cfg.VendorActionNotices).Msg(serviceName + "_starting")
+		log.Info().Str("port", cfg.Base.Port).Str("email_provider", cfg.EmailProvider).Bool("delivery_paused", cfg.DeliveryPaused).Bool("vendor_action_notices", cfg.VendorActionNotices).Bool("inbox", cfg.Inbox).Msg(serviceName + "_starting")
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatal().Err(err).Msg(serviceName + "_listen_failed")
 		}

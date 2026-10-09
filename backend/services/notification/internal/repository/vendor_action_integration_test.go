@@ -102,10 +102,10 @@ func (e *shopEnv) action(t *testing.T, id string) *domain.VendorAction {
 func TestVendorActionReachesOwnerAndOptedInStaffOnce(t *testing.T) {
 	e := newShopEnv(t)
 	uc := e.useCase(roles{})
-	if _, err := uc.UpdatePreferences(t.Context(), e.clerk, []string{"orders"}, 0); err != nil {
+	if _, err := uc.UpdatePreferences(t.Context(), e.clerk, categories(0, []string{"orders"})); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := uc.UpdatePreferences(t.Context(), e.other, []string{"finance"}, 0); err != nil {
+	if _, err := uc.UpdatePreferences(t.Context(), e.other, categories(0, []string{"finance"})); err != nil {
 		t.Fatal(err)
 	}
 	var wg sync.WaitGroup
@@ -254,6 +254,10 @@ func TestVendorActionStoppedWorkerCannotDuplicate(t *testing.T) {
 	}
 }
 
+func categories(version int64, cats []string) usecase.PreferenceChange {
+	return usecase.PreferenceChange{VendorCategories: &cats, ExpectedVersion: version}
+}
+
 // Preferences: self-service, versioned, validated; off with the flag.
 func TestNoticePreferences(t *testing.T) {
 	e := newShopEnv(t)
@@ -262,16 +266,16 @@ func TestNoticePreferences(t *testing.T) {
 	if err != nil || len(p.Optional) != 0 || p.Version != 0 {
 		t.Fatalf("default preferences: %+v %v", p, err)
 	}
-	if p, err = uc.UpdatePreferences(t.Context(), e.clerk, []string{"returns", "orders"}, 0); err != nil || p.Version != 1 {
+	if p, err = uc.UpdatePreferences(t.Context(), e.clerk, categories(0, []string{"returns", "orders"})); err != nil || p.Version != 1 {
 		t.Fatalf("first save: %+v %v", p, err)
 	}
-	if _, err := uc.UpdatePreferences(t.Context(), e.clerk, []string{"finance"}, 0); err == nil {
+	if _, err := uc.UpdatePreferences(t.Context(), e.clerk, categories(0, []string{"finance"})); err == nil {
 		t.Fatal("a stale first save must conflict")
 	}
-	if p, err = uc.UpdatePreferences(t.Context(), e.clerk, []string{}, 1); err != nil || p.Version != 2 || len(p.Optional) != 0 {
+	if p, err = uc.UpdatePreferences(t.Context(), e.clerk, categories(1, []string{})); err != nil || p.Version != 2 || len(p.Optional) != 0 {
 		t.Fatalf("clear: %+v %v", p, err)
 	}
-	if _, err := uc.UpdatePreferences(t.Context(), e.clerk, []string{"marketing"}, 2); err == nil {
+	if _, err := uc.UpdatePreferences(t.Context(), e.clerk, categories(2, []string{"marketing"})); err == nil {
 		t.Fatal("unknown category accepted")
 	}
 	uc.Enabled = false

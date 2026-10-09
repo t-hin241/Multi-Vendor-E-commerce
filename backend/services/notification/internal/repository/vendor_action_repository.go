@@ -196,39 +196,58 @@ func (r VendorActionRepository) OptIns(ctx context.Context, userIDs []string) (m
 	return out, rows.Err()
 }
 
-// Preference is a person's opt-in list; Version 0 means never saved.
+// Preference is a person's notice choices; Version 0 means never saved.
 type Preference struct {
-	Categories []string
-	Version    int64
-	UpdatedAt  *time.Time
+	Categories     []string
+	MarketingOptIn bool
+	Version        int64
+	UpdatedAt      *time.Time
 }
 
+// Preference reads userID's choices (in the caller's transaction, locked).
 func (r VendorActionRepository) Preference(ctx context.Context, userID string) (*Preference, error) {
+	q := `SELECT vendor_categories, marketing_opt_in, version, updated_at FROM notification_preferences WHERE user_id = $1`
+	if inTransaction(ctx) {
+		q += ` FOR UPDATE`
+	}
 	p := &Preference{Categories: []string{}}
-	err := r.Pool.QueryRow(ctx, `SELECT vendor_categories, version, updated_at FROM notification_preferences WHERE user_id = $1`, userID).
-		Scan(&p.Categories, &p.Version, &p.UpdatedAt)
+	err := connection(ctx, r.Pool).QueryRow(ctx, q, userID).Scan(&p.Categories, &p.MarketingOptIn, &p.Version, &p.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return &Preference{Categories: []string{}}, nil
 	}
 	return p, err
 }
 
-// SavePreference stores categories if the stored version is still
-// expectedVersion (0: not saved yet); otherwise ErrStale.
-func (r VendorActionRepository) SavePreference(ctx context.Context, userID string, categories []string, expectedVersion int64) (*Preference, error) {
-	p := &Preference{}
+// SavePreference stores the choices if the stored version is still
+// expectedVersion (0: not saved yet); otherwise ErrStale. A change of the
+// marketing consent records its time.
+func (r VendorActionRepository) SavePreference(ctx context.Context, userID string, p Preference, expectedVersion int64) (*Preference, error) {
+	out := &Preference{}
 	var err error
+	q := connection(ctx, r.Pool)
 	if expectedVersion == 0 {
-		err = r.Pool.QueryRow(ctx, `INSERT INTO notification_preferences (user_id, vendor_categories) VALUES ($1, $2)
-			ON CONFLICT (user_id) DO NOTHING RETURNING vendor_categories, version, updated_at`, userID, categories).
-			Scan(&p.Categories, &p.Version, &p.UpdatedAt)
+		err = q.QueryRow(ctx, `INSERT INTO notification_preferences (user_id, vendor_categories, marketing_opt_in, marketing_consented_at)
+			VALUES ($1, $2, $3, CASE WHEN $3 THEN now() END)
+			ON CONFLICT (user_id) DO NOTHING RETURNING vendor_categories, marketing_opt_in, version, updated_at`, userID, p.Categories, p.MarketingOptIn).
+			Scan(&out.Categories, &out.MarketingOptIn, &out.Version, &out.UpdatedAt)
 	} else {
-		err = r.Pool.QueryRow(ctx, `UPDATE notification_preferences SET vendor_categories = $2, version = version + 1, updated_at = now()
-			WHERE user_id = $1 AND version = $3 RETURNING vendor_categories, version, updated_at`, userID, categories, expectedVersion).
-			Scan(&p.Categories, &p.Version, &p.UpdatedAt)
+		err = q.QueryRow(ctx, `UPDATE notification_preferences SET vendor_categories = $2, version = version + 1, updated_at = now(),
+				marketing_consented_at = CASE WHEN $3 AND NOT marketing_opt_in THEN now() ELSE marketing_consented_at END,
+				marketing_withdrawn_at = CASE WHEN NOT $3 AND marketing_opt_in THEN now() ELSE marketing_withdrawn_at END,
+				marketing_opt_in = $3
+			WHERE user_id = $1 AND version = $4 RETURNING vendor_categories, marketing_opt_in, version, updated_at`,
+			userID, p.Categories, p.MarketingOptIn, expectedVersion).
+			Scan(&out.Categories, &out.MarketingOptIn, &out.Version, &out.UpdatedAt)
 	}
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrStale
 	}
-	return p, err
+	return out, err
+}
+
+// RecordConsent appends a marketing consent change (append-only audit).
+func (r VendorActionRepository) RecordConsent(ctx context.Context, userID string, granted bool, version int64) error {
+	_, err := connection(ctx, r.Pool).Exec(ctx, `INSERT INTO notification_consent_audit (user_id, consent, granted, preference_version, request_id)
+		VALUES ($1, 'marketing', $2, $3, $4)`, userID, granted, version, middleware.CorrelationID(ctx))
+	return err
 }
