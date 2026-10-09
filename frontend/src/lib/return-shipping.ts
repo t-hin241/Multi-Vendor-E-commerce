@@ -35,7 +35,9 @@ export function canRecordReceipt(r: Pick<ReturnRequest, "status">): boolean {
   return r.status === "approved";
 }
 
-export function canAuthorizeShipping(r: Pick<ReturnRequest, "status" | "shipping_status">): boolean {
+export function canAuthorizeShipping(
+  r: Pick<ReturnRequest, "status" | "shipping_status">,
+): boolean {
   return (
     r.status === "approved" &&
     (r.shipping_status === undefined ||

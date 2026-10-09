@@ -57,7 +57,9 @@ export function DeliveryExceptionPanel({ order }: { order: api.Order }) {
               {d.status === "resolved" && d.resolution === "redelivery" && (
                 <p className="text-muted-foreground">Kiện hàng đã được giao lại thành công.</p>
               )}
-              {d.status === "awaiting_buyer" && <ConsentForm exception={d} orderId={order.id} order={order} />}
+              {d.status === "awaiting_buyer" && (
+                <ConsentForm exception={d} orderId={order.id} order={order} />
+              )}
             </div>
           );
         })}

@@ -13,7 +13,13 @@ import { buyerShippingLabel, canDispatch, returnShippingErrorMessage } from "@/l
 // (AF-05): the shop's return address, the return code, the deadline and who
 // pays; then the buyer reports the carrier and tracking number. A late
 // parcel is still accepted. Nothing here says the money is back.
-export function ReturnShippingPanel({ returnRequest: r, orderId }: { returnRequest: api.ReturnRequest; orderId: string }) {
+export function ReturnShippingPanel({
+  returnRequest: r,
+  orderId,
+}: {
+  returnRequest: api.ReturnRequest;
+  orderId: string;
+}) {
   const { callWithAuth } = useAuth();
   const instructions = useQuery({
     queryKey: ["return-shipping-instructions", r.id, r.version],
@@ -21,7 +27,9 @@ export function ReturnShippingPanel({ returnRequest: r, orderId }: { returnReque
     enabled: r.authorization_version > 0,
   });
   if (r.shipping_status === "destination_missing") {
-    return <p className="text-xs text-muted-foreground">{buyerShippingLabel(r.shipping_status)}.</p>;
+    return (
+      <p className="text-xs text-muted-foreground">{buyerShippingLabel(r.shipping_status)}.</p>
+    );
   }
   if (r.authorization_version === 0 || !instructions.data) return null;
   const i = instructions.data;
@@ -58,7 +66,13 @@ function localNow(): string {
   return d.toISOString().slice(0, 16);
 }
 
-function DispatchForm({ returnRequest: r, orderId }: { returnRequest: api.ReturnRequest; orderId: string }) {
+function DispatchForm({
+  returnRequest: r,
+  orderId,
+}: {
+  returnRequest: api.ReturnRequest;
+  orderId: string;
+}) {
   const { callWithAuth } = useAuth();
   const queryClient = useQueryClient();
   const [carrier, setCarrier] = useState("");
@@ -86,7 +100,8 @@ function DispatchForm({ returnRequest: r, orderId }: { returnRequest: api.Return
       await queryClient.invalidateQueries({ queryKey: ["order", orderId] });
       await queryClient.invalidateQueries({ queryKey: ["return-shipping-instructions", r.id] });
     },
-    onError: (err) => setError(returnShippingErrorMessage(err, "Không ghi nhận được thông tin gửi hàng.")),
+    onError: (err) =>
+      setError(returnShippingErrorMessage(err, "Không ghi nhận được thông tin gửi hàng.")),
   });
   return (
     <form
@@ -102,15 +117,30 @@ function DispatchForm({ returnRequest: r, orderId }: { returnRequest: api.Return
     >
       <label className="flex flex-col gap-1">
         Đơn vị vận chuyển
-        <Input className="h-8 w-36" maxLength={60} value={carrier} onChange={(e) => setCarrier(e.target.value)} />
+        <Input
+          className="h-8 w-36"
+          maxLength={60}
+          value={carrier}
+          onChange={(e) => setCarrier(e.target.value)}
+        />
       </label>
       <label className="flex flex-col gap-1">
         Mã vận đơn
-        <Input className="h-8 w-40" maxLength={64} value={tracking} onChange={(e) => setTracking(e.target.value)} />
+        <Input
+          className="h-8 w-40"
+          maxLength={64}
+          value={tracking}
+          onChange={(e) => setTracking(e.target.value)}
+        />
       </label>
       <label className="flex flex-col gap-1">
         Thời gian gửi
-        <Input className="h-8 w-48" type="datetime-local" value={sentAt} onChange={(e) => setSentAt(e.target.value)} />
+        <Input
+          className="h-8 w-48"
+          type="datetime-local"
+          value={sentAt}
+          onChange={(e) => setSentAt(e.target.value)}
+        />
       </label>
       <Button type="submit" size="sm" disabled={send.isPending}>
         {send.isPending ? "Đang gửi…" : "Báo đã gửi hàng"}

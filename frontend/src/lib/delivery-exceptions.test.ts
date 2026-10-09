@@ -69,18 +69,29 @@ describe("admin decisions", () => {
     expect(canRedeliver(dx({ receipt: sellable }))).toBe(true);
     expect(canRedeliver(dx({ receipt: sellable, resolution: "refund" }))).toBe(false);
     expect(canRedeliver(dx({ receipt: sellable, redelivery_count: 1 }))).toBe(false);
-    const damaged = { ...sellable, lines: [{ order_item_id: "i1", condition: "damaged" as const, quantity: 2 }] };
+    const damaged = {
+      ...sellable,
+      lines: [{ order_item_id: "i1", condition: "damaged" as const, quantity: 2 }],
+    };
     expect(canRedeliver(dx({ receipt: damaged }))).toBe(false);
   });
   it("refunds only once the carrier is done with the package", () => {
-    expect(canRefund(dx({ status: "investigating", carrier_outcome: "attempts_exhausted" }))).toBe(false);
+    expect(canRefund(dx({ status: "investigating", carrier_outcome: "attempts_exhausted" }))).toBe(
+      false,
+    );
     expect(canRefund(dx({ status: "investigating", carrier_outcome: "lost" }))).toBe(true);
     expect(canRefund(dx({ refund_id: "r1" }))).toBe(false);
   });
   it("closes only a package delivered after all", () => {
     expect(canClose(dx({ status: "needs_review" }))).toBe(false);
     expect(
-      canClose(dx({ status: "needs_review", carrier_outcome: "delivered", late_delivery_at: "2026-10-09T00:00:00Z" })),
+      canClose(
+        dx({
+          status: "needs_review",
+          carrier_outcome: "delivered",
+          late_delivery_at: "2026-10-09T00:00:00Z",
+        }),
+      ),
     ).toBe(true);
   });
   it("asks the shop for a receipt while the goods are unrecorded", () => {
@@ -96,7 +107,9 @@ describe("buyer wording", () => {
     expect(buyerDeliveryLabel("awaiting_buyer")).toMatch(/xác nhận/);
   });
   it("explains conflicts", () => {
-    expect(deliveryErrorMessage(new ApiError(409, "resolution_locked", "x"), "f")).toMatch(/hoàn tiền/);
+    expect(deliveryErrorMessage(new ApiError(409, "resolution_locked", "x"), "f")).toMatch(
+      /hoàn tiền/,
+    );
     expect(deliveryErrorMessage(new Error("x"), "fallback")).toBe("fallback");
   });
 });

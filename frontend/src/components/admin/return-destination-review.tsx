@@ -39,7 +39,9 @@ export function ReturnDestinationReview({ vendorId }: { vendorId: string }) {
     if (!d) return;
     setError(null);
     try {
-      await callWithAuth((token) => api.decideReturnDestination(token, vendorId, { version: d.version, verify, reason }));
+      await callWithAuth((token) =>
+        api.decideReturnDestination(token, vendorId, { version: d.version, verify, reason }),
+      );
     } catch (err) {
       setError(err);
     }
@@ -52,7 +54,8 @@ export function ReturnDestinationReview({ vendorId }: { vendorId: string }) {
       {d && (
         <>
           <p className="max-w-72 whitespace-normal">
-            {d.recipient_name} ({d.phone}), {d.street_address}, {d.ward}, {d.district}, {d.province} · {d.receiving_hours}
+            {d.recipient_name} ({d.phone}), {d.street_address}, {d.ward}, {d.district}, {d.province}{" "}
+            · {d.receiving_hours}
           </p>
           <p className={d.verified ? "text-muted-foreground" : "text-destructive"}>
             v{d.version} · {d.verified ? "verified" : "not verified"}
