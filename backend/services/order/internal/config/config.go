@@ -44,6 +44,10 @@ type Config struct {
 	// (ORDER_RETURN_DISPATCH_DAYS, 1-30, default 7) is the deadline.
 	ReturnShipping     bool
 	ReturnDispatchDays int
+	// VendorActionNotices is FEATURE_VENDOR_ACTION_NOTICES_ENABLED (AF-08):
+	// tell shops about new paid orders, cancellation and return requests
+	// and return parcels. Enable Notification's flag first.
+	VendorActionNotices bool
 }
 
 // SupportConfig is the rollout of order support cases (AF-01).
@@ -140,6 +144,12 @@ func Load() (Config, error) {
 			return Config{}, fmt.Errorf("config: ORDER_RETURN_DISPATCH_DAYS must be between 1 and 30")
 		}
 	}
+	vendorActionNotices := false
+	if raw := os.Getenv("FEATURE_VENDOR_ACTION_NOTICES_ENABLED"); raw != "" {
+		if vendorActionNotices, err = strconv.ParseBool(raw); err != nil {
+			return Config{}, fmt.Errorf("config: FEATURE_VENDOR_ACTION_NOTICES_ENABLED must be true or false")
+		}
+	}
 	versionedPolicies := false
 	if raw := os.Getenv("FEATURE_VERSIONED_POLICIES_ENABLED"); raw != "" {
 		if versionedPolicies, err = strconv.ParseBool(raw); err != nil {
@@ -154,6 +164,7 @@ func Load() (Config, error) {
 		DeliveryRedelivery:     deliveryRedelivery,
 		ReturnShipping:         returnShipping,
 		ReturnDispatchDays:     returnDispatchDays,
+		VendorActionNotices:    vendorActionNotices,
 		Base:                   base,
 		CartServiceURL:         cartServiceURL,
 		CatalogServiceURL:      catalogServiceURL,

@@ -2,6 +2,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { FinanceDashboard } from "@/components/vendor/finance-dashboard";
+import { NotificationPreferences } from "@/components/vendor/notification-preferences";
 import { ShopReadiness } from "@/components/vendor/shop-readiness";
 import Link from "next/link";
 
@@ -90,6 +91,7 @@ export default function VendorDashboardPage() {
           mục được phân quyền.
         </p>
       )}
+      <NotificationPreferences owner={owner} />
     </div>
   );
 }

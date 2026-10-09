@@ -2865,6 +2865,88 @@ export function retryNotification(
   });
 }
 
+// ---------- AF-08: shop work notices ----------
+
+export type VendorNoticeCategory = "orders" | "returns" | "finance";
+
+// A person's own opt-ins. The owner of a shop receives every category
+// whatever is stored; staff receive only what they opted into.
+export type NotificationPreferences = {
+  optional_vendor_categories: VendorNoticeCategory[];
+  available_vendor_categories: VendorNoticeCategory[];
+  version: number;
+  owner_receives_all: boolean;
+};
+
+export function getNotificationPreferences(token: string): Promise<NotificationPreferences> {
+  return request<NotificationPreferences>("/api/notifications/preferences", { token });
+}
+
+// updateNotificationPreferences replaces the opt-ins if expectedVersion is
+// still current (0 before the first save); otherwise 409.
+export function updateNotificationPreferences(
+  token: string,
+  categories: VendorNoticeCategory[],
+  expectedVersion: number,
+): Promise<NotificationPreferences> {
+  return request<NotificationPreferences>("/api/notifications/preferences", {
+    method: "PATCH",
+    token,
+    json: { optional_vendor_categories: categories, expected_version: expectedVersion },
+  });
+}
+
+export type VendorActionStatus = "pending" | "resolving" | "resolved" | "no_recipient" | "parked";
+
+// One producer event about a shop's work; recipients is a count only.
+export type VendorActionNotice = {
+  id: string;
+  source: "order" | "payment";
+  event_id: string;
+  vendor_id: string;
+  action_kind: string;
+  purpose: VendorNoticeCategory;
+  reference_id: string;
+  vendor_order_id?: string;
+  status: VendorActionStatus;
+  attempts: number;
+  next_attempt_at: string;
+  last_error?: string;
+  recipients: number;
+  permission_version?: string;
+  resolved_at?: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export function listVendorActionNotices(
+  token: string,
+  params: { status?: string; vendor_id?: string; limit?: number; offset?: number } = {},
+): Promise<VendorActionNotice[]> {
+  return request<VendorActionNotice[]>("/api/notifications/admin/vendor-actions", {
+    token,
+    query: params,
+  });
+}
+
+export function getVendorActionSummary(token: string): Promise<{ counts: Record<string, number> }> {
+  return request("/api/notifications/admin/vendor-actions/summary", { token });
+}
+
+// retryVendorActionNotice resolves an event without recipients (or parked)
+// again, e.g. after the owner's account was unlocked; audited.
+export function retryVendorActionNotice(
+  token: string,
+  id: string,
+  reason: string,
+): Promise<VendorActionNotice> {
+  return request<VendorActionNotice>(`/api/notifications/admin/vendor-actions/${id}/retry`, {
+    method: "POST",
+    token,
+    json: { reason },
+  });
+}
+
 // ---------- Event bus (PLT-03) ----------
 
 // Services that consume domain events, with their admin API prefix.

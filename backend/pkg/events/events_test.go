@@ -107,6 +107,13 @@ func TestEventContracts(t *testing.T) {
 
 	env, err = OutcomeRejectedEvent("effect-5", OutcomeRejection{Kind: "payment", PaymentID: "p-1", OrderID: order, Reason: "amount differs"})
 	pin(t, env, err, PaymentOutcomeRejected, order, `{"kind":"payment","payment_id":"p-1","order_id":"`+order+`","reason":"amount differs"}`)
+
+	env, err = VendorOrderActionEvent("effect-6", VendorOrderAction{VendorID: vendor, VendorOrderID: vo, OrderID: order, ActionKind: VendorActionNewOrder, ReferenceID: vo})
+	pin(t, env, err, OrderVendorActionRequired, vo, `{"vendor_id":"`+vendor+`","vendor_order_id":"`+vo+`","order_id":"`+order+`",
+		"action_kind":"new_order","reference_id":"`+vo+`"}`)
+
+	env, err = VendorPayoutActionEvent("payout-notice-1", VendorPayoutAction{VendorID: vendor, PayoutID: "pi-1", Outcome: PayoutFailed})
+	pin(t, env, err, PaymentVendorActionRequired, "pi-1", `{"vendor_id":"`+vendor+`","payout_id":"pi-1","outcome":"failed"}`)
 }
 
 // A consumer reads an older or newer payload without failing on fields

@@ -62,6 +62,12 @@ type Deps struct {
 	ReturnParcels         ReturnParcelGateway
 	ReturnShippingEnabled bool
 	ReturnDispatchDays    int
+	// VendorActionNotices is FEATURE_VENDOR_ACTION_NOTICES_ENABLED (AF-08):
+	// tell the shop about new paid orders, cancellation and return
+	// requests and incoming return parcels. VendorNotices is the HTTP path
+	// when the event bus is off.
+	VendorActionNotices bool
+	VendorNotices       VendorNoticeGateway
 	// Policies is the read model of published policies (AF-02).
 	Policies PolicyVersionPort
 

@@ -289,3 +289,25 @@ func (h *StaffHandler) Authorize(c *gin.Context) {
 	httpresponse.OK(c, http.StatusOK, gin.H{"allowed": res.Allowed, "vendor_id": res.VendorID, "status": res.Status,
 		"vendor_version": res.VendorVersion, "role": res.Role, "membership_version": res.MembershipVersion})
 }
+
+// NotificationRecipients serves GET /internal/vendors/:vendorId/notification-recipients
+// (AF-08, Notification only): who may be told about a shop's work for a
+// purpose. A doubt (Identity unavailable) is a 503, never a shorter list.
+func (h *StaffHandler) NotificationRecipients(c *gin.Context) {
+	res, err := h.staff.NotificationRecipients(c.Request.Context(), c.Param("vendorId"), c.Query("purpose"))
+	if err != nil {
+		if app, ok := err.(*apperror.Error); ok && app.Status < 500 {
+			httpresponse.HandleError(c, h.log, err)
+			return
+		}
+		h.log.Warn().Str("vendor_id", c.Param("vendorId")).Msg("shop_notice_recipients_unavailable")
+		httpresponse.HandleError(c, h.log, shopaccess.Unavailable(err))
+		return
+	}
+	recipients := make([]gin.H, 0, len(res.Recipients))
+	for _, r := range res.Recipients {
+		recipients = append(recipients, gin.H{"user_id": r.UserID, "role": r.Role, "membership_version": r.MembershipVersion})
+	}
+	httpresponse.OK(c, http.StatusOK, gin.H{"vendor_id": res.VendorID, "purpose": res.Purpose, "recipients": recipients,
+		"permission_version": res.PermissionVersion})
+}

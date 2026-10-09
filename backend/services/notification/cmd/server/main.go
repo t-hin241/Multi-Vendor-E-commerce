@@ -131,10 +131,21 @@ func main() {
 	maintenanceCtx, stopMaintenance := context.WithCancel(ctx)
 	defer stopMaintenance()
 	go maintenance.Run(maintenanceCtx)
+	// AF-08: shop work notices. The flag gates the consumer too: off, the
+	// events wait in the stream (consumers are deployed before producers).
+	vendorActions := &usecase.VendorActionUseCase{Store: repository.VendorActionRepository{Pool: dbPool}, Notifications: notificationUseCase,
+		Directory: adapter.NewVendorClient(cfg.VendorServiceURL, cfg.IdentityServiceKey), Tx: repository.Transactions{Pool: dbPool},
+		Enabled: cfg.VendorActionNotices, Log: log, Wake: make(chan struct{}, 1)}
 	// PLT-03: notification requests arrive from the event bus (the internal
 	// HTTP route stays for producers in rollback mode).
-	bus.Run(maintenanceCtx, eventbus.Subscription{Durable: "notification-requests",
-		Types: []string{events.OrderNotificationRequested, events.VendorNotificationRequested, events.OrderWorkItemReminder, events.OrderWorkItemOverdue, events.PaymentWorkItemReminder, events.PaymentWorkItemOverdue, events.ShipmentWorkItemReminder, events.ShipmentWorkItemOverdue}, Handle: transport.NotificationRequestedHandler(notificationUseCase)})
+	subscriptions := []eventbus.Subscription{{Durable: "notification-requests",
+		Types: []string{events.OrderNotificationRequested, events.VendorNotificationRequested, events.OrderWorkItemReminder, events.OrderWorkItemOverdue, events.PaymentWorkItemReminder, events.PaymentWorkItemOverdue, events.ShipmentWorkItemReminder, events.ShipmentWorkItemOverdue}, Handle: transport.NotificationRequestedHandler(notificationUseCase)}}
+	if cfg.VendorActionNotices {
+		subscriptions = append(subscriptions, eventbus.Subscription{Durable: "notification-vendor-actions",
+			Types: []string{events.OrderVendorActionRequired, events.PaymentVendorActionRequired}, Handle: transport.VendorActionHandler(vendorActions)})
+		go vendorActions.Run(maintenanceCtx)
+	}
+	bus.Run(maintenanceCtx, subscriptions...)
 
 	internalHandler := transport.NewInternalHandler(notificationUseCase, log)
 	adminHandler := transport.NewAdminHandler(notificationUseCase, log)
@@ -145,6 +156,7 @@ func main() {
 		health.Checker{Name: "postgres", Ping: func(ctx context.Context) error { return dbPool.Ping(ctx) }},
 		health.Checker{Name: "redis", Ping: func(ctx context.Context) error { return redisClient.Ping(ctx).Err() }},
 	)
+	transport.RegisterVendorActions(router, jwtManager, cfg.InternalVerifier, adminGuard, transport.VendorActionRoutes{UseCase: vendorActions, Log: log})
 	adminGroup := router.Group("/api/notifications/admin", middleware.RequireAuth(jwtManager), middleware.RequireRole("admin"), adminGuard)
 	bus.RegisterAdmin(adminGroup, roles)
 	adminaudit.Register(adminGroup, "/audit-events",
@@ -164,7 +176,7 @@ func main() {
 	}
 
 	go func() {
-		log.Info().Str("port", cfg.Base.Port).Str("email_provider", cfg.EmailProvider).Bool("delivery_paused", cfg.DeliveryPaused).Msg(serviceName + "_starting")
+		log.Info().Str("port", cfg.Base.Port).Str("email_provider", cfg.EmailProvider).Bool("delivery_paused", cfg.DeliveryPaused).Bool("vendor_action_notices", cfg.VendorActionNotices).Msg(serviceName + "_starting")
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatal().Err(err).Msg(serviceName + "_listen_failed")
 		}

@@ -14,6 +14,7 @@ import (
 	"shopee/backend/pkg/authjwt/authjwttest"
 	"shopee/backend/pkg/serviceauth"
 	"shopee/backend/services/notification/internal/transport"
+	"shopee/backend/services/notification/internal/usecase"
 )
 
 // The notify contract needs the internal key (it used to be open), and
@@ -57,4 +58,49 @@ func TestEveryAdminRouteNamesAPermission(t *testing.T) {
 	router := transport.NewRouter("test", zerolog.Nop(), authjwttest.Manager(), serviceauth.SharedKey("fake-test-internal-key-not-a-real-secret"),
 		transport.NewInternalHandler(nil, zerolog.Nop()), transport.NewAdminHandler(nil, zerolog.Nop()), adminaccesstest.Guard(transport.AdminRoutes))
 	adminaccesstest.AssertCovered(t, router, transport.AdminRoutes)
+}
+
+// AF-08: the report route needs a service key, preferences a session (any
+// role), the review routes an admin with a permission bundle.
+func TestVendorActionRoutesAreProtected(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	jwt := authjwttest.Manager()
+	key := "test-internal-key-not-a-real-secret-0000"
+	router := gin.New()
+	transport.RegisterVendorActions(router, jwt, serviceauth.SharedKey(key), adminaccesstest.Guard(transport.AdminRoutes),
+		transport.VendorActionRoutes{UseCase: &usecase.VendorActionUseCase{}, Log: zerolog.Nop()})
+	adminaccesstest.AssertCovered(t, router, transport.AdminRoutes)
+	send := func(method, path string, headers map[string]string) int {
+		req := httptest.NewRequest(method, path, strings.NewReader(`{}`))
+		for k, v := range headers {
+			req.Header.Set(k, v)
+		}
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+		return w.Code
+	}
+	if code := send("POST", "/internal/vendor-action-notices", nil); code != http.StatusForbidden {
+		t.Fatalf("report without the key: %d", code)
+	}
+	if code := send("POST", "/internal/vendor-action-notices", map[string]string{serviceauth.Header: key}); code != http.StatusBadRequest {
+		t.Fatalf("report with the key and an empty body: %d", code)
+	}
+	for _, route := range [][2]string{{"GET", "/api/notifications/preferences"}, {"PATCH", "/api/notifications/preferences"}} {
+		if code := send(route[0], route[1], nil); code != http.StatusUnauthorized {
+			t.Fatalf("%v without a session: %d", route, code)
+		}
+	}
+	vendor, _, _ := jwt.IssueAccessToken("11111111-1111-1111-1111-111111111111", "vendor", time.Minute)
+	if code := send("GET", "/api/notifications/preferences", map[string]string{"Authorization": "Bearer " + vendor}); code != http.StatusNotFound {
+		t.Fatalf("preferences while the feature is off: %d", code)
+	}
+	for _, route := range [][2]string{{"GET", "/api/notifications/admin/vendor-actions"}, {"GET", "/api/notifications/admin/vendor-actions/summary"},
+		{"POST", "/api/notifications/admin/vendor-actions/11111111-1111-1111-1111-111111111111/retry"}} {
+		if code := send(route[0], route[1], nil); code != http.StatusUnauthorized {
+			t.Fatalf("%v without token: %d", route, code)
+		}
+		if code := send(route[0], route[1], map[string]string{"Authorization": "Bearer " + vendor}); code != http.StatusForbidden {
+			t.Fatalf("%v as vendor: %d", route, code)
+		}
+	}
 }

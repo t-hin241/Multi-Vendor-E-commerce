@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"shopee/backend/pkg/apperror"
+	"shopee/backend/pkg/events"
 	"shopee/backend/pkg/shopaccess"
 	"shopee/backend/services/order/internal/adapter"
 	"shopee/backend/services/order/internal/domain"
@@ -352,6 +353,9 @@ func (uc *OrderUseCase) ReportReturnDispatch(ctx context.Context, buyerID, retur
 			return err
 		}
 		result = rr
+		if err := uc.noticeVendorOfReturn(ctx, rr, events.VendorActionReturnDispatched); err != nil {
+			return err
+		}
 		return uc.Effects.Enqueue(ctx, domain.Effect{OrderID: rr.OrderID, Kind: domain.EffectDispatchReturnShipment, Target: rr.ID})
 	})
 	if err != nil {
