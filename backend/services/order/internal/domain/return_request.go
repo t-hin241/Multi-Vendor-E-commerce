@@ -50,6 +50,25 @@ type ReturnRequest struct {
 	Version           int64
 	CreatedAt         time.Time
 	UpdatedAt         time.Time
+	// AF-05 return shipping: the authorization, the buyer's dispatch and
+	// the shop's receipt.
+	AuthorizationVersion int
+	AuthorizedAt         *time.Time
+	AuthorizedBy         *string
+	Destination          *ReturnDestination
+	FeePayer             *string
+	FeeCap               *int64
+	DispatchDeadline     *time.Time
+	ShippingStatus       *string
+	ReturnShipmentID     *string
+	DispatchCarrier      *string
+	DispatchTracking     *string
+	DispatchedAt         *time.Time
+	DispatchKey          *string
+	DispatchHash         *string
+	DispatchOverdueAt    *time.Time
+	RestockQuantity      *int64
+	InspectionDisputed   bool
 }
 
 // ReturnEvent is one audited step of a return request.

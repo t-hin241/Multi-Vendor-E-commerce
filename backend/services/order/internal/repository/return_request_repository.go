@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"shopee/backend/pkg/casesla"
 	"time"
@@ -25,18 +26,31 @@ func NewReturnRequestRepository(pool *pgxpool.Pool) *ReturnRequestRepository {
 const returnRequestColumns = `rr.id, rr.order_id, rr.order_item_id, rr.buyer_id, rr.reason, rr.status, rr.quantity, rr.refund_amount,
 	rr.policy_version, rr.return_window_days, rr.evidence, rr.vendor_note, rr.vendor_confirmed_by, rr.vendor_confirmed_at,
 	rr.decided_by, rr.decision_note, rr.decided_at, rr.received_by, rr.received_at, rr.inspection_note, rr.restock, rr.version,
-	rr.created_at, rr.updated_at, (SELECT due_at FROM case_sla_work_items w WHERE w.resource_type='return' AND w.resource_id=rr.id AND w.active), COALESCE((SELECT payload->>'waiting_on' FROM case_sla_work_items w WHERE w.resource_type='return' AND w.resource_id=rr.id AND w.active),'')`
+	rr.created_at, rr.updated_at, rr.authorization_version, rr.authorized_at, rr.authorized_by, rr.return_destination, rr.return_fee_payer,
+	rr.return_fee_cap, rr.dispatch_deadline, rr.shipping_status, rr.return_shipment_id, rr.dispatch_carrier, rr.dispatch_tracking,
+	rr.dispatched_at, rr.dispatch_key, rr.dispatch_hash, rr.dispatch_overdue_at, rr.restock_quantity, rr.inspection_disputed,
+	(SELECT due_at FROM case_sla_work_items w WHERE w.resource_type='return' AND w.resource_id=rr.id AND w.active), COALESCE((SELECT payload->>'waiting_on' FROM case_sla_work_items w WHERE w.resource_type='return' AND w.resource_id=rr.id AND w.active),'')`
 
 func scanReturnRequest(row pgx.Row) (*domain.ReturnRequest, error) {
 	var r domain.ReturnRequest
+	var destination []byte
 	if err := row.Scan(&r.ID, &r.OrderID, &r.OrderItemID, &r.BuyerID, &r.Reason, &r.Status, &r.Quantity, &r.RefundAmount,
 		&r.PolicyVersion, &r.ReturnWindowDays, &r.Evidence, &r.VendorNote, &r.VendorConfirmedBy, &r.VendorConfirmedAt,
 		&r.DecidedBy, &r.DecisionNote, &r.DecidedAt, &r.ReceivedBy, &r.ReceivedAt, &r.InspectionNote, &r.Restock, &r.Version,
-		&r.CreatedAt, &r.UpdatedAt, &r.ActionDueAt, &r.WaitingOn); err != nil {
+		&r.CreatedAt, &r.UpdatedAt, &r.AuthorizationVersion, &r.AuthorizedAt, &r.AuthorizedBy, &destination, &r.FeePayer, &r.FeeCap,
+		&r.DispatchDeadline, &r.ShippingStatus, &r.ReturnShipmentID, &r.DispatchCarrier, &r.DispatchTracking, &r.DispatchedAt,
+		&r.DispatchKey, &r.DispatchHash, &r.DispatchOverdueAt, &r.RestockQuantity, &r.InspectionDisputed,
+		&r.ActionDueAt, &r.WaitingOn); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrReturnRequestNotFound
 		}
 		return nil, err
+	}
+	if len(destination) > 0 {
+		r.Destination = &domain.ReturnDestination{}
+		if err := json.Unmarshal(destination, r.Destination); err != nil {
+			return nil, err
+		}
 	}
 	return &r, nil
 }
@@ -101,6 +115,11 @@ type ReturnUpdate struct {
 	ReceivedBy     *string
 	InspectionNote *string
 	Restock        *bool
+	// AF-05: a received return's sellable units, dispute flag and the
+	// shipping status that goes with the step.
+	RestockQuantity    *int64
+	InspectionDisputed *bool
+	ShippingStatus     *string
 }
 
 // Transition moves a request from one status to another (compare-and-set
@@ -120,9 +139,13 @@ func (r *ReturnRequestRepository) Transition(ctx context.Context, rr *domain.Ret
 		    received_by = COALESCE($9, received_by),
 		    received_at = CASE WHEN $9::uuid IS NOT NULL THEN now() ELSE received_at END,
 		    inspection_note = COALESCE($10, inspection_note),
-		    restock = COALESCE($11, restock)
+		    restock = COALESCE($11, restock),
+		    restock_quantity = COALESCE($12, restock_quantity),
+		    inspection_disputed = COALESCE($13, inspection_disputed),
+		    shipping_status = COALESCE($14, shipping_status)
 		WHERE id = $1 AND status = $2 AND version = $3`,
-		rr.ID, rr.Status, rr.Version, to, u.VendorNote, u.VendorActor, u.DecisionNote, u.DecidedBy, u.ReceivedBy, u.InspectionNote, u.Restock)
+		rr.ID, rr.Status, rr.Version, to, u.VendorNote, u.VendorActor, u.DecisionNote, u.DecidedBy, u.ReceivedBy, u.InspectionNote, u.Restock,
+		u.RestockQuantity, u.InspectionDisputed, u.ShippingStatus)
 	if err != nil {
 		return err
 	}
@@ -132,7 +155,95 @@ func (r *ReturnRequestRepository) Transition(ctx context.Context, rr *domain.Ret
 	rr.Status = to
 	rr.Version++
 	rr.UpdatedAt = time.Now().UTC()
+	if u.RestockQuantity != nil {
+		rr.RestockQuantity = u.RestockQuantity
+	}
+	if u.InspectionDisputed != nil {
+		rr.InspectionDisputed = *u.InspectionDisputed
+	}
+	if u.ShippingStatus != nil {
+		rr.ShippingStatus = u.ShippingStatus
+	}
 	return r.syncSLA(ctx, rr)
+}
+
+// SaveShipping writes a return's shipping fields (AF-05) with
+// compare-and-set on its version; the status does not change.
+func (r *ReturnRequestRepository) SaveShipping(ctx context.Context, rr *domain.ReturnRequest) error {
+	var destination []byte
+	if rr.Destination != nil {
+		var err error
+		if destination, err = json.Marshal(rr.Destination); err != nil {
+			return err
+		}
+	}
+	err := connection(ctx, r.pool).QueryRow(ctx, `UPDATE return_requests SET authorization_version = $3, authorized_at = $4, authorized_by = $5,
+		return_destination = $6, return_fee_payer = $7, return_fee_cap = $8, dispatch_deadline = $9, shipping_status = $10,
+		dispatch_carrier = $11, dispatch_tracking = $12, dispatched_at = $13, dispatch_key = $14, dispatch_hash = $15,
+		dispatch_overdue_at = $16, version = version + 1, updated_at = now()
+		WHERE id = $1 AND version = $2 RETURNING version, updated_at`,
+		rr.ID, rr.Version, rr.AuthorizationVersion, rr.AuthorizedAt, rr.AuthorizedBy, destination, rr.FeePayer, rr.FeeCap, rr.DispatchDeadline,
+		rr.ShippingStatus, rr.DispatchCarrier, rr.DispatchTracking, rr.DispatchedAt, rr.DispatchKey, rr.DispatchHash, rr.DispatchOverdueAt).
+		Scan(&rr.Version, &rr.UpdatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ErrStaleState
+	}
+	if err != nil {
+		return err
+	}
+	return r.syncSLA(ctx, rr)
+}
+
+// SetReturnShipment records Shipment's parcel id without a version bump
+// (the buyer's view does not become stale).
+func (r *ReturnRequestRepository) SetReturnShipment(ctx context.Context, returnID, shipmentID string) error {
+	_, err := connection(ctx, r.pool).Exec(ctx, `UPDATE return_requests SET return_shipment_id = $2 WHERE id = $1`, returnID, shipmentID)
+	return err
+}
+
+// AddReceipt appends what the shop received; a concurrent receipt of the
+// same version is refused (ErrStaleState).
+func (r *ReturnRequestRepository) AddReceipt(ctx context.Context, g *domain.ReturnReceipt) error {
+	err := connection(ctx, r.pool).QueryRow(ctx, `INSERT INTO return_goods_receipts (return_id, receipt_version, recorded_by, actor_role,
+		sellable_quantity, damaged_quantity, missing_quantity, note) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id, created_at`,
+		g.ReturnID, g.Version, g.RecordedBy, g.ActorRole, g.Sellable, g.Damaged, g.Missing, g.Note).Scan(&g.ID, &g.CreatedAt)
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+		return ErrStaleState
+	}
+	return err
+}
+
+// LatestReceipt is the return's newest receipt, or nil.
+func (r *ReturnRequestRepository) LatestReceipt(ctx context.Context, returnID string) (*domain.ReturnReceipt, error) {
+	var g domain.ReturnReceipt
+	err := connection(ctx, r.pool).QueryRow(ctx, `SELECT id, return_id, receipt_version, recorded_by, actor_role, sellable_quantity,
+		damaged_quantity, missing_quantity, note, created_at FROM return_goods_receipts WHERE return_id = $1
+		ORDER BY receipt_version DESC LIMIT 1`, returnID).
+		Scan(&g.ID, &g.ReturnID, &g.Version, &g.RecordedBy, &g.ActorRole, &g.Sellable, &g.Damaged, &g.Missing, &g.Note, &g.CreatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	return &g, err
+}
+
+// ListDispatchOverdue lists authorized returns whose parcel is late and
+// not flagged yet.
+func (r *ReturnRequestRepository) ListDispatchOverdue(ctx context.Context, now time.Time, limit int) ([]*domain.ReturnRequest, error) {
+	return r.list(ctx, `SELECT `+returnRequestColumns+` FROM return_requests rr WHERE rr.status = 'approved'
+		AND rr.shipping_status = 'awaiting_dispatch' AND rr.dispatch_overdue_at IS NULL AND rr.dispatch_deadline < $1
+		ORDER BY rr.dispatch_deadline, rr.id LIMIT $2`, now, limit)
+}
+
+// ShippingCounts feed the worker report.
+func (r *ReturnRequestRepository) ShippingCounts(ctx context.Context) (missing, overdue, inTransit, disputed int64, err error) {
+	err = connection(ctx, r.pool).QueryRow(ctx, `SELECT
+		count(*) FILTER (WHERE status = 'approved' AND shipping_status = 'destination_missing'),
+		count(*) FILTER (WHERE status = 'approved' AND shipping_status = 'awaiting_dispatch' AND dispatch_overdue_at IS NOT NULL),
+		count(*) FILTER (WHERE status = 'approved' AND shipping_status = 'awaiting_verification'),
+		count(*) FILTER (WHERE status = 'received' AND inspection_disputed)
+		FROM return_requests WHERE status IN ('approved', 'received')`).Scan(&missing, &overdue, &inTransit, &disputed)
+	return missing, overdue, inTransit, disputed, err
 }
 
 // AddEvent appends one audit entry in the caller's transaction.

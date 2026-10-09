@@ -60,6 +60,9 @@ func NewRouter(
 		buyerGroup.POST("/:id/cancel", orderHandler.Cancel)
 		buyerGroup.POST("/:id/return-requests", returnHandler.Create)
 		buyerGroup.GET("/return-requests/mine", returnHandler.ListMine)
+		// AF-05: how to send a return back, and the parcel's dispatch.
+		buyerGroup.GET("/return-requests/:id/shipping-instructions", returnHandler.ShippingInstructions)
+		buyerGroup.POST("/return-requests/:id/dispatches", returnHandler.Dispatch)
 		// AF-03: cancel a paid package before handover.
 		buyerGroup.POST("/vendor-orders/:id/cancellation-requests", cancellationHandler.Create)
 		buyerGroup.GET("/:id/cancellation-requests", cancellationHandler.OrderList)
@@ -103,6 +106,7 @@ func NewRouter(
 		vendorGroup.POST("/delivery-exceptions/:exceptionID/receipts", deliveryHandler.Receipt)
 		vendorGroup.POST("/return-requests/:id/confirm", returnHandler.ConfirmByVendor)
 		vendorGroup.POST("/return-requests/:id/receive", returnHandler.Receive)
+		vendorGroup.POST("/return-requests/:id/goods-receipts", returnHandler.GoodsReceipt)
 		vendorGroup.GET("/support-cases/capability", supportHandler.Capability)
 		vendorGroup.GET("/support-cases", supportHandler.List)
 		vendorGroup.GET("/support-cases/:caseID", supportHandler.Get)
@@ -130,6 +134,9 @@ func NewRouter(
 		adminGroup.POST("/return-requests/:id/decision", returnHandler.Decide)
 		adminGroup.POST("/return-requests/:id/receive", returnHandler.Receive)
 		adminGroup.POST("/return-requests/:id/retry-refund", returnHandler.RetryRefund)
+		adminGroup.POST("/return-requests/:id/goods-receipts", returnHandler.GoodsReceipt)
+		adminGroup.POST("/return-requests/:id/shipping-authorizations", returnHandler.AuthorizeShipping)
+		adminGroup.POST("/return-requests/:id/shipping-decisions", returnHandler.ShippingDecision)
 		adminGroup.GET("/support-cases/capability", supportHandler.Capability)
 		adminGroup.GET("/support-cases", supportHandler.List)
 		adminGroup.GET("/support-cases/:caseID", supportHandler.Get)

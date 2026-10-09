@@ -147,6 +147,12 @@ func (uc *OrderUseCase) executeEffect(ctx context.Context, e *domain.Effect) err
 		return uc.createReplacementAttempt(ctx, e)
 	case domain.EffectRecoverDeliveryStock:
 		return uc.recoverDeliveryStock(ctx, e)
+	case domain.EffectAuthorizeReturnShipment:
+		return uc.authorizeReturnShipment(ctx, e)
+	case domain.EffectDispatchReturnShipment:
+		return uc.dispatchReturnShipment(ctx, e)
+	case domain.EffectCloseReturnShipment:
+		return uc.closeReturnShipment(ctx, e)
 	case domain.EffectReportRejectedOutcome:
 		var p domain.RejectedOutcomePayload
 		if err := json.Unmarshal(e.Payload, &p); err != nil {

@@ -468,13 +468,38 @@ type returnResponse struct {
 	Restock          *bool      `json:"restock,omitempty"`
 	CreatedAt        time.Time  `json:"created_at"`
 	UpdatedAt        time.Time  `json:"updated_at"`
+	// AF-05 return shipping (the address itself is in the buyer's
+	// shipping instructions only).
+	Version              int64                `json:"version"`
+	AuthorizationVersion int                  `json:"authorization_version"`
+	ReturnCode           string               `json:"return_code,omitempty"`
+	ShippingStatus       *string              `json:"shipping_status,omitempty"`
+	FeePayer             *string              `json:"fee_payer,omitempty"`
+	FeeCap               *int64               `json:"fee_cap,omitempty"`
+	DispatchDeadline     *time.Time           `json:"dispatch_deadline,omitempty"`
+	DispatchOverdue      bool                 `json:"dispatch_overdue"`
+	DispatchCarrier      *string              `json:"dispatch_carrier,omitempty"`
+	DispatchTracking     *string              `json:"dispatch_tracking,omitempty"`
+	DispatchedAt         *time.Time           `json:"dispatched_at,omitempty"`
+	DestinationProvince  *string              `json:"destination_province,omitempty"`
+	RestockQuantity      *int64               `json:"restock_quantity,omitempty"`
+	InspectionDisputed   bool                 `json:"inspection_disputed"`
+	Receipt              *receiptResponseBody `json:"receipt,omitempty"`
 }
 
 func toReturnResponse(r *domain.ReturnRequest) returnResponse {
-	return returnResponse{ActionDueAt: r.ActionDueAt, WaitingOn: r.WaitingOn, ID: r.ID, OrderID: r.OrderID, OrderItemID: r.OrderItemID, Reason: r.Reason, Status: string(r.Status),
+	out := returnResponse{ActionDueAt: r.ActionDueAt, WaitingOn: r.WaitingOn, ID: r.ID, OrderID: r.OrderID, OrderItemID: r.OrderItemID, Reason: r.Reason, Status: string(r.Status),
 		Quantity: r.Quantity, RefundAmount: r.RefundAmount, PolicyVersion: r.PolicyVersion, ReturnWindowDays: r.ReturnWindowDays,
 		Evidence: r.Evidence, VendorNote: r.VendorNote, DecisionNote: r.DecisionNote, DecidedAt: r.DecidedAt,
-		ReceivedAt: r.ReceivedAt, InspectionNote: r.InspectionNote, Restock: r.Restock, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt}
+		ReceivedAt: r.ReceivedAt, InspectionNote: r.InspectionNote, Restock: r.Restock, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt,
+		Version: r.Version, AuthorizationVersion: r.AuthorizationVersion, ShippingStatus: r.ShippingStatus, FeePayer: r.FeePayer, FeeCap: r.FeeCap,
+		DispatchDeadline: r.DispatchDeadline, DispatchOverdue: r.DispatchOverdueAt != nil, DispatchCarrier: r.DispatchCarrier,
+		DispatchTracking: r.DispatchTracking, DispatchedAt: r.DispatchedAt, RestockQuantity: r.RestockQuantity, InspectionDisputed: r.InspectionDisputed}
+	if r.Authorized() {
+		out.ReturnCode = domain.ReturnCode(r.ID)
+		out.DestinationProvince = &r.Destination.Province
+	}
+	return out
 }
 
 func toReturnResponses(items []*domain.ReturnRequest) []returnResponse {

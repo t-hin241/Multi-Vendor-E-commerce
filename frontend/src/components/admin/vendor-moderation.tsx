@@ -1,6 +1,7 @@
 "use client";
 
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { ReturnDestinationReview } from "@/components/admin/return-destination-review";
 import { VendorOperations } from "@/components/admin/vendor-operations";
 import { useState } from "react";
 
@@ -134,6 +135,7 @@ export function VendorModeration() {
                       </div>
                     )}
                     <VendorOperations vendor={v} />
+                    <ReturnDestinationReview vendorId={v.id} />
                   </TableCell>
                 </TableRow>
               ))}

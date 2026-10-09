@@ -67,3 +67,7 @@ Từ bản AF-03, "Đã giao cho vận chuyển" luôn claim quyền bàn giao �
 ## Giao thất bại, thất lạc và giao lại (AF-04)
 
 Migration `000009` thêm trạng thái `lost`, số lần giao (`attempt_no`, `original_shipment_id`) và cho một gói có nhiều lần giao (tối đa một lần giao đang chạy). Với `FEATURE_DELIVERY_RESOLUTION_ENABLED`, Shipment báo Order qua `shipment.exception_detected` khi đủ `SHIPMENT_DELIVERY_ATTEMPT_LIMIT` lần giao thất bại, khi hàng hoàn về, hoặc khi admin xác nhận thất lạc (`POST /api/shipments/admin/shipments/:id/failure-reports {kind: lost}`); Order tạo lần giao lại qua `POST /internal/shipments/replacement-attempts`. Lần giao cũ không bao giờ bị đặt lại về `shipped`. Chi tiết: `deploy/delivery-exception-runbook.md`.
+
+## Kiện hàng trả (AF-05)
+
+Migration `000010` thêm `return_shipments`: kiện chiều về từ buyer tới địa chỉ nhận trả đã xác minh của shop, do Order điều khiển qua `/internal/shipments/return-shipments` (mở / gửi / nhận / thất lạc). Mỗi yêu cầu trả hàng tối đa một kiện đang chạy; không dùng lại shipment chiều đi. Cờ `FEATURE_RETURN_SHIPPING_ENABLED` chỉ chặn kiện mới. Admin xem ở `GET /api/shipments/admin/return-shipments?status=stale`; log `shipment_return_backlog`. Chi tiết: `deploy/return-shipping-runbook.md`.

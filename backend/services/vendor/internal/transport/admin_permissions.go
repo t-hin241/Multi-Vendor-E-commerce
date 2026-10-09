@@ -24,4 +24,6 @@ var AdminRoutes = adminaccess.Routes{
 	"GET /api/vendor/admin/shops/:vendorId/payout-accounts":               adminaccess.FinanceRead,
 	"POST /api/vendor/admin/shops/:vendorId/payout-accounts/:id/decision": adminaccess.FinanceApprove,
 	"POST /api/vendor/admin/shops/:vendorId/payout-accounts/:id/details":  adminaccess.FinanceApprove,
+	"GET /api/vendor/admin/shops/:vendorId/return-destination":            adminaccess.ModerationManage,
+	"POST /api/vendor/admin/shops/:vendorId/return-destination/decision":  adminaccess.ModerationManage,
 }.Merge(adminaccess.Shared("/api/vendor/admin", true, false, false))

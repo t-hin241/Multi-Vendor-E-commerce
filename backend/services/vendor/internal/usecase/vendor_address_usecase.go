@@ -18,6 +18,9 @@ type VendorAddressUseCase struct {
 	addresses VendorAddressRepositoryPort
 	vendors   VendorRepositoryPort
 	ops       Operations
+	// Destinations (AF-05), when set: editing the return destination's
+	// address makes it unverified; deleting it is refused.
+	Destinations ReturnDestinationPort
 }
 
 func NewVendorAddressUseCase(addresses VendorAddressRepositoryPort, vendors VendorRepositoryPort, ops Operations) *VendorAddressUseCase {
@@ -85,6 +88,11 @@ func (uc *VendorAddressUseCase) update(ctx context.Context, userID, vendorID, ad
 	if err := uc.addresses.Update(ctx, addressID, address); err != nil {
 		return nil, apperror.Internal(err)
 	}
+	if uc.Destinations != nil {
+		if _, err := uc.Destinations.TouchAddress(ctx, addressID); err != nil {
+			return nil, apperror.Internal(err)
+		}
+	}
 	return address, nil
 }
 
@@ -95,6 +103,15 @@ func (uc *VendorAddressUseCase) delete(ctx context.Context, userID, vendorID, ad
 	}
 	if address.IsDefault {
 		return apperror.Conflict("Choose another default pickup address before deleting this address")
+	}
+	if uc.Destinations != nil {
+		used, err := uc.Destinations.UsesAddress(ctx, addressID)
+		if err != nil {
+			return apperror.Internal(err)
+		}
+		if used {
+			return apperror.Conflict("This address receives returned goods; choose another return destination first")
+		}
 	}
 	if err := uc.addresses.Delete(ctx, addressID); err != nil {
 		return apperror.Internal(err)

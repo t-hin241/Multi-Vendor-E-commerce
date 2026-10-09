@@ -32,6 +32,10 @@ type createReturnRequest struct {
 type decideReturnRequest struct {
 	Approve bool   `json:"approve"`
 	Note    string `json:"note" binding:"max=1000"`
+	// AF-05: who pays the way back (seller by default) and the approved
+	// reimbursement cap when the seller pays.
+	FeePayer string `json:"fee_payer" binding:"omitempty,oneof=buyer seller"`
+	FeeCap   *int64 `json:"fee_cap" binding:"omitempty,min=0"`
 }
 
 type noteRequest struct {
@@ -133,7 +137,14 @@ func (h *ReturnHandler) AdminGet(c *gin.Context) {
 		httpresponse.HandleError(c, h.log, err)
 		return
 	}
-	httpresponse.OK(c, http.StatusOK, toReturnResponse(r))
+	out := toReturnResponse(r)
+	receipt, err := h.orders.ReturnReceipt(c.Request.Context(), r.ID)
+	if err != nil {
+		httpresponse.HandleError(c, h.log, err)
+		return
+	}
+	out.Receipt = toReturnReceipt(receipt)
+	httpresponse.OK(c, http.StatusOK, out)
 }
 
 func (h *ReturnHandler) Decide(c *gin.Context) {
@@ -145,7 +156,8 @@ func (h *ReturnHandler) Decide(c *gin.Context) {
 		httpresponse.Error(c, http.StatusBadRequest, "validation_error", "note must be at most 1000 characters")
 		return
 	}
-	item, err := h.orders.AdminDecideReturn(c.Request.Context(), middleware.GetUserID(c), c.Param("id"), req.Approve, req.Note)
+	item, err := h.orders.AdminDecideReturnWithTerms(c.Request.Context(), middleware.GetUserID(c), c.Param("id"), req.Approve, req.Note,
+		usecase.ReturnShippingTerms{FeePayer: req.FeePayer, FeeCap: req.FeeCap})
 	if err != nil {
 		httpresponse.HandleError(c, h.log, err)
 		return

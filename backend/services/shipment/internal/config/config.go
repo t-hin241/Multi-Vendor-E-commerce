@@ -27,6 +27,10 @@ type Config struct {
 	// (SHIPMENT_DELIVERY_ATTEMPT_LIMIT, default 2) open a case.
 	DeliveryResolution bool
 	AttemptLimit       int
+	// ReturnShipping (AF-05, FEATURE_RETURN_SHIPPING_ENABLED, default
+	// off): open return parcels Order authorizes. Parcels already open keep
+	// moving when it is turned off.
+	ReturnShipping bool
 }
 
 func Load() (Config, error) {
@@ -70,6 +74,10 @@ func Load() (Config, error) {
 	if err != nil {
 		return Config{}, fmt.Errorf("config: FEATURE_DELIVERY_RESOLUTION_ENABLED must be true or false")
 	}
+	returnShipping, err := strconv.ParseBool(getEnv("FEATURE_RETURN_SHIPPING_ENABLED", "false"))
+	if err != nil {
+		return Config{}, fmt.Errorf("config: FEATURE_RETURN_SHIPPING_ENABLED must be true or false")
+	}
 	attemptLimit, err := strconv.Atoi(getEnv("SHIPMENT_DELIVERY_ATTEMPT_LIMIT", "2"))
 	if err != nil || attemptLimit < 1 || attemptLimit > 5 {
 		return Config{}, fmt.Errorf("config: SHIPMENT_DELIVERY_ATTEMPT_LIMIT must be between 1 and 5")
@@ -79,7 +87,7 @@ func Load() (Config, error) {
 		Base: base, VendorServiceURL: vendorServiceURL, OrderServiceURL: orderServiceURL,
 		CarrierProvider: carrierProvider, CarrierMockWebhookSecret: carrierMockWebhookSecret,
 		AddressRetention:   time.Duration(retentionDays) * 24 * time.Hour,
-		DeliveryResolution: deliveryResolution, AttemptLimit: attemptLimit,
+		DeliveryResolution: deliveryResolution, AttemptLimit: attemptLimit, ReturnShipping: returnShipping,
 	}, nil
 }
 

@@ -23,4 +23,5 @@ var AdminRoutes = adminaccess.Routes{
 	"POST /api/shipments/admin/shipments/:id/tracking":              adminaccess.SupportManage,
 	"POST /api/shipments/admin/shipments/:id/interception-decision": adminaccess.SupportManage,
 	"POST /api/shipments/admin/order-events/:id/retry":              adminaccess.PlatformConfigure,
+	"GET /api/shipments/admin/return-shipments":                     adminaccess.SupportManage,
 }.Merge(adminaccess.Shared("/api/shipments/admin", true, true, true))

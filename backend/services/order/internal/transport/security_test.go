@@ -249,6 +249,36 @@ func TestCancellationRoutesCheckRolesAndInput(t *testing.T) {
 	}
 }
 
+// AF-05: buyers read instructions and report dispatch, shops record the
+// goods, admins authorize and decide.
+func TestReturnShippingRoutesCheckRolesAndInput(t *testing.T) {
+	r, jwt := testRouter()
+	forbidden := []struct{ method, path, role string }{
+		{"GET", "/api/orders/return-requests/" + someID + "/shipping-instructions", "vendor"},
+		{"POST", "/api/orders/return-requests/" + someID + "/dispatches", "admin"},
+		{"POST", "/api/orders/admin/return-requests/" + someID + "/shipping-authorizations", "buyer"},
+		{"POST", "/api/orders/admin/return-requests/" + someID + "/shipping-decisions", "vendor"},
+		{"POST", "/api/orders/admin/return-requests/" + someID + "/goods-receipts", "vendor"},
+	}
+	for _, tc := range forbidden {
+		if code := do(r, tc.method, tc.path, `{}`, as(t, jwt, tc.role)); code != http.StatusForbidden {
+			t.Errorf("%s %s as %s: expected 403, got %d", tc.method, tc.path, tc.role, code)
+		}
+	}
+	invalid := []struct{ method, path, body, role string }{
+		{"POST", "/api/orders/return-requests/not-a-uuid/dispatches", `{}`, "buyer"},
+		{"POST", "/api/orders/return-requests/" + someID + "/dispatches", `{"carrier_name":"GHN","expected_version":1}`, "buyer"},
+		{"POST", "/api/orders/vendor/return-requests/" + someID + "/goods-receipts", `{"sellable_quantity":-1,"damaged_quantity":0,"missing_quantity":0,"expected_version":1}`, "vendor"},
+		{"POST", "/api/orders/admin/return-requests/" + someID + "/shipping-authorizations", `{"fee_payer":"nobody","reason":"x","expected_version":1}`, "admin"},
+		{"POST", "/api/orders/admin/return-requests/" + someID + "/shipping-decisions", `{"action":"cancel","reason":"x","expected_version":1}`, "admin"},
+	}
+	for _, tc := range invalid {
+		if code := do(r, tc.method, tc.path, tc.body, as(t, jwt, tc.role)); code != http.StatusBadRequest {
+			t.Errorf("%s %s %s: expected 400, got %d", tc.method, tc.path, tc.body, code)
+		}
+	}
+}
+
 // AF-04: buyers answer redelivery offers, shops record goods, admins
 // decide; Shipment alone reports exceptions.
 func TestDeliveryExceptionRoutesCheckRolesAndInput(t *testing.T) {

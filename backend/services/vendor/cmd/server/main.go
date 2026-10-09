@@ -116,6 +116,8 @@ func main() {
 	}
 	go adapter.DispatchPolicies(workerCtx, policyRepo, sendPolicy, policyUseCase, log)
 	addressUseCase := usecase.NewVendorAddressUseCase(addressRepo, vendorRepo, ops)
+	returnDestinations := repository.ReturnDestinationRepository{Pool: dbPool}
+	addressUseCase.Destinations = returnDestinations
 	// AF-17: shop staff. Authorization reads memberships on every call;
 	// invitation emails go out from this worker.
 	staffUseCase := &usecase.StaffUseCase{Staff: repository.StaffRepository{Pool: dbPool}, Vendors: vendorRepo,
@@ -145,6 +147,9 @@ func main() {
 	payoutUC := &usecase.PayoutUseCase{Accounts: repository.PayoutRepository{Pool: dbPool}, Vendors: vendorRepo, Audit: auditLogRepo, Ops: ops, Cipher: cipher,
 		Proofs: adminaccess.Client{URL: cfg.Internal.IdentityURL, Key: cfg.Internal.Key}, RequireProof: cfg.AdminReauth}
 	(transport.PayoutHandler{UseCase: payoutUC, Log: log, AdminGuard: adminGuard}).Register(router, middleware.RequireAuth(jwtManager), cfg.PayoutServiceKey, cfg.Internal.Verifier)
+	// AF-05: where returned goods go; Order reads the verified one.
+	(transport.ReturnDestinationHandler{UseCase: &usecase.ReturnDestinationUseCase{Destinations: returnDestinations, Addresses: addressRepo,
+		Vendors: vendorRepo, Audit: auditLogRepo, Ops: ops}, Log: log, AdminGuard: adminGuard}).Register(router, middleware.RequireAuth(jwtManager), cfg.Internal.Verifier)
 
 	dashboard := usecase.Dashboard{Vendors: vendorUseCase, Orders: adapter.ReportClient{URL: cfg.OrderURL, Key: cfg.Internal.Key}, Payments: adapter.ReportClient{URL: cfg.PaymentURL, Key: cfg.Internal.Key},
 		Access: staffUseCase}

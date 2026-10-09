@@ -6,7 +6,7 @@ import { useState } from "react";
 
 import { ConfirmDialog, ReasonDialog } from "@/components/admin/confirm-dialogs";
 import { StatusFilter } from "@/components/admin/status-filter";
-import { ReceiveReturnDialog } from "@/components/orders/receive-return-dialog";
+import { ReturnShippingActions, ReturnShippingInfo } from "@/components/admin/return-shipping-actions";
 import { SectionHeader } from "@/components/section-header";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -129,23 +129,15 @@ export function ReturnModeration({ focusID }: { focusID?: string }) {
                       </span>
                     )}
                   </TableCell>
-                  <TableCell>{returnStatusLabel(r.status)}</TableCell>
+                  <TableCell>
+                    {returnStatusLabel(r.status)}
+                    <ReturnShippingInfo returnRequest={r} />
+                  </TableCell>
                   <TableCell className="text-right">
                     <div className="flex flex-wrap justify-end gap-2">
+                      <ReturnShippingActions returnRequest={r} onDone={refresh} />
                       {adminCanDecide(r) && (
                         <>
-                          <ConfirmDialog
-                            trigger={<Button size="sm">Approve</Button>}
-                            title="Approve this return?"
-                            description="The buyer may send the goods back. No money moves until they are received."
-                            confirmLabel="Approve"
-                            onConfirm={async () => {
-                              await callWithAuth((token) =>
-                                api.decideReturn(token, r.id, true, ""),
-                              );
-                              await refresh();
-                            }}
-                          />
                           <ReasonDialog
                             trigger={
                               <Button size="sm" variant="outline" className="text-destructive">
@@ -163,16 +155,6 @@ export function ReturnModeration({ focusID }: { focusID?: string }) {
                             }}
                           />
                         </>
-                      )}
-                      {canReceive(r) && (
-                        <ReceiveReturnDialog
-                          onConfirm={async (input) => {
-                            await callWithAuth((token) =>
-                              api.receiveReturn(token, "admin", r.id, input),
-                            );
-                            await refresh();
-                          }}
-                        />
                       )}
                       {adminCanRetryRefund(r) && (
                         <ReasonDialog

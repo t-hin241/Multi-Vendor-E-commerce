@@ -54,6 +54,8 @@ var templates = map[Type]Template{
 		"Sàn đề nghị giao lại một kiện hàng của đơn #%s. Mở trang chi tiết đơn hàng để xác nhận địa chỉ nhận; bạn không phải trả thêm phí."},
 	TypeDeliveryExceptionResolved: {"v1", "Sự cố giao hàng của đơn #%s đã được xử lý",
 		"Sự cố giao hàng của đơn #%s đã có kết quả. Xem chi tiết trong trang đơn hàng; khoản hoàn tiền (nếu có) được báo riêng khi đã xác nhận."},
+	TypeReturnShippingInstructions: {"v1", "Hướng dẫn gửi trả hàng cho đơn #%s",
+		"Yêu cầu trả hàng của đơn #%s đã được chấp nhận. Mở trang Trả hàng để xem địa chỉ nhận, mã trả hàng và hạn gửi; sau khi gửi, nhập mã vận đơn. Tiền hoàn chỉ được báo khi người bán đã nhận hàng và khoản hoàn được xác nhận."},
 	TypeMarketplacePolicyUpdated: {"v1", "Chính sách sàn có phiên bản mới (cửa hàng %s)",
 		"Sàn đã công bố phiên bản chính sách mới áp dụng cho cửa hàng (mã %s). Đơn đã đặt giữ chính sách cũ; xem nội dung tại trang Chính sách."},
 	TypeShopPolicyApproved: {"v1", "Chính sách cửa hàng %s đã được duyệt",

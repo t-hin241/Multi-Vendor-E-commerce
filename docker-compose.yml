@@ -479,6 +479,11 @@ services:
       # AF-04: offer redeliveries of failed packages (cases from Shipment are
       # always recorded and refundable). Turn on after Shipment's 000009.
       FEATURE_DELIVERY_RESOLUTION_ENABLED: ${ORDER_FEATURE_DELIVERY_RESOLUTION_ENABLED:-false}
+      # AF-05: approved returns get the shop's verified return address, a
+      # dispatch deadline and a return parcel. Turn on after Vendor 000012
+      # and Shipment 000010 are deployed.
+      FEATURE_RETURN_SHIPPING_ENABLED: ${ORDER_FEATURE_RETURN_SHIPPING_ENABLED:-false}
+      ORDER_RETURN_DISPATCH_DAYS: ${ORDER_RETURN_DISPATCH_DAYS:-7}
       SUPPORT_ATTACHMENT_RETENTION_DAYS: ${SUPPORT_ATTACHMENT_RETENTION_DAYS:-180}
       # Private evidence bucket: no bucket policy, read only through Order.
       SUPPORT_ATTACHMENT_STORAGE_ENDPOINT: minio:9000
@@ -570,6 +575,9 @@ services:
       # Order (with migration 000022) must be deployed first.
       FEATURE_DELIVERY_RESOLUTION_ENABLED: ${SHIPMENT_FEATURE_DELIVERY_RESOLUTION_ENABLED:-false}
       SHIPMENT_DELIVERY_ATTEMPT_LIMIT: ${SHIPMENT_DELIVERY_ATTEMPT_LIMIT:-2}
+      # AF-05: open return parcels Order authorizes (open ones keep moving
+      # when off).
+      FEATURE_RETURN_SHIPPING_ENABLED: ${SHIPMENT_FEATURE_RETURN_SHIPPING_ENABLED:-false}
       SLA_POLL_INTERVAL: ${SLA_POLL_INTERVAL:-60s}
       SLA_ON_CALL_ADMIN_IDS: ${SLA_ON_CALL_ADMIN_IDS:-}
       SLA_ESCALATION_ADMIN_IDS: ${SLA_ESCALATION_ADMIN_IDS:-}

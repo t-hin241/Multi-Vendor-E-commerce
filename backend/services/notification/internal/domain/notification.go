@@ -49,6 +49,8 @@ const (
 	TypeDeliveryExceptionOpened   Type = "delivery_exception_opened"
 	TypeRedeliveryOffered         Type = "delivery_redelivery_offered"
 	TypeDeliveryExceptionResolved Type = "delivery_exception_resolved"
+	// Return shipping (Order, AF-05); the reference is the order id.
+	TypeReturnShippingInstructions Type = "return_shipping_instructions"
 	// Policies (Vendor, AF-02); the reference is the shop id.
 	TypeMarketplacePolicyUpdated Type = "marketplace_policy_updated"
 	TypeShopPolicyApproved       Type = "shop_policy_approved"

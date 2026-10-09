@@ -8,7 +8,7 @@ import Link from "next/link";
 import { useState } from "react";
 
 import { OrderStatusBadge } from "@/components/order-status-badge";
-import { ReceiveReturnDialog } from "@/components/orders/receive-return-dialog";
+import { ReturnReceiptForm } from "@/components/orders/return-receipt-form";
 import { SectionHeader } from "@/components/section-header";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -258,6 +258,19 @@ function VendorReturnsSection({ vendorId }: { vendorId: string }) {
                 <p className="text-muted-foreground">Lý do: {r.reason}</p>
                 {r.evidence && <p className="text-muted-foreground">Bằng chứng: {r.evidence}</p>}
                 {r.decision_note && <p className="text-muted-foreground">Sàn: {r.decision_note}</p>}
+                {r.return_code && (
+                  <p className="text-xs text-muted-foreground">
+                    Mã trả hàng {r.return_code}
+                    {r.dispatch_tracking
+                      ? ` · người mua đã gửi qua ${r.dispatch_carrier}, mã vận đơn ${r.dispatch_tracking}`
+                      : " · chờ người mua gửi hàng"}
+                  </p>
+                )}
+                {r.shipping_status === "destination_missing" && (
+                  <p className="text-xs text-destructive">
+                    Chưa có địa chỉ nhận hàng trả đã xác minh: chọn ở trang Vận chuyển.
+                  </p>
+                )}
                 <div className="mt-1 flex flex-wrap gap-2">
                   {vendorCanConfirm(r) && (
                     <Button
@@ -272,24 +285,7 @@ function VendorReturnsSection({ vendorId }: { vendorId: string }) {
                     </Button>
                   )}
                   {canReceive(r) && (
-                    <ReceiveReturnDialog
-                      labels={{
-                        trigger: "Đã nhận hàng trả",
-                        title: "Xác nhận đã nhận hàng trả?",
-                        description:
-                          "Việc này bắt đầu hoàn tiền cho người mua. Chỉ nhập lại kho hàng còn bán được.",
-                        restock: "Nhập lại kho",
-                        note: "Ghi chú kiểm tra hàng",
-                        cancel: "Đóng",
-                        confirm: "Xác nhận",
-                      }}
-                      onConfirm={async (input) => {
-                        await callWithAuth((token) =>
-                          api.receiveReturn(token, "vendor", r.id, input),
-                        );
-                        await refresh();
-                      }}
-                    />
+                    <ReturnReceiptForm returnRequest={r} scope="vendor" onDone={refresh} />
                   )}
                 </div>
               </CardContent>

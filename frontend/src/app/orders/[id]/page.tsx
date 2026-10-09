@@ -11,6 +11,7 @@ import { CancellationPanel } from "@/components/orders/cancellation-panel";
 import { DeliveryExceptionPanel } from "@/components/orders/delivery-exception-panel";
 import { RefundStatusPanel } from "@/components/orders/refund-status-panel";
 import { ReturnRequestDialog } from "@/components/orders/return-request-dialog";
+import { ReturnShippingPanel } from "@/components/orders/return-shipping-panel";
 import { PageShell } from "@/components/page-shell";
 import { PaymentSection } from "@/components/payment-section";
 import { OrderPolicyCard } from "@/components/policies/order-policy-card";
@@ -166,6 +167,7 @@ export default function OrderDetailPage() {
                   {r.decision_note && (
                     <p className="text-muted-foreground">Sàn: {r.decision_note}</p>
                   )}
+                  <ReturnShippingPanel returnRequest={r} orderId={order.id} />
                 </div>
               );
             })}

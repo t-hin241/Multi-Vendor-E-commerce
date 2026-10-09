@@ -1115,6 +1115,40 @@ export type ReturnRequest = {
   restock?: boolean;
   created_at: string;
   updated_at: string;
+  // AF-05 return shipping (the destination address is in the buyer's
+  // shipping instructions only).
+  version: number;
+  authorization_version: number;
+  return_code?: string;
+  shipping_status?: ReturnShippingStatus;
+  fee_payer?: "buyer" | "seller";
+  fee_cap?: number;
+  dispatch_deadline?: string;
+  dispatch_overdue: boolean;
+  dispatch_carrier?: string;
+  dispatch_tracking?: string;
+  dispatched_at?: string;
+  destination_province?: string;
+  restock_quantity?: number;
+  inspection_disputed: boolean;
+  receipt?: ReturnGoodsReceipt;
+};
+
+export type ReturnShippingStatus =
+  | "destination_missing"
+  | "awaiting_dispatch"
+  | "awaiting_verification"
+  | "received"
+  | "lost";
+
+export type ReturnGoodsReceipt = {
+  version: number;
+  actor_role: string;
+  sellable_quantity: number;
+  damaged_quantity: number;
+  missing_quantity: number;
+  note?: string;
+  created_at: string;
 };
 
 export type ReturnEvent = {
@@ -1508,11 +1542,13 @@ export function decideReturn(
   returnId: string,
   approve: boolean,
   note: string,
+  // AF-05: who pays the way back (seller by default).
+  terms: { fee_payer?: "buyer" | "seller"; fee_cap?: number } = {},
 ): Promise<ReturnRequest> {
   return request<ReturnRequest>(`/api/orders/admin/return-requests/${returnId}/decision`, {
     method: "POST",
     token,
-    json: { approve, note },
+    json: { approve, note, ...terms },
   });
 }
 
@@ -4251,6 +4287,146 @@ export function decideDeliveryException(
   },
 ): Promise<DeliveryException> {
   return request<DeliveryException>(`/api/orders/admin/delivery-exceptions/${id}/decisions`, {
+    method: "POST",
+    token,
+    json: input,
+  });
+}
+
+// ----- AF-05 return shipping -----
+
+export type ReturnShippingInstructions = {
+  return_id: string;
+  return_code: string;
+  authorization_version: number;
+  version: number;
+  dispatch_deadline?: string;
+  dispatch_overdue: boolean;
+  fee_payer?: "buyer" | "seller";
+  address: {
+    recipient_name: string;
+    phone: string;
+    province: string;
+    district: string;
+    ward: string;
+    street_address: string;
+    receiving_hours: string;
+  };
+  instructions: string;
+  shipping_status?: ReturnShippingStatus;
+  carrier_name?: string;
+  tracking_number?: string;
+  dispatched_at?: string;
+};
+
+export function getReturnShippingInstructions(token: string, returnId: string): Promise<ReturnShippingInstructions> {
+  return request<ReturnShippingInstructions>(`/api/orders/return-requests/${returnId}/shipping-instructions`, { token });
+}
+
+// reportReturnDispatch: the buyer's carrier and tracking number; the same
+// idempotencyKey on a retry.
+export function reportReturnDispatch(
+  token: string,
+  returnId: string,
+  input: { carrier_name: string; tracking_number: string; dispatched_at: string; expected_version: number },
+  idempotencyKey: string,
+): Promise<ReturnRequest> {
+  return request<ReturnRequest>(`/api/orders/return-requests/${returnId}/dispatches`, {
+    method: "POST",
+    token,
+    headers: { "Idempotency-Key": idempotencyKey },
+    json: input,
+  });
+}
+
+// recordReturnGoodsReceipt: every returned unit sellable, damaged or
+// missing; the refund follows when all are sellable.
+export function recordReturnGoodsReceipt(
+  token: string,
+  scope: "vendor" | "admin",
+  returnId: string,
+  input: {
+    sellable_quantity: number;
+    damaged_quantity: number;
+    missing_quantity: number;
+    note?: string;
+    expected_version: number;
+  },
+): Promise<ReturnRequest> {
+  return request<ReturnRequest>(`/api/orders/${scope}/return-requests/${returnId}/goods-receipts`, {
+    method: "POST",
+    token,
+    json: input,
+  });
+}
+
+export function getAdminReturn(token: string, returnId: string): Promise<ReturnRequest> {
+  return request<ReturnRequest>(`/api/orders/admin/return-requests/${returnId}`, { token });
+}
+
+export function authorizeReturnShipping(
+  token: string,
+  returnId: string,
+  input: { fee_payer?: "buyer" | "seller"; fee_cap?: number; reason: string; expected_version: number },
+): Promise<ReturnRequest> {
+  return request<ReturnRequest>(`/api/orders/admin/return-requests/${returnId}/shipping-authorizations`, {
+    method: "POST",
+    token,
+    json: input,
+  });
+}
+
+export function decideReturnShipping(
+  token: string,
+  returnId: string,
+  input: { action: "refund" | "mark_lost"; reason: string; expected_version: number },
+): Promise<ReturnRequest> {
+  return request<ReturnRequest>(`/api/orders/admin/return-requests/${returnId}/shipping-decisions`, {
+    method: "POST",
+    token,
+    json: input,
+  });
+}
+
+export type ReturnDestination = {
+  vendor_id: string;
+  address_id: string;
+  recipient_name: string;
+  phone: string;
+  province: string;
+  district: string;
+  ward: string;
+  street_address: string;
+  receiving_hours: string;
+  version: number;
+  verified: boolean;
+  verified_at?: string;
+  rejection_reason?: string;
+  updated_at: string;
+};
+
+export function getReturnDestination(token: string, vendorId: string): Promise<ReturnDestination> {
+  return request<ReturnDestination>(`/api/vendor/${vendorId}/return-destination`, { token });
+}
+
+export function setReturnDestination(
+  token: string,
+  vendorId: string,
+  input: { address_id: string; receiving_hours: string },
+): Promise<ReturnDestination> {
+  return request<ReturnDestination>(`/api/vendor/${vendorId}/return-destination`, { method: "PUT", token, json: input });
+}
+
+export function getAdminReturnDestination(token: string, vendorId: string): Promise<ReturnDestination> {
+  return request<ReturnDestination>(`/api/vendor/admin/shops/${vendorId}/return-destination`, { token });
+}
+
+export function decideReturnDestination(
+  token: string,
+  vendorId: string,
+  input: { version: number; verify: boolean; reason: string },
+): Promise<ReturnDestination> {
+  return request<ReturnDestination>(`/api/vendor/admin/shops/${vendorId}/return-destination/decision`, {
     method: "POST",
     token,
     json: input,

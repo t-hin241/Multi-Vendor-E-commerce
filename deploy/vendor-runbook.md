@@ -157,3 +157,7 @@ Bật: deploy Order (consumer + readiness) trước, rồi Vendor; publish chín
 ## Nhân viên và phân quyền theo shop (AF-17)
 
 Migration `000011_shop_staff`, contract `POST /internal/vendors/authorize` và các biến `FEATURE_SHOP_STAFF_ENABLED`, `SHOP_STAFF_INVITES_PAUSED`, `STAFF_INVITATION_FINGERPRINT_KEY`, `STAFF_INVITATION_ACCEPT_URL`: xem `deploy/shop-staff-runbook.md`. Deploy Vendor trước các service gọi `/authorize`; tắt cờ là quay về chỉ chủ shop.
+
+## Địa chỉ nhận hàng trả (AF-05)
+
+Migration `000012_return_destinations`: chủ shop chọn một địa chỉ của shop làm nơi nhận hàng trả kèm giờ nhận (`PUT /api/vendor/:vendorId/return-destination`); địa chỉ lấy hàng không tự thành địa chỉ nhận trả. Admin (`moderation.manage`) xác minh đúng phiên bản (`POST /api/vendor/admin/shops/:vendorId/return-destination/decision`); sửa địa chỉ hoặc đổi lựa chọn làm tăng phiên bản và phải xác minh lại; không xoá được địa chỉ đang nhận trả. Order chỉ đọc địa chỉ đã xác minh qua `GET /internal/return-destinations/:vendorId`. Audit `return_destination_set/verified/rejected`. Chi tiết: `deploy/return-shipping-runbook.md`.

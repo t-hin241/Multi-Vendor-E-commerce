@@ -31,6 +31,11 @@ const (
 	// Target is the delivery exception id.
 	EffectCreateReplacementAttempt EffectKind = "create_replacement_attempt"
 	EffectRecoverDeliveryStock     EffectKind = "recover_delivery_stock"
+	// AF-05: open, dispatch and close a return's parcel at Shipment.
+	// Target is the return id (with the authorization version to open).
+	EffectAuthorizeReturnShipment EffectKind = "authorize_return_shipment"
+	EffectDispatchReturnShipment  EffectKind = "dispatch_return_shipment"
+	EffectCloseReturnShipment     EffectKind = "close_return_shipment"
 )
 
 // RejectedOutcomePayload is what a report_rejected_outcome effect sends.

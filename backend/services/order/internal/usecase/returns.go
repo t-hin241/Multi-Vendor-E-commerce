@@ -141,6 +141,11 @@ func (uc *OrderUseCase) MarkReturnReceived(ctx context.Context, actorID, role, r
 		if err != nil {
 			return err
 		}
+		if rr.Authorized() {
+			// AF-05: a return with shipping instructions is received with
+			// a goods receipt (sellable / damaged / missing).
+			return apperror.Conflict("Record what came back with a goods receipt for this return")
+		}
 		if err := uc.stepReturn(ctx, rr, domain.ReturnReceived, role, &actorID, "received", inspection,
 			repository.ReturnUpdate{ReceivedBy: &actorID, InspectionNote: inspection, Restock: &restock}); err != nil {
 			return err
@@ -326,7 +331,15 @@ func (uc *OrderUseCase) restockReturn(ctx context.Context, returnID string) erro
 	if err != nil {
 		return appError(err)
 	}
-	return uc.Inventory.RestockReturn(ctx, rr.ID, item.ProductID, item.VariantID, rr.Quantity)
+	quantity := rr.Quantity
+	if rr.RestockQuantity != nil {
+		// AF-05: only the units the shop recorded sellable.
+		quantity = *rr.RestockQuantity
+	}
+	if quantity <= 0 {
+		return nil
+	}
+	return uc.Inventory.RestockReturn(ctx, rr.ID, item.ProductID, item.VariantID, quantity)
 }
 
 // ListMyReturns lists a buyer's own return requests.

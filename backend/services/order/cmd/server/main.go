@@ -177,7 +177,13 @@ func main() {
 		DeliveryExceptions: repository.DeliveryExceptionRepository{Pool: dbPool},
 		Replacements:       shipmentClient,
 		DeliveryRedelivery: cfg.DeliveryRedelivery,
-		Log:                log,
+		// AF-05: the way back.
+		ReturnShipping:        repository.NewReturnRequestRepository(dbPool),
+		ReturnDestinations:    vendorClient,
+		ReturnParcels:         shipmentClient,
+		ReturnShippingEnabled: cfg.ReturnShipping,
+		ReturnDispatchDays:    cfg.ReturnDispatchDays,
+		Log:                   log,
 	})
 	workerCtx, stopWorker := context.WithCancel(ctx)
 	defer stopWorker()

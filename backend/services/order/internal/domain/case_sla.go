@@ -32,5 +32,24 @@ func (r ReturnRequest) SLAStage() casesla.StageInput {
 	if r.Status == ReturnRequested || r.Status == ReturnVendorConfirmed {
 		in.Stage = "return_decision"
 	}
+	// AF-05: waiting on the buyer's parcel pauses the clock; a missed
+	// dispatch deadline, a missing destination or a disputed inspection is
+	// the marketplace's to look at.
+	shipping := ""
+	if r.ShippingStatus != nil {
+		shipping = *r.ShippingStatus
+	}
+	switch {
+	case r.Status == ReturnApproved && shipping == ShippingDestinationMissing:
+		in.Stage, in.Duration = "return_authorization", casesla.SupportAcknowledgement
+	case r.Status == ReturnApproved && shipping == ShippingAwaitingDispatch && r.DispatchOverdueAt != nil:
+		in.Stage, in.Duration, in.At = "return_dispatch_review", casesla.SupportAcknowledgement, *r.DispatchOverdueAt
+	case r.Status == ReturnApproved && shipping == ShippingAwaitingDispatch:
+		in.Stage, in.WaitingOn, in.Pause = "return_dispatch", "buyer", true
+	case r.Status == ReturnApproved && shipping == ShippingLost:
+		in.Stage, in.Duration = "return_lost_review", casesla.SupportAcknowledgement
+	case r.Status == ReturnReceived && r.InspectionDisputed:
+		in.Stage, in.Duration = "return_inspection_review", casesla.SupportAcknowledgement
+	}
 	return in
 }

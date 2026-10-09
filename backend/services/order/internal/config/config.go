@@ -38,6 +38,12 @@ type Config struct {
 	// offer redeliveries of failed packages. Delivery exception cases are
 	// always recorded and resolvable (refund) once Shipment reports them.
 	DeliveryRedelivery bool
+	// ReturnShipping is FEATURE_RETURN_SHIPPING_ENABLED (AF-05): approved
+	// returns get shipping instructions and a return parcel; returns
+	// already authorized keep going when it is off. ReturnDispatchDays
+	// (ORDER_RETURN_DISPATCH_DAYS, 1-30, default 7) is the deadline.
+	ReturnShipping     bool
+	ReturnDispatchDays int
 }
 
 // SupportConfig is the rollout of order support cases (AF-01).
@@ -122,6 +128,18 @@ func Load() (Config, error) {
 			return Config{}, fmt.Errorf("config: FEATURE_DELIVERY_RESOLUTION_ENABLED must be true or false")
 		}
 	}
+	returnShipping := false
+	if raw := os.Getenv("FEATURE_RETURN_SHIPPING_ENABLED"); raw != "" {
+		if returnShipping, err = strconv.ParseBool(raw); err != nil {
+			return Config{}, fmt.Errorf("config: FEATURE_RETURN_SHIPPING_ENABLED must be true or false")
+		}
+	}
+	returnDispatchDays := 7
+	if raw := os.Getenv("ORDER_RETURN_DISPATCH_DAYS"); raw != "" {
+		if returnDispatchDays, err = strconv.Atoi(raw); err != nil || returnDispatchDays < 1 || returnDispatchDays > 30 {
+			return Config{}, fmt.Errorf("config: ORDER_RETURN_DISPATCH_DAYS must be between 1 and 30")
+		}
+	}
 	versionedPolicies := false
 	if raw := os.Getenv("FEATURE_VERSIONED_POLICIES_ENABLED"); raw != "" {
 		if versionedPolicies, err = strconv.ParseBool(raw); err != nil {
@@ -134,6 +152,8 @@ func Load() (Config, error) {
 		VersionedPolicies:      versionedPolicies,
 		PaidCancellation:       paidCancellation,
 		DeliveryRedelivery:     deliveryRedelivery,
+		ReturnShipping:         returnShipping,
+		ReturnDispatchDays:     returnDispatchDays,
 		Base:                   base,
 		CartServiceURL:         cartServiceURL,
 		CatalogServiceURL:      catalogServiceURL,

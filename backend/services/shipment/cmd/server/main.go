@@ -197,9 +197,13 @@ func main() {
 		eventbus.Subscription{Durable: "shipment-fulfillment-ready", Types: []string{events.FulfillmentReady}, Handle: transport.FulfillmentReadyHandler(shipmentUseCase)},
 		eventbus.Subscription{Durable: "shipment-fulfillment-cancelled", Types: []string{events.FulfillmentCancelled}, Handle: transport.FulfillmentCancelledHandler(shipmentUseCase)},
 	)
-	go (usecase.Worker{Shipments: shipmentUseCase, Retention: cfg.AddressRetention, Log: log}).Run(workerCtx)
+	// AF-05: return parcels, driven by Order.
+	returnShipments := &usecase.ReturnShipmentUseCase{Tx: repository.Transactions{Pool: dbPool}, Returns: repository.ReturnShipmentRepository{Pool: dbPool},
+		Identity: identityclient.Client{URL: internalServices.IdentityURL, Key: internalServices.Key}, Enabled: cfg.ReturnShipping, Log: log}
+	go (usecase.Worker{Shipments: shipmentUseCase, Returns: returnShipments, Retention: cfg.AddressRetention, Log: log}).Run(workerCtx)
 
 	adminGroup := router.Group("/api/shipments/admin", middleware.RequireAuth(jwtManager), middleware.RequireRole("admin"), adminGuard)
+	(transport.ReturnShipmentHandler{Returns: returnShipments, Log: log}).Register(router, adminGroup, internalServices.Verifier)
 	slaRoles := identityclient.Client{URL: internalServices.IdentityURL, Key: internalServices.Key}
 	slaStore := casesla.Store{Pool: dbPool}
 	casesla.Register(adminGroup, casesla.Service{Repo: slaStore, Roles: slaRoles, Permissions: adminaccess.Client{URL: internalServices.IdentityURL, Key: internalServices.Key}}, log)

@@ -54,6 +54,14 @@ type Deps struct {
 	DeliveryExceptions DeliveryExceptionPort
 	Replacements       ReplacementCreator
 	DeliveryRedelivery bool
+	// ReturnShipping, ReturnDestinations and ReturnParcels run AF-05 (the
+	// way back); ReturnShippingEnabled is FEATURE_RETURN_SHIPPING_ENABLED
+	// (new authorizations) and ReturnDispatchDays the dispatch deadline.
+	ReturnShipping        ReturnShippingPort
+	ReturnDestinations    ReturnDestinationGateway
+	ReturnParcels         ReturnParcelGateway
+	ReturnShippingEnabled bool
+	ReturnDispatchDays    int
 	// Policies is the read model of published policies (AF-02).
 	Policies PolicyVersionPort
 

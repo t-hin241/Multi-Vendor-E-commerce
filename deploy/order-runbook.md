@@ -201,3 +201,7 @@ Xem `deploy/paid-cancellation-runbook.md`: migration `000021`, cờ `FEATURE_PAI
 ## Giao thất bại và hàng hoàn về (AF-04)
 
 Xem `deploy/delivery-exception-runbook.md`: migration `000022`, consumer `order-shipment-exceptions` (event `shipment.exception_detected`, HTTP dự phòng `/internal/shipment-exceptions`), cờ `FEATURE_DELIVERY_RESOLUTION_ENABLED` (chỉ chặn đề nghị giao lại mới), hold payout, phiếu nhận hàng của shop, hoàn kho theo `delivery_exception:<case>:<item>`, thứ tự deploy (Order trước Shipment) và rollback.
+
+## Vận chuyển hàng trả (AF-05)
+
+Xem `deploy/return-shipping-runbook.md`: migration `000023`, cờ `FEATURE_RETURN_SHIPPING_ENABLED` và `ORDER_RETURN_DISPATCH_DAYS`, địa chỉ nhận trả đã xác minh (Vendor), phiếu nhận hàng (bán được / hỏng / thiếu), hạn gửi, kiện hàng trả ở Shipment, thứ tự deploy và rollback.
