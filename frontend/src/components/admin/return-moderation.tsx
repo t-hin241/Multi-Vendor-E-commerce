@@ -6,7 +6,10 @@ import { useState } from "react";
 
 import { ConfirmDialog, ReasonDialog } from "@/components/admin/confirm-dialogs";
 import { StatusFilter } from "@/components/admin/status-filter";
-import { ReturnShippingActions, ReturnShippingInfo } from "@/components/admin/return-shipping-actions";
+import {
+  ReturnShippingActions,
+  ReturnShippingInfo,
+} from "@/components/admin/return-shipping-actions";
 import { SectionHeader } from "@/components/section-header";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";

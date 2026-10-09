@@ -9,4 +9,8 @@ var AdminRoutes = adminaccess.Routes{
 	"GET /api/notifications/admin/operations":   adminaccess.SupportManage,
 	"GET /api/notifications/admin/:id/attempts": adminaccess.SupportManage,
 	"POST /api/notifications/admin/:id/retry":   adminaccess.SupportManage,
+	// AF-08: shop notice events without recipients and their retry.
+	"GET /api/notifications/admin/vendor-actions":            adminaccess.SupportManage,
+	"GET /api/notifications/admin/vendor-actions/summary":    adminaccess.SupportManage,
+	"POST /api/notifications/admin/vendor-actions/:id/retry": adminaccess.SupportManage,
 }.Merge(adminaccess.Shared("/api/notifications/admin", true, false, true))

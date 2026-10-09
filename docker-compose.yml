@@ -484,6 +484,9 @@ services:
       # and Shipment 000010 are deployed.
       FEATURE_RETURN_SHIPPING_ENABLED: ${ORDER_FEATURE_RETURN_SHIPPING_ENABLED:-false}
       ORDER_RETURN_DISPATCH_DAYS: ${ORDER_RETURN_DISPATCH_DAYS:-7}
+      # AF-08: tell shops about new paid orders, cancellation and return
+      # requests and return parcels. Turn on after Notification's flag.
+      FEATURE_VENDOR_ACTION_NOTICES_ENABLED: ${ORDER_FEATURE_VENDOR_ACTION_NOTICES_ENABLED:-false}
       SUPPORT_ATTACHMENT_RETENTION_DAYS: ${SUPPORT_ATTACHMENT_RETENTION_DAYS:-180}
       # Private evidence bucket: no bucket policy, read only through Order.
       SUPPORT_ATTACHMENT_STORAGE_ENDPOINT: minio:9000
@@ -542,6 +545,9 @@ services:
       # AF-06 manual refund transfers: off by default; the key is required
       # once on (a placeholder with the flag off only disables destinations).
       FEATURE_MANUAL_REFUND_WORKFLOW_ENABLED: ${FEATURE_MANUAL_REFUND_WORKFLOW_ENABLED:-false}
+      # AF-08: tell shops their payout results (needs the event bus). Turn on
+      # after Notification's flag.
+      FEATURE_VENDOR_ACTION_NOTICES_ENABLED: ${PAYMENT_FEATURE_VENDOR_ACTION_NOTICES_ENABLED:-false}
       REFUND_DESTINATION_KEY: ${REFUND_DESTINATION_KEY:-}
       REFUND_DESTINATION_KEY_VERSION: ${REFUND_DESTINATION_KEY_VERSION:-1}
       REFUND_DESTINATION_PREVIOUS_KEYS: ${REFUND_DESTINATION_PREVIOUS_KEYS:-}
@@ -703,6 +709,11 @@ services:
       NOTIFICATION_DELIVERY_PAUSED: ${NOTIFICATION_DELIVERY_PAUSED:-false}
       # Delivery jobs run at once (Asynq workers on REDIS_URL), 1-100.
       NOTIFICATION_WORKER_CONCURRENCY: ${NOTIFICATION_WORKER_CONCURRENCY:-10}
+      # AF-08: record shop work events, ask Vendor who may receive them and
+      # send one email per person; staff opt into categories. Turn on first
+      # (before Order and Payment).
+      FEATURE_VENDOR_ACTION_NOTICES_ENABLED: ${NOTIFICATION_FEATURE_VENDOR_ACTION_NOTICES_ENABLED:-false}
+      VENDOR_SERVICE_URL: http://vendor:8082
       PORT: "8090"
       DATABASE_URL: postgres://notification_app:${NOTIFICATION_DB_PASSWORD:?set NOTIFICATION_DB_PASSWORD in .env}@postgres:5432/notification_db?sslmode=disable
       IDENTITY_SERVICE_URL: http://identity:8081

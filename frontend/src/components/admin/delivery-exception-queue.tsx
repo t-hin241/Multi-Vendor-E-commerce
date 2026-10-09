@@ -74,7 +74,10 @@ function DeliveryExceptionCard({ exception: listed }: { exception: api.DeliveryE
   });
   const d = detail.data?.exception ?? listed;
 
-  async function decide(resolution: "redeliver" | "refund" | "close" | "retry_refund", reason: string) {
+  async function decide(
+    resolution: "redeliver" | "refund" | "close" | "retry_refund",
+    reason: string,
+  ) {
     setError(null);
     try {
       await callWithAuth((t) =>
@@ -101,14 +104,18 @@ function DeliveryExceptionCard({ exception: listed }: { exception: api.DeliveryE
         </div>
         {d.detection_reason && <p className="text-muted-foreground">{d.detection_reason}</p>}
         <p className="text-xs text-muted-foreground">
-          package {d.vendor_order_id.slice(0, 8)} · shipment {d.current_shipment_id.slice(0, 8)} (attempt{" "}
-          {d.attempt_no}) · {d.failed_attempts} failed attempt(s) · opened{" "}
+          package {d.vendor_order_id.slice(0, 8)} · shipment {d.current_shipment_id.slice(0, 8)}{" "}
+          (attempt {d.attempt_no}) · {d.failed_attempts} failed attempt(s) · opened{" "}
           {new Date(d.created_at).toLocaleString("vi-VN")}
           {d.action_due_at && ` · due ${new Date(d.action_due_at).toLocaleString("vi-VN")}`}
           {d.waiting_on && ` · waiting on ${d.waiting_on}`}
         </p>
         {d.hold_status && (
-          <p className={d.hold_status === "needs_review" ? "text-destructive" : "text-muted-foreground"}>
+          <p
+            className={
+              d.hold_status === "needs_review" ? "text-destructive" : "text-muted-foreground"
+            }
+          >
             Payout hold: {d.hold_status}
             {d.hold_note && ` — ${d.hold_note}`}
           </p>
@@ -126,8 +133,9 @@ function DeliveryExceptionCard({ exception: listed }: { exception: api.DeliveryE
         )}
         {d.redelivery_address && (
           <p className="text-xs">
-            Redelivery to {d.redelivery_address.recipient_name}, {d.redelivery_address.street_address},{" "}
-            {d.redelivery_address.district}, {d.redelivery_address.province}
+            Redelivery to {d.redelivery_address.recipient_name},{" "}
+            {d.redelivery_address.street_address}, {d.redelivery_address.district},{" "}
+            {d.redelivery_address.province}
             {d.replacement_shipment_id && ` · shipment ${d.replacement_shipment_id.slice(0, 8)}`}
           </p>
         )}
@@ -139,7 +147,9 @@ function DeliveryExceptionCard({ exception: listed }: { exception: api.DeliveryE
         {d.review_reason && <p className="text-destructive">{d.review_reason}</p>}
         {d.refund_id && <p className="font-mono text-xs">refund {d.refund_id.slice(0, 8)}</p>}
         {d.stock_recovered && <p className="text-xs">Sellable units go back to stock.</p>}
-        {d.decision_reason && <p className="text-muted-foreground">Decision: {d.decision_reason}</p>}
+        {d.decision_reason && (
+          <p className="text-muted-foreground">Decision: {d.decision_reason}</p>
+        )}
 
         <div className="flex flex-wrap items-center gap-2">
           {d.hold_status === "preparing" && (
@@ -160,7 +170,11 @@ function DeliveryExceptionCard({ exception: listed }: { exception: api.DeliveryE
           {canRefund(d) && (
             <ReasonDialog
               variant="default"
-              trigger={<Button size="sm" variant="outline">Refund buyer</Button>}
+              trigger={
+                <Button size="sm" variant="outline">
+                  Refund buyer
+                </Button>
+              }
               title="Refund this package?"
               description="Merchandise and the shipping fee paid. After a refund the package cannot be redelivered; sellable units go back to stock once the goods are recorded."
               confirmLabel="Refund"
@@ -169,7 +183,11 @@ function DeliveryExceptionCard({ exception: listed }: { exception: api.DeliveryE
           )}
           {canClose(d) && (
             <ReasonDialog
-              trigger={<Button size="sm" variant="outline">Close (delivered)</Button>}
+              trigger={
+                <Button size="sm" variant="outline">
+                  Close (delivered)
+                </Button>
+              }
               title="Close this case?"
               description="Only when the buyer did receive the package. The payout hold is released."
               confirmLabel="Close"

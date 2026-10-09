@@ -40,7 +40,8 @@ export function ReturnDestinationCard({ vendorId }: { vendorId: string }) {
       setError(null);
       await queryClient.invalidateQueries({ queryKey: ["return-destination", vendorId] });
     },
-    onError: (err) => setError(err instanceof Error ? err.message : "Không lưu được địa chỉ nhận trả."),
+    onError: (err) =>
+      setError(err instanceof Error ? err.message : "Không lưu được địa chỉ nhận trả."),
   });
   const d = destination.data;
 
@@ -53,17 +54,27 @@ export function ReturnDestinationCard({ vendorId }: { vendorId: string }) {
         {d ? (
           <div>
             <p>
-              {d.recipient_name} ({d.phone}), {d.street_address}, {d.ward}, {d.district}, {d.province}
+              {d.recipient_name} ({d.phone}), {d.street_address}, {d.ward}, {d.district},{" "}
+              {d.province}
             </p>
             <p className="text-muted-foreground">Giờ nhận hàng: {d.receiving_hours}</p>
-            <p className={d.verified ? "text-xs text-emerald-700 dark:text-emerald-400" : "text-xs text-destructive"}>
-              {d.verified ? "Sàn đã xác minh" : "Chờ sàn xác minh; người mua chưa được gửi tới địa chỉ này"}
+            <p
+              className={
+                d.verified
+                  ? "text-xs text-emerald-700 dark:text-emerald-400"
+                  : "text-xs text-destructive"
+              }
+            >
+              {d.verified
+                ? "Sàn đã xác minh"
+                : "Chờ sàn xác minh; người mua chưa được gửi tới địa chỉ này"}
               {d.rejection_reason && ` · Lý do: ${d.rejection_reason}`}
             </p>
           </div>
         ) : (
           <p className="text-muted-foreground">
-            Chưa chọn địa chỉ nhận hàng trả. Yêu cầu trả hàng được duyệt sẽ chờ tới khi có địa chỉ đã xác minh.
+            Chưa chọn địa chỉ nhận hàng trả. Yêu cầu trả hàng được duyệt sẽ chờ tới khi có địa chỉ
+            đã xác minh.
           </p>
         )}
         <form

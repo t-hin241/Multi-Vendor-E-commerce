@@ -57,7 +57,9 @@ export const CONDITION_LABELS: Record<GoodsCondition, string> = {
 
 // needsReceipt: the package is back at the shop and nothing is recorded
 // for this attempt yet.
-export function needsReceipt(d: Pick<DeliveryException, "status" | "carrier_outcome" | "receipt">): boolean {
+export function needsReceipt(
+  d: Pick<DeliveryException, "status" | "carrier_outcome" | "receipt">,
+): boolean {
   return d.carrier_outcome === "returned" && !d.receipt && d.status !== "resolved";
 }
 
@@ -82,7 +84,12 @@ export function canRefund(d: DeliveryException): boolean {
 }
 
 export function canClose(d: DeliveryException): boolean {
-  return !!d.late_delivery_at && d.carrier_outcome === "delivered" && d.status !== "resolved" && d.status !== "refund_pending";
+  return (
+    !!d.late_delivery_at &&
+    d.carrier_outcome === "delivered" &&
+    d.status !== "resolved" &&
+    d.status !== "refund_pending"
+  );
 }
 
 export function canRetryRefund(d: DeliveryException): boolean {
@@ -110,7 +117,10 @@ export function receiptLines(
       }
     }
     if (total !== item.quantity) {
-      return { lines: [], error: `Mỗi sản phẩm cần ghi đủ ${item.quantity} đơn vị (đang ${total}).` };
+      return {
+        lines: [],
+        error: `Mỗi sản phẩm cần ghi đủ ${item.quantity} đơn vị (đang ${total}).`,
+      };
     }
   }
   return { lines };

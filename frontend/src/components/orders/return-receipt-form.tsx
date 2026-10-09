@@ -106,7 +106,13 @@ export function ReturnReceiptForm({
           </label>
         ))}
       </div>
-      <Textarea rows={2} maxLength={1000} placeholder={t.note} value={note} onChange={(e) => setNote(e.target.value)} />
+      <Textarea
+        rows={2}
+        maxLength={1000}
+        placeholder={t.note}
+        value={note}
+        onChange={(e) => setNote(e.target.value)}
+      />
       {error && <p className="text-destructive">{error}</p>}
       <div className="flex gap-2">
         <Button type="submit" size="sm" disabled={busy}>

@@ -5,6 +5,7 @@ import (
 	"errors"
 
 	"shopee/backend/pkg/apperror"
+	"shopee/backend/pkg/events"
 	"shopee/backend/services/order/internal/adapter"
 	"shopee/backend/services/order/internal/domain"
 )
@@ -145,6 +146,11 @@ func (uc *OrderUseCase) applyPaid(ctx context.Context, order *domain.Order) erro
 			}
 		}
 		effects = append(effects, domain.Effect{OrderID: order.ID, Kind: domain.EffectCreateShipment, Target: vo.ID})
+		if uc.VendorActionNotices {
+			// AF-08: only here, after the capture was verified and the
+			// stock committed, is the package the shop's work.
+			effects = append(effects, domain.NewVendorNoticeEffect(order.ID, vo.VendorID, vo.ID, events.VendorActionNewOrder, vo.ID))
+		}
 	}
 	if err := uc.Effects.Enqueue(ctx, effects...); err != nil {
 		return err

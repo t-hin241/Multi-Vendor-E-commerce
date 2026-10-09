@@ -175,6 +175,11 @@ func main() {
 		Audit: repository.NewAuditRepository(dbPool), Roles: roles, Orders: orderClient, Vendors: vendorClient, Log: log,
 		RequireApprovals: cfg.AdminApprovals,
 	})
+	// AF-08: payout results for the shop, relayed to the event bus.
+	vendorNotices := repository.VendorNotices{Pool: dbPool}
+	if cfg.VendorActionNotices {
+		settlementUseCase.VendorNotices = vendorNotices
+	}
 	refundRepo := repository.NewRefundRepository(dbPool)
 	refundUseCase := usecase.NewRefundUseCase(refundRepo, roles, log).WithSettlement(tx, settlementUseCase).RequireApprovals(cfg.AdminApprovals)
 	// AF-19: scoped admin permissions (Identity) and maker-checker requests.
@@ -245,6 +250,20 @@ func main() {
 		}
 	}
 	go refundSync.Run(syncCtx, deliverRefund, log)
+	if cfg.VendorActionNotices {
+		if bus.Publish {
+			go vendorNotices.Run(syncCtx, func(ctx context.Context, n repository.VendorNotice) error {
+				env, err := events.VendorPayoutActionEvent("payout-notice-"+n.ID, events.VendorPayoutAction{VendorID: n.VendorID, PayoutID: n.PayoutItemID, Outcome: n.Outcome})
+				if err != nil {
+					return err
+				}
+				return bus.Bus.Publish(ctx, env.WithCorrelation(""))
+			}, log)
+		} else {
+			// The notices are kept and relayed once the event bus is back.
+			log.Warn().Msg("payment_vendor_notices_wait_for_event_bus")
+		}
+	}
 	bus.Run(syncCtx,
 		eventbus.Subscription{Durable: "payment-settlements", Types: []string{events.VendorOrderSettleable}, Handle: transport.SettleableHandler(settlementUseCase)},
 		eventbus.Subscription{Durable: "payment-rejected-outcomes", Types: []string{events.PaymentOutcomeRejected}, Handle: transport.OutcomeRejectedHandler(orderSync, refundSync)},

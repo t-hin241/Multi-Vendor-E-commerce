@@ -73,3 +73,7 @@ Reset mật khẩu thất bại sau 5 lần nằm ở Identity: `SELECT count(*)
 - Image Notification về bản cũ: vẫn gửi đồng bộ và ghi bản ghi (cột mới có default). Thông báo `pending`/`parked` nằm lại trong bảng và được gửi khi lên lại bản mới (vòng khôi phục đẩy job từ PostgreSQL). Job Asynq còn trong Redis không ảnh hưởng bản cũ. Producer mới vẫn chạy với bản cũ.
 - Cấu hình Redis (AOF, `noeviction`) không cần rollback; nếu bỏ, chỉ mất khả năng giữ job qua restart, job vẫn được khôi phục từ PostgreSQL.
 - Không chạy migration down khi còn thông báo `pending`/`sending`/`parked` hoặc đã có audit, hoặc Vendor còn notice chưa gửi: các migration down từ chối trong trường hợp đó. Không xóa hàng chờ để "làm sạch".
+
+## Thông báo công việc cho shop (AF-08)
+
+Migration `000005` thêm `vendor_action_events` (sự việc cần báo cho shop, ghi một lần theo source và event id) và `notification_preferences` (nhóm việc mà nhân viên chọn nhận). Khi bật `FEATURE_VENDOR_ACTION_NOTICES_ENABLED` (cần `VENDOR_SERVICE_URL`), consumer `notification-vendor-actions` nhận `order.vendor_action_required` và `payment.vendor_action_required`. Worker hỏi Vendor ai được nhận rồi ghi một thông báo cho mỗi người; các thông báo này được gửi như mọi thông báo khác. Admin xem các sự việc chưa xác định được người nhận ở `/admin/notifications`. Chi tiết: `deploy/vendor-action-notices-runbook.md`.

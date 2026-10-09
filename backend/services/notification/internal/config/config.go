@@ -32,6 +32,11 @@ type Config struct {
 	DeliveryPaused bool
 	// WorkerConcurrency is how many delivery jobs run at once.
 	WorkerConcurrency int
+	// VendorActionNotices is FEATURE_VENDOR_ACTION_NOTICES_ENABLED (AF-08):
+	// shop work notices are recorded, resolved through Vendor
+	// (VendorServiceURL) and sent; staff may opt into categories.
+	VendorActionNotices bool
+	VendorServiceURL    string
 }
 
 func Load() (Config, error) {
@@ -94,12 +99,19 @@ func Load() (Config, error) {
 		}
 	}
 
+	vendorNotices := os.Getenv("FEATURE_VENDOR_ACTION_NOTICES_ENABLED") == "true"
+	vendorURL := os.Getenv("VENDOR_SERVICE_URL")
+	if vendorNotices && vendorURL == "" {
+		return Config{}, fmt.Errorf("config: FEATURE_VENDOR_ACTION_NOTICES_ENABLED needs VENDOR_SERVICE_URL")
+	}
+
 	return Config{
 		Base: base, IdentityServiceURL: identityServiceURL, IdentityServiceKey: internal.Key, InternalVerifier: internal.Verifier,
 		ResetDeliveryKey: key, SMTPHost: smtpHost, SMTPPort: port, SMTPUsername: os.Getenv("SMTP_USERNAME"),
 		SMTPPassword: os.Getenv("SMTP_PASSWORD"), SMTPFrom: smtpFrom, SMTPAllowPlaintext: plain,
 		EmailProvider: provider, AttemptRetention: time.Duration(days) * 24 * time.Hour,
 		DeliveryPaused: os.Getenv("NOTIFICATION_DELIVERY_PAUSED") == "true", WorkerConcurrency: concurrency,
+		VendorActionNotices: vendorNotices, VendorServiceURL: vendorURL,
 	}, nil
 }
 

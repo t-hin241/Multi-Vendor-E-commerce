@@ -184,6 +184,10 @@ func main() {
 		ReturnShippingEnabled: cfg.ReturnShipping,
 		ReturnDispatchDays:    cfg.ReturnDispatchDays,
 		Log:                   log,
+
+		// AF-08: tell shops about their work (event bus, or HTTP in rollback).
+		VendorActionNotices: cfg.VendorActionNotices,
+		VendorNotices:       notificationClient,
 	})
 	workerCtx, stopWorker := context.WithCancel(ctx)
 	defer stopWorker()

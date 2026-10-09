@@ -1135,11 +1135,7 @@ export type ReturnRequest = {
 };
 
 export type ReturnShippingStatus =
-  | "destination_missing"
-  | "awaiting_dispatch"
-  | "awaiting_verification"
-  | "received"
-  | "lost";
+  "destination_missing" | "awaiting_dispatch" | "awaiting_verification" | "received" | "lost";
 
 export type ReturnGoodsReceipt = {
   version: number;
@@ -2869,6 +2865,88 @@ export function retryNotification(
   });
 }
 
+// ---------- AF-08: shop work notices ----------
+
+export type VendorNoticeCategory = "orders" | "returns" | "finance";
+
+// A person's own opt-ins. The owner of a shop receives every category
+// whatever is stored; staff receive only what they opted into.
+export type NotificationPreferences = {
+  optional_vendor_categories: VendorNoticeCategory[];
+  available_vendor_categories: VendorNoticeCategory[];
+  version: number;
+  owner_receives_all: boolean;
+};
+
+export function getNotificationPreferences(token: string): Promise<NotificationPreferences> {
+  return request<NotificationPreferences>("/api/notifications/preferences", { token });
+}
+
+// updateNotificationPreferences replaces the opt-ins if expectedVersion is
+// still current (0 before the first save); otherwise 409.
+export function updateNotificationPreferences(
+  token: string,
+  categories: VendorNoticeCategory[],
+  expectedVersion: number,
+): Promise<NotificationPreferences> {
+  return request<NotificationPreferences>("/api/notifications/preferences", {
+    method: "PATCH",
+    token,
+    json: { optional_vendor_categories: categories, expected_version: expectedVersion },
+  });
+}
+
+export type VendorActionStatus = "pending" | "resolving" | "resolved" | "no_recipient" | "parked";
+
+// One producer event about a shop's work; recipients is a count only.
+export type VendorActionNotice = {
+  id: string;
+  source: "order" | "payment";
+  event_id: string;
+  vendor_id: string;
+  action_kind: string;
+  purpose: VendorNoticeCategory;
+  reference_id: string;
+  vendor_order_id?: string;
+  status: VendorActionStatus;
+  attempts: number;
+  next_attempt_at: string;
+  last_error?: string;
+  recipients: number;
+  permission_version?: string;
+  resolved_at?: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export function listVendorActionNotices(
+  token: string,
+  params: { status?: string; vendor_id?: string; limit?: number; offset?: number } = {},
+): Promise<VendorActionNotice[]> {
+  return request<VendorActionNotice[]>("/api/notifications/admin/vendor-actions", {
+    token,
+    query: params,
+  });
+}
+
+export function getVendorActionSummary(token: string): Promise<{ counts: Record<string, number> }> {
+  return request("/api/notifications/admin/vendor-actions/summary", { token });
+}
+
+// retryVendorActionNotice resolves an event without recipients (or parked)
+// again, e.g. after the owner's account was unlocked; audited.
+export function retryVendorActionNotice(
+  token: string,
+  id: string,
+  reason: string,
+): Promise<VendorActionNotice> {
+  return request<VendorActionNotice>(`/api/notifications/admin/vendor-actions/${id}/retry`, {
+    method: "POST",
+    token,
+    json: { reason },
+  });
+}
+
 // ---------- Event bus (PLT-03) ----------
 
 // Services that consume domain events, with their admin API prefix.
@@ -4216,7 +4294,10 @@ export type DeliveryException = {
 
 export type DeliveryExceptionEvent = CancellationEvent;
 
-export function listOrderDeliveryExceptions(token: string, orderId: string): Promise<DeliveryException[]> {
+export function listOrderDeliveryExceptions(
+  token: string,
+  orderId: string,
+): Promise<DeliveryException[]> {
   return request<DeliveryException[]>(`/api/orders/${orderId}/delivery-exceptions`, { token });
 }
 
@@ -4231,8 +4312,14 @@ export function listVendorDeliveryExceptions(
   });
 }
 
-export function listDeliveryExceptions(token: string, status = "open"): Promise<DeliveryException[]> {
-  return request<DeliveryException[]>("/api/orders/admin/delivery-exceptions", { token, query: { status } });
+export function listDeliveryExceptions(
+  token: string,
+  status = "open",
+): Promise<DeliveryException[]> {
+  return request<DeliveryException[]>("/api/orders/admin/delivery-exceptions", {
+    token,
+    query: { status },
+  });
 }
 
 export function getDeliveryException(
@@ -4319,8 +4406,14 @@ export type ReturnShippingInstructions = {
   dispatched_at?: string;
 };
 
-export function getReturnShippingInstructions(token: string, returnId: string): Promise<ReturnShippingInstructions> {
-  return request<ReturnShippingInstructions>(`/api/orders/return-requests/${returnId}/shipping-instructions`, { token });
+export function getReturnShippingInstructions(
+  token: string,
+  returnId: string,
+): Promise<ReturnShippingInstructions> {
+  return request<ReturnShippingInstructions>(
+    `/api/orders/return-requests/${returnId}/shipping-instructions`,
+    { token },
+  );
 }
 
 // reportReturnDispatch: the buyer's carrier and tracking number; the same
@@ -4328,7 +4421,12 @@ export function getReturnShippingInstructions(token: string, returnId: string): 
 export function reportReturnDispatch(
   token: string,
   returnId: string,
-  input: { carrier_name: string; tracking_number: string; dispatched_at: string; expected_version: number },
+  input: {
+    carrier_name: string;
+    tracking_number: string;
+    dispatched_at: string;
+    expected_version: number;
+  },
   idempotencyKey: string,
 ): Promise<ReturnRequest> {
   return request<ReturnRequest>(`/api/orders/return-requests/${returnId}/dispatches`, {
@@ -4367,13 +4465,21 @@ export function getAdminReturn(token: string, returnId: string): Promise<ReturnR
 export function authorizeReturnShipping(
   token: string,
   returnId: string,
-  input: { fee_payer?: "buyer" | "seller"; fee_cap?: number; reason: string; expected_version: number },
+  input: {
+    fee_payer?: "buyer" | "seller";
+    fee_cap?: number;
+    reason: string;
+    expected_version: number;
+  },
 ): Promise<ReturnRequest> {
-  return request<ReturnRequest>(`/api/orders/admin/return-requests/${returnId}/shipping-authorizations`, {
-    method: "POST",
-    token,
-    json: input,
-  });
+  return request<ReturnRequest>(
+    `/api/orders/admin/return-requests/${returnId}/shipping-authorizations`,
+    {
+      method: "POST",
+      token,
+      json: input,
+    },
+  );
 }
 
 export function decideReturnShipping(
@@ -4381,11 +4487,14 @@ export function decideReturnShipping(
   returnId: string,
   input: { action: "refund" | "mark_lost"; reason: string; expected_version: number },
 ): Promise<ReturnRequest> {
-  return request<ReturnRequest>(`/api/orders/admin/return-requests/${returnId}/shipping-decisions`, {
-    method: "POST",
-    token,
-    json: input,
-  });
+  return request<ReturnRequest>(
+    `/api/orders/admin/return-requests/${returnId}/shipping-decisions`,
+    {
+      method: "POST",
+      token,
+      json: input,
+    },
+  );
 }
 
 export type ReturnDestination = {
@@ -4414,11 +4523,20 @@ export function setReturnDestination(
   vendorId: string,
   input: { address_id: string; receiving_hours: string },
 ): Promise<ReturnDestination> {
-  return request<ReturnDestination>(`/api/vendor/${vendorId}/return-destination`, { method: "PUT", token, json: input });
+  return request<ReturnDestination>(`/api/vendor/${vendorId}/return-destination`, {
+    method: "PUT",
+    token,
+    json: input,
+  });
 }
 
-export function getAdminReturnDestination(token: string, vendorId: string): Promise<ReturnDestination> {
-  return request<ReturnDestination>(`/api/vendor/admin/shops/${vendorId}/return-destination`, { token });
+export function getAdminReturnDestination(
+  token: string,
+  vendorId: string,
+): Promise<ReturnDestination> {
+  return request<ReturnDestination>(`/api/vendor/admin/shops/${vendorId}/return-destination`, {
+    token,
+  });
 }
 
 export function decideReturnDestination(
@@ -4426,9 +4544,12 @@ export function decideReturnDestination(
   vendorId: string,
   input: { version: number; verify: boolean; reason: string },
 ): Promise<ReturnDestination> {
-  return request<ReturnDestination>(`/api/vendor/admin/shops/${vendorId}/return-destination/decision`, {
-    method: "POST",
-    token,
-    json: input,
-  });
+  return request<ReturnDestination>(
+    `/api/vendor/admin/shops/${vendorId}/return-destination/decision`,
+    {
+      method: "POST",
+      token,
+      json: input,
+    },
+  );
 }

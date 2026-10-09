@@ -71,3 +71,7 @@ Rollback: đặt `SHOP_STAFF_INVITES_PAUSED=true` để dừng cấp mới; nế
 - Unit: `go test ./pkg/shopaccess/ ./services/vendor/... ./services/notification/... ./gateway/...` và các service đã chuyển.
 - Integration: `VENDOR_TEST_DATABASE_URL` trỏ tới PostgreSQL tạm có tên DB kết thúc bằng `_test`; test tạo schema riêng (trigger owner, mời → nhận → authorize → thu hồi, nhận đồng thời một token, audit append-only, down migration từ chối).
 - Frontend: `npx vitest run src/lib/shop-access.test.ts`, `tsc --noEmit`, ESLint.
+
+## Email công việc (AF-08)
+
+Vendor trả danh sách người nhận email công việc qua `GET /internal/vendors/:vendorId/notification-recipients?purpose=orders|returns|finance` (chỉ Notification gọi được). Danh sách gồm chủ shop và nhân viên đang có `orders.fulfill`, `returns.handle` hoặc `finance.read`; nhân viên chỉ có mặt khi cờ shop staff đang bật. Nhân viên còn phải tự chọn nhóm việc ở `/vendor` thì mới nhận. Thu hồi quyền có hiệu lực ngay với việc mới. Chi tiết: `deploy/vendor-action-notices-runbook.md`.

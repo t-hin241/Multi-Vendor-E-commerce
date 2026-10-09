@@ -32,7 +32,8 @@ export function VendorDeliveryExceptionsSection({
   const { callWithAuth } = useAuth();
   const cases = useQuery({
     queryKey: ["vendor-delivery-exceptions", vendorId],
-    queryFn: () => callWithAuth((token) => api.listVendorDeliveryExceptions(token, vendorId, "open")),
+    queryFn: () =>
+      callWithAuth((token) => api.listVendorDeliveryExceptions(token, vendorId, "open")),
   });
   const list = cases.data ?? [];
   if (list.length === 0) return null;
@@ -116,7 +117,9 @@ function ReceiptForm({
   });
 
   if (items.length === 0) {
-    return <p className="text-xs text-muted-foreground">Mở chi tiết đơn để ghi nhận hàng hoàn về.</p>;
+    return (
+      <p className="text-xs text-muted-foreground">Mở chi tiết đơn để ghi nhận hàng hoàn về.</p>
+    );
   }
   return (
     <form
@@ -131,7 +134,9 @@ function ReceiptForm({
         save.mutate(out.lines);
       }}
     >
-      <p className="text-xs">Ghi nhận từng đơn vị hàng hoàn về (tổng phải bằng số lượng đã giao):</p>
+      <p className="text-xs">
+        Ghi nhận từng đơn vị hàng hoàn về (tổng phải bằng số lượng đã giao):
+      </p>
       {items.map((item) => (
         <div key={item.id} className="flex flex-wrap items-center gap-2 text-xs">
           <span className="min-w-40">
@@ -165,7 +170,13 @@ function ReceiptForm({
         onChange={(e) => setNote(e.target.value)}
       />
       {error && <p className="text-xs text-destructive">{error}</p>}
-      <Button type="submit" size="sm" variant="outline" className="self-start" disabled={save.isPending}>
+      <Button
+        type="submit"
+        size="sm"
+        variant="outline"
+        className="self-start"
+        disabled={save.isPending}
+      >
         {save.isPending ? "Đang lưu…" : "Ghi nhận hàng hoàn về"}
       </Button>
     </form>

@@ -29,6 +29,14 @@ type SettlementDeps struct {
 	// RequireApprovals (AF-19): adjustments and payout results go through
 	// an approved maker-checker request only.
 	RequireApprovals bool
+	// VendorNotices (AF-08, FEATURE_VENDOR_ACTION_NOTICES_ENABLED) records
+	// each payout result for the shop in the same transaction; nil is off.
+	VendorNotices VendorNoticeOutbox
+}
+
+// VendorNoticeOutbox records a payout result to tell the shop about.
+type VendorNoticeOutbox interface {
+	Enqueue(ctx context.Context, vendorID, payoutItemID, outcome string) error
 }
 
 // SettlementUseCase keeps the append-only ledger of what the marketplace
@@ -340,6 +348,11 @@ func (uc *SettlementUseCase) resolvePayoutItem(ctx context.Context, adminID, ite
 		}
 		if err := uc.Payouts.SaveResolution(ctx, item); err != nil {
 			return err
+		}
+		if uc.VendorNotices != nil {
+			if err := uc.VendorNotices.Enqueue(ctx, item.VendorID, item.ID, string(item.Status)); err != nil {
+				return err
+			}
 		}
 		if item.Status == domain.PayoutItemSucceeded {
 			note := "Payout " + item.ID

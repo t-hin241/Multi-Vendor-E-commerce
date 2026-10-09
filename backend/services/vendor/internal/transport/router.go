@@ -118,6 +118,8 @@ func NewRouter(
 		// not migrated yet, so they can never grant staff access.
 		internalGroup.POST("/authorize", internal.Allow("catalog", "inventory", "order", "review", "shipment", "payment"), staffHandler.Authorize)
 		internalGroup.GET("/:vendorId/owned-by/:userID", internal.Allow("catalog", "inventory", "order", "review", "shipment", "payment"), internalHandler.GetOwnedStatus)
+		// AF-08: who receives a shop notice; Notification only.
+		internalGroup.GET("/:vendorId/notification-recipients", internal.Allow("notification"), staffHandler.NotificationRecipients)
 	}
 
 	return r

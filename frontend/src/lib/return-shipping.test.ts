@@ -12,14 +12,20 @@ import {
 describe("return shipping steps", () => {
   it("dispatches only an authorized, not yet sent return", () => {
     expect(canDispatch({ status: "approved", shipping_status: "awaiting_dispatch" })).toBe(true);
-    expect(canDispatch({ status: "approved", shipping_status: "awaiting_verification" })).toBe(false);
+    expect(canDispatch({ status: "approved", shipping_status: "awaiting_verification" })).toBe(
+      false,
+    );
     expect(canDispatch({ status: "approved", shipping_status: "destination_missing" })).toBe(false);
     expect(canDispatch({ status: "received", shipping_status: "awaiting_dispatch" })).toBe(false);
   });
   it("authorizes (or corrects) only before dispatch", () => {
     expect(canAuthorizeShipping({ status: "approved", shipping_status: undefined })).toBe(true);
-    expect(canAuthorizeShipping({ status: "approved", shipping_status: "awaiting_dispatch" })).toBe(true);
-    expect(canAuthorizeShipping({ status: "approved", shipping_status: "awaiting_verification" })).toBe(false);
+    expect(canAuthorizeShipping({ status: "approved", shipping_status: "awaiting_dispatch" })).toBe(
+      true,
+    );
+    expect(
+      canAuthorizeShipping({ status: "approved", shipping_status: "awaiting_verification" }),
+    ).toBe(false);
   });
 });
 
@@ -37,6 +43,8 @@ describe("wording", () => {
     expect(buyerShippingLabel("received")).not.toMatch(/hoàn tiền/);
   });
   it("explains a parcel already sent", () => {
-    expect(returnShippingErrorMessage(new ApiError(409, "destination_changed", "x"), "f")).toMatch(/đã được gửi/);
+    expect(returnShippingErrorMessage(new ApiError(409, "destination_changed", "x"), "f")).toMatch(
+      /đã được gửi/,
+    );
   });
 });

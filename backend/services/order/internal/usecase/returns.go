@@ -5,6 +5,7 @@ import (
 	"errors"
 
 	"shopee/backend/pkg/apperror"
+	"shopee/backend/pkg/events"
 	"shopee/backend/pkg/shopaccess"
 	"shopee/backend/services/order/internal/domain"
 	"shopee/backend/services/order/internal/repository"
@@ -64,8 +65,14 @@ func (uc *OrderUseCase) CreateReturn(ctx context.Context, buyerID string, in Ret
 		if err := uc.Returns.Create(ctx, rr); err != nil {
 			return err
 		}
+		if err := uc.noticeVendor(ctx, order.ID, vo.VendorID, vo.ID, events.VendorActionReturnRequested, rr.ID); err != nil {
+			return err
+		}
 		return uc.Returns.AddEvent(ctx, &domain.ReturnEvent{ReturnID: rr.ID, ActorUserID: &buyerID, ActorRole: "buyer", Action: "requested", ToStatus: string(rr.Status)})
 	})
+	if err == nil && uc.VendorActionNotices {
+		uc.runEffectsSoon(ctx, in.OrderID)
+	}
 	return rr, err
 }
 

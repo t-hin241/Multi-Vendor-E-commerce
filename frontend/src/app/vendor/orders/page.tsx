@@ -100,7 +100,10 @@ export default function VendorOrdersPage() {
 
       <VendorReturnsSection vendorId={selectedVendorId} />
 
-      <VendorDeliveryExceptionsSection vendorId={selectedVendorId} vendorOrders={ordersQuery.data ?? []} />
+      <VendorDeliveryExceptionsSection
+        vendorId={selectedVendorId}
+        vendorOrders={ordersQuery.data ?? []}
+      />
 
       {ordersQuery.isPending && <p className="text-sm text-muted-foreground">Đang tải…</p>}
       {ordersQuery.data?.length === 0 && (

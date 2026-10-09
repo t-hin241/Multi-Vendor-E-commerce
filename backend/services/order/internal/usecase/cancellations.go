@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 
 	"shopee/backend/pkg/apperror"
+	"shopee/backend/pkg/events"
 	"shopee/backend/pkg/shopaccess"
 	"shopee/backend/services/order/internal/adapter"
 	"shopee/backend/services/order/internal/domain"
@@ -177,6 +178,11 @@ func (uc *OrderUseCase) RequestCancellation(ctx context.Context, actor SupportAc
 		notice.Target = notifyCancellationRequested + ":" + c.ID
 		if err := uc.Effects.Enqueue(ctx, notice); err != nil {
 			return err
+		}
+		if c.Origin != "vendor" {
+			if err := uc.noticeVendor(ctx, order.ID, c.VendorID, c.VendorOrderID, events.VendorActionCancellationRequested, c.ID); err != nil {
+				return err
+			}
 		}
 		result = c
 		return nil

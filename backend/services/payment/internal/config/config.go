@@ -36,6 +36,9 @@ type Config struct {
 	AdminApprovals bool
 	// ManualRefunds is the AF-06 manual bank-transfer refund workflow.
 	ManualRefunds ManualRefundConfig
+	// VendorActionNotices is FEATURE_VENDOR_ACTION_NOTICES_ENABLED (AF-08):
+	// payout results are told to the shop (needs the event bus).
+	VendorActionNotices bool
 }
 
 // ManualRefundConfig: FEATURE_MANUAL_REFUND_WORKFLOW_ENABLED, the keys that
@@ -110,12 +113,16 @@ func Load() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	vendorNotices, err := strconv.ParseBool(getEnv("FEATURE_VENDOR_ACTION_NOTICES_ENABLED", "false"))
+	if err != nil {
+		return Config{}, fmt.Errorf("config: FEATURE_VENDOR_ACTION_NOTICES_ENABLED must be true or false")
+	}
 
 	return Config{
 		AdminApprovals:   approvals,
 		ManualRefunds:    manual,
 		VendorServiceURL: getEnv("VENDOR_SERVICE_URL", "http://vendor:8082"), WebhookRatePerMinute: rate,
-		Base: base, OrderServiceURL: orderServiceURL,
+		Base: base, OrderServiceURL: orderServiceURL, VendorActionNotices: vendorNotices,
 		Provider: provider, MockWebhookSecret: mockWebhookSecret, PayOSClientID: payosClientID, PayOSAPIKey: payosAPIKey, PayOSChecksumKey: payosChecksumKey, PayOSBaseURL: getEnv("PAYOS_API_URL", "https://api-merchant.payos.vn"), PayOSReturnURL: payosReturnURL, PayOSCancelURL: payosCancelURL,
 	}, nil
 }

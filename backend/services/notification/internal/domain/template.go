@@ -56,6 +56,21 @@ var templates = map[Type]Template{
 		"Sự cố giao hàng của đơn #%s đã có kết quả. Xem chi tiết trong trang đơn hàng; khoản hoàn tiền (nếu có) được báo riêng khi đã xác nhận."},
 	TypeReturnShippingInstructions: {"v1", "Hướng dẫn gửi trả hàng cho đơn #%s",
 		"Yêu cầu trả hàng của đơn #%s đã được chấp nhận. Mở trang Trả hàng để xem địa chỉ nhận, mã trả hàng và hạn gửi; sau khi gửi, nhập mã vận đơn. Tiền hoàn chỉ được báo khi người bán đã nhận hàng và khoản hoàn được xác nhận."},
+	// AF-08 shop work notices: the reference is the vendor order, the
+	// request or the payout item. Never the buyer's address, an amount or
+	// an account; the link only opens the console, where access is checked.
+	TypeVendorNewOrder: {"v1", "Có đơn hàng mới cần chuẩn bị (gói #%s)",
+		"Gói hàng #%s đã được thanh toán và giữ hàng trong kho. Mở /vendor/orders để chuẩn bị và giao cho đơn vị vận chuyển đúng hạn."},
+	TypeVendorCancellationRequested: {"v1", "Người mua yêu cầu hủy gói #%s",
+		"Người mua đã yêu cầu hủy gói hàng #%s. Đừng giao gói này cho đơn vị vận chuyển trong khi chờ quyết định; mở /vendor/orders để xem yêu cầu."},
+	TypeVendorReturnRequested: {"v1", "Có yêu cầu trả hàng mới (#%s)",
+		"Người mua đã gửi yêu cầu trả hàng #%s. Mở /vendor/orders để xem lý do và theo dõi xử lý. Thông báo này không hoàn tiền."},
+	TypeVendorReturnDispatched: {"v1", "Hàng trả đang được gửi về shop (#%s)",
+		"Người mua đã gửi hàng trả cho yêu cầu #%s. Khi nhận được, mở /vendor/orders để ghi phiếu nhận hàng theo tình trạng từng sản phẩm."},
+	TypeVendorPayoutSucceeded: {"v1", "Khoản thanh toán cho shop đã được chuyển (#%s)",
+		"Khoản thanh toán #%s đã được ghi nhận là chuyển thành công tới tài khoản nhận tiền của shop. Xem chi tiết ở trang tổng quan /vendor."},
+	TypeVendorPayoutFailed: {"v1", "Khoản thanh toán cho shop chưa chuyển được (#%s)",
+		"Khoản thanh toán #%s chưa chuyển được và sẽ được đưa vào đợt sau. Kiểm tra tài khoản nhận tiền tại /vendor/payout-accounts; sàn không bao giờ hỏi mật khẩu hay mã OTP qua email."},
 	TypeMarketplacePolicyUpdated: {"v1", "Chính sách sàn có phiên bản mới (cửa hàng %s)",
 		"Sàn đã công bố phiên bản chính sách mới áp dụng cho cửa hàng (mã %s). Đơn đã đặt giữ chính sách cũ; xem nội dung tại trang Chính sách."},
 	TypeShopPolicyApproved: {"v1", "Chính sách cửa hàng %s đã được duyệt",

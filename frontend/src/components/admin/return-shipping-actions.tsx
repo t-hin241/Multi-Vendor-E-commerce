@@ -9,7 +9,11 @@ import { Button } from "@/components/ui/button";
 import * as api from "@/lib/api-client";
 import { useAuth } from "@/lib/auth-context";
 import { adminCanDecide } from "@/lib/order-workflow";
-import { ADMIN_SHIPPING_LABELS, canAuthorizeShipping, canRecordReceipt } from "@/lib/return-shipping";
+import {
+  ADMIN_SHIPPING_LABELS,
+  canAuthorizeShipping,
+  canRecordReceipt,
+} from "@/lib/return-shipping";
 
 // ReturnShippingInfo is the way back at a glance (AF-05).
 export function ReturnShippingInfo({ returnRequest: r }: { returnRequest: api.ReturnRequest }) {
@@ -19,7 +23,8 @@ export function ReturnShippingInfo({ returnRequest: r }: { returnRequest: api.Re
       {ADMIN_SHIPPING_LABELS[r.shipping_status] ?? r.shipping_status}
       {r.fee_payer && ` · fee: ${r.fee_payer}`}
       {r.destination_province && ` · to ${r.destination_province}`}
-      {r.dispatch_deadline && r.shipping_status === "awaiting_dispatch" &&
+      {r.dispatch_deadline &&
+        r.shipping_status === "awaiting_dispatch" &&
         ` · due ${new Date(r.dispatch_deadline).toLocaleDateString("vi-VN")}`}
       {r.dispatch_overdue && <span className="text-destructive"> · overdue</span>}
       {r.dispatch_tracking && ` · ${r.dispatch_carrier} ${r.dispatch_tracking}`}
@@ -73,7 +78,9 @@ export function ReturnShippingActions({
           title="Approve this return?"
           description="The buyer gets the shop's verified return address and a deadline. No money moves until the goods are received."
           confirmLabel="Approve"
-          onConfirm={() => run((token) => api.decideReturn(token, r.id, true, "", { fee_payer: feePayer }))}
+          onConfirm={() =>
+            run((token) => api.decideReturn(token, r.id, true, "", { fee_payer: feePayer }))
+          }
         />
       )}
       {canAuthorizeShipping(r) && (
@@ -89,7 +96,11 @@ export function ReturnShippingActions({
           confirmLabel="Issue"
           onConfirm={(reason) =>
             run((token) =>
-              api.authorizeReturnShipping(token, r.id, { fee_payer: feePayer, reason, expected_version: r.version }),
+              api.authorizeReturnShipping(token, r.id, {
+                fee_payer: feePayer,
+                reason,
+                expected_version: r.version,
+              }),
             )
           }
         />
@@ -103,7 +114,13 @@ export function ReturnShippingActions({
           description="Some goods came back damaged or missing. Refund anyway, or leave it and handle the dispute in a support case."
           confirmLabel="Refund"
           onConfirm={(reason) =>
-            run((token) => api.decideReturnShipping(token, r.id, { action: "refund", reason, expected_version: r.version }))
+            run((token) =>
+              api.decideReturnShipping(token, r.id, {
+                action: "refund",
+                reason,
+                expected_version: r.version,
+              }),
+            )
           }
         />
       )}
@@ -118,7 +135,13 @@ export function ReturnShippingActions({
           description="After checking with the carrier (note its reference). The refund then goes through a support case."
           confirmLabel="Mark lost"
           onConfirm={(reason) =>
-            run((token) => api.decideReturnShipping(token, r.id, { action: "mark_lost", reason, expected_version: r.version }))
+            run((token) =>
+              api.decideReturnShipping(token, r.id, {
+                action: "mark_lost",
+                reason,
+                expected_version: r.version,
+              }),
+            )
           }
         />
       )}

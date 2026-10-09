@@ -36,6 +36,9 @@ const (
 	EffectAuthorizeReturnShipment EffectKind = "authorize_return_shipment"
 	EffectDispatchReturnShipment  EffectKind = "dispatch_return_shipment"
 	EffectCloseReturnShipment     EffectKind = "close_return_shipment"
+	// AF-08: tell a shop it has work (Notification resolves who). Target
+	// is "<action_kind>:<reference>", so each fact is told once.
+	EffectNotifyVendor EffectKind = "notify_vendor"
 )
 
 // RejectedOutcomePayload is what a report_rejected_outcome effect sends.
@@ -76,6 +79,21 @@ const (
 type NotifyPayload struct {
 	UserID string `json:"user_id"`
 	Type   string `json:"type"`
+}
+
+// VendorNoticePayload is the payload of a notify_vendor effect.
+type VendorNoticePayload struct {
+	VendorID      string `json:"vendor_id"`
+	VendorOrderID string `json:"vendor_order_id"`
+	ActionKind    string `json:"action_kind"`
+	ReferenceID   string `json:"reference_id"`
+}
+
+// NewVendorNoticeEffect tells the shop of vendorOrderID about one piece of
+// work (kind) on reference, once.
+func NewVendorNoticeEffect(orderID, vendorID, vendorOrderID, kind, referenceID string) Effect {
+	payload, _ := json.Marshal(VendorNoticePayload{VendorID: vendorID, VendorOrderID: vendorOrderID, ActionKind: kind, ReferenceID: referenceID})
+	return Effect{OrderID: orderID, Kind: EffectNotifyVendor, Target: kind + ":" + referenceID, Payload: payload}
 }
 
 // NewNotifyEffect notifies userID once per (order, type).
