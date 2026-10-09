@@ -8,6 +8,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"shopee/backend/pkg/middleware"
+	"shopee/backend/pkg/shopaccess"
 )
 
 // AdminAudit appends admin decisions (restock approvals and rejections) to
@@ -24,7 +25,7 @@ func (r AdminAudit) Record(ctx context.Context, entityType, entityID, actor, act
 		}
 	}
 	_, err := connection(ctx, r.Pool).Exec(ctx, `
-		INSERT INTO inventory_operation_audit (entity_type, entity_id, actor_user_id, action, reason, changes, request_id)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)`, entityType, entityID, actor, action, reason, encoded, middleware.CorrelationID(ctx))
+		INSERT INTO inventory_operation_audit (entity_type, entity_id, actor_user_id, action, reason, changes, request_id, membership_version)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`, entityType, entityID, actor, action, reason, encoded, middleware.CorrelationID(ctx), shopaccess.UsedMembershipVersion(ctx))
 	return err
 }

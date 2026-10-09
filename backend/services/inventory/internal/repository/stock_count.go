@@ -7,6 +7,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"shopee/backend/pkg/apperror"
+	"shopee/backend/pkg/shopaccess"
 	"shopee/backend/services/inventory/internal/domain"
 )
 
@@ -73,9 +74,9 @@ func (r *InventoryItemRepository) RecordStockCount(ctx context.Context, count *d
 			return err
 		}
 		if _, err := q.Exec(ctx, `
-			INSERT INTO stock_movements (inventory_item_id, change_quantity, reserved_change, reason, reference_id, actor_user_id, operation_key)
-			VALUES ($1, $2, 0, 'stock_count', $3, $4, 'count:'||$3)`,
-			count.InventoryItemID, next-available, count.ID, count.ActorUserID); err != nil {
+			INSERT INTO stock_movements (inventory_item_id, change_quantity, reserved_change, reason, reference_id, actor_user_id, operation_key, membership_version)
+			VALUES ($1, $2, 0, 'stock_count', $3, $4, 'count:'||$3, $5)`,
+			count.InventoryItemID, next-available, count.ID, count.ActorUserID, shopaccess.UsedMembershipVersion(ctx)); err != nil {
 			return err
 		}
 		result = count

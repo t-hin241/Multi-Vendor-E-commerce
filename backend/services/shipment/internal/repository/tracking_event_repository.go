@@ -7,6 +7,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"shopee/backend/pkg/shopaccess"
 	"shopee/backend/services/shipment/internal/domain"
 )
 
@@ -27,11 +28,11 @@ func (r *TrackingEventRepository) Insert(ctx context.Context, e *domain.Tracking
 		e.ActorRole = domain.ActorSystem
 	}
 	err := connection(ctx, r.pool).QueryRow(ctx, `
-		INSERT INTO shipment_tracking_events (shipment_id, status, note, actor_id, actor_role, event_key, occurred_at)
-		VALUES ($1, $2, $3, $4, $5, $6, COALESCE($7, now()))
+		INSERT INTO shipment_tracking_events (shipment_id, status, note, actor_id, actor_role, event_key, occurred_at, membership_version)
+		VALUES ($1, $2, $3, $4, $5, $6, COALESCE($7, now()), $8)
 		ON CONFLICT (shipment_id, event_key) WHERE event_key IS NOT NULL DO NOTHING
 		RETURNING id, occurred_at, created_at`,
-		e.ShipmentID, e.Status, e.Note, e.ActorID, e.ActorRole, e.EventKey, nullTime(e.OccurredAt)).Scan(&e.ID, &e.OccurredAt, &e.CreatedAt)
+		e.ShipmentID, e.Status, e.Note, e.ActorID, e.ActorRole, e.EventKey, nullTime(e.OccurredAt), shopaccess.UsedMembershipVersion(ctx)).Scan(&e.ID, &e.OccurredAt, &e.CreatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return false, nil
 	}

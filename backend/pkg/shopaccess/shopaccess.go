@@ -222,8 +222,10 @@ func (c Client) Authorize(ctx context.Context, actorUserID, vendorID, permission
 	if out.Data.VendorID != vendorID || out.Data.Status == "" {
 		return Grant{}, Unavailable(errors.New("vendor authorize answered for another shop"))
 	}
-	return Grant{VendorID: out.Data.VendorID, Status: out.Data.Status, VendorVersion: out.Data.VendorVersion,
-		Role: out.Data.Role, MembershipVersion: out.Data.MembershipVersion}, nil
+	g := Grant{VendorID: out.Data.VendorID, Status: out.Data.Status, VendorVersion: out.Data.VendorVersion,
+		Role: out.Data.Role, MembershipVersion: out.Data.MembershipVersion}
+	remember(ctx, g) // PW-021: the audit records which grant allowed the change
+	return g, nil
 }
 
 func (c Client) ownerOnly(ctx context.Context, actorUserID, vendorID string) (Grant, error) {
@@ -257,5 +259,8 @@ func (c Client) ownerOnly(ctx context.Context, actorUserID, vendorID string) (Gr
 	if out.Data.VendorID != vendorID || out.Data.Status == "" {
 		return Grant{}, Unavailable(errors.New("vendor ownership answered for another shop"))
 	}
-	return Grant{VendorID: vendorID, Status: out.Data.Status, VendorVersion: out.Data.Version, Role: "owner"}, nil
+	// A Vendor without memberships: version 0 marks the owner-only check.
+	g := Grant{VendorID: vendorID, Status: out.Data.Status, VendorVersion: out.Data.Version, Role: "owner"}
+	remember(ctx, g)
+	return g, nil
 }

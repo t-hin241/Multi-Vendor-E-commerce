@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"shopee/backend/pkg/apperror"
+	"shopee/backend/pkg/shopaccess"
 	"shopee/backend/services/order/internal/domain"
 )
 
@@ -249,9 +250,9 @@ func (r *ReturnRequestRepository) ShippingCounts(ctx context.Context) (missing, 
 // AddEvent appends one audit entry in the caller's transaction.
 func (r *ReturnRequestRepository) AddEvent(ctx context.Context, e *domain.ReturnEvent) error {
 	return connection(ctx, r.pool).QueryRow(ctx, `
-		INSERT INTO return_request_events (return_request_id, actor_user_id, actor_role, action, from_status, to_status, note)
-		VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id, created_at`,
-		e.ReturnID, e.ActorUserID, e.ActorRole, e.Action, e.FromStatus, e.ToStatus, e.Note).Scan(&e.ID, &e.CreatedAt)
+		INSERT INTO return_request_events (return_request_id, actor_user_id, actor_role, action, from_status, to_status, note, membership_version)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id, created_at`,
+		e.ReturnID, e.ActorUserID, e.ActorRole, e.Action, e.FromStatus, e.ToStatus, e.Note, shopaccess.UsedMembershipVersion(ctx)).Scan(&e.ID, &e.CreatedAt)
 }
 
 func (r *ReturnRequestRepository) ListEvents(ctx context.Context, returnID string) ([]*domain.ReturnEvent, error) {

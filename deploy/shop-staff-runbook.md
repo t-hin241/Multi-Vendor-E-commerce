@@ -75,3 +75,24 @@ Rollback: đặt `SHOP_STAFF_INVITES_PAUSED=true` để dừng cấp mới; nế
 ## Email công việc (AF-08)
 
 Vendor trả danh sách người nhận email công việc qua `GET /internal/vendors/:vendorId/notification-recipients?purpose=orders|returns|finance` (chỉ Notification gọi được). Danh sách gồm chủ shop và nhân viên đang có `orders.fulfill`, `returns.handle` hoặc `finance.read`; nhân viên chỉ có mặt khi cờ shop staff đang bật. Nhân viên còn phải tự chọn nhóm việc ở `/vendor` thì mới nhận. Thu hồi quyền có hiệu lực ngay với việc mới. Chi tiết: `deploy/vendor-action-notices-runbook.md`.
+
+## Phiên bản quyền trong audit (PW-021)
+
+Quyền được kiểm khi request bắt đầu, còn việc thu hồi có thể xảy ra trước khi transaction của lệnh commit. Không gọi lại Vendor trong transaction (quy tắc: không giữ transaction trong lúc gọi service khác). Thay vào đó, service sở hữu ghi `membership_version` của grant đã cho phép lệnh vào audit:
+
+| Service (migration) | Bảng | Lệnh |
+|---|---|---|
+| Catalog (`000016`) | `product_audit_logs` | Sửa nội dung/giá sản phẩm |
+| Inventory (`000008`) | `stock_movements`, `inventory_operation_audit` | Tạo tồn ban đầu, kiểm kê, thao tác kho |
+| Order (`000026`) | `return_request_events` | Xác nhận/nhận hàng trả |
+| Shipment (`000011`) | `shipment_tracking_events` | Bàn giao, cập nhật giao hàng |
+
+`NULL` nghĩa là lệnh không đi qua quyền shop (buyer, admin, hệ thống).
+
+Điều tra một thao tác nghi vấn:
+
+1. Lấy `membership_version` trong audit.
+2. So với `membership_audit_logs` của Vendor (`staff_revoked` / `staff_permissions_changed` có version mới hơn).
+3. Nếu version đã bị thu hồi trước thời điểm ghi, đó là thao tác lọt khe; xử lý theo quy trình sự cố.
+
+Down của các migration này tự từ chối khi đã có giá trị được ghi.

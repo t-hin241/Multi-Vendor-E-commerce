@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"shopee/backend/pkg/shopaccess"
 	"shopee/backend/services/inventory/internal/domain"
 )
 
@@ -39,8 +40,8 @@ func (r *InventoryItemRepository) create(ctx context.Context, item *domain.Inven
 		return err
 	}
 
-	const movementQuery = `INSERT INTO stock_movements (inventory_item_id, change_quantity, reason,actor_user_id,reference_id,operation_key) VALUES ($1, $2, 'initial_stock',NULLIF($3,'')::uuid,$1::uuid::text,'initial:'||$1::uuid::text)`
-	_, err = connection(ctx, r.pool).Exec(ctx, movementQuery, item.ID, item.AvailableQuantity, item.ActorUserID)
+	const movementQuery = `INSERT INTO stock_movements (inventory_item_id, change_quantity, reason,actor_user_id,reference_id,operation_key,membership_version) VALUES ($1, $2, 'initial_stock',NULLIF($3,'')::uuid,$1::uuid::text,'initial:'||$1::uuid::text,$4)`
+	_, err = connection(ctx, r.pool).Exec(ctx, movementQuery, item.ID, item.AvailableQuantity, item.ActorUserID, shopaccess.UsedMembershipVersion(ctx))
 	return err
 }
 
