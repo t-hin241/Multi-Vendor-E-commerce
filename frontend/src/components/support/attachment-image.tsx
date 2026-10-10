@@ -14,16 +14,21 @@ export function AttachmentImage({
   scope,
   caseId,
   attachment,
+  load,
 }: {
   scope: api.SupportScope;
   caseId: string;
   attachment: api.SupportAttachment;
+  // load reads the bytes from another route (receipt evidence, PW-038).
+  load?: (token: string) => Promise<Blob>;
 }) {
   const { callWithAuth } = useAuth();
   const query = useQuery({
     queryKey: ["support-attachment", scope, caseId, attachment.id],
     queryFn: () =>
-      callWithAuth((token) => api.fetchSupportAttachment(token, scope, caseId, attachment.id)),
+      callWithAuth((token) =>
+        load ? load(token) : api.fetchSupportAttachment(token, scope, caseId, attachment.id),
+      ),
     staleTime: Infinity,
     gcTime: 5 * 60_000,
     retry: 1,

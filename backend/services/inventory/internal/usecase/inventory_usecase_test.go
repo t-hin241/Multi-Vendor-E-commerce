@@ -240,6 +240,49 @@ func TestApproveRestockRequest_AppliesQuantityIncrease(t *testing.T) {
 	}
 }
 
+// PW-027: a large restock needs two different admins; the first approval
+// moves no stock and the same admin cannot give the second.
+func TestApproveRestockRequest_LargeNeedsASecondAdmin(t *testing.T) {
+	items := newFakeItemRepository()
+	vendors, catalog, restocks := newFakeVendorGateway(), newFakeCatalogGateway(), newFakeRestockRequestRepository()
+	uc := usecase.NewInventoryUseCase(items, newFakeReservationRepository(items), restocks, vendors, catalog,
+		usecase.Operations{Transactions: fakeTransactions{}, Identity: fakeIdentity{}, Audit: fakeAudit{}, SecondApprovalQuantity: 100})
+	vendors.approvedVendors["user-1"] = "vendor-1"
+	catalog.productOwners["product-1"] = "vendor-1"
+	catalog.productStatuses["product-1"] = "approved"
+	ctx := t.Context()
+	if _, err := uc.CreateItem(ctx, "user-1", strPtr("product-1"), nil, 5); err != nil {
+		t.Fatal(err)
+	}
+	small, err := uc.RequestRestock(ctx, "user-1", strPtr("product-1"), nil, 99)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, err := uc.ApproveRestockRequest(ctx, "admin-1", small.ID); err != nil || got.Status != domain.RestockApproved {
+		t.Fatalf("below the threshold one admin is enough: %+v %v", got, err)
+	}
+	large, err := uc.RequestRestock(ctx, "user-1", strPtr("product-1"), nil, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := uc.ApproveRestockRequest(ctx, "admin-1", large.ID)
+	if err != nil || first.Status != domain.RestockPending || first.FirstApprovedBy == nil {
+		t.Fatalf("first approval keeps it pending: %+v %v", first, err)
+	}
+	if item, _ := items.FindByProductID(ctx, "product-1"); item.AvailableQuantity != 104 {
+		t.Fatalf("no stock on the first approval, got %d", item.AvailableQuantity)
+	}
+	if _, err := uc.ApproveRestockRequest(ctx, "admin-1", large.ID); mustAppError(t, err).Code != "self_approval" {
+		t.Fatalf("the same admin cannot approve twice: %v", err)
+	}
+	if got, err := uc.ApproveRestockRequest(ctx, "admin-2", large.ID); err != nil || got.Status != domain.RestockApproved {
+		t.Fatalf("a second admin applies it: %+v %v", got, err)
+	}
+	if item, _ := items.FindByProductID(ctx, "product-1"); item.AvailableQuantity != 204 {
+		t.Fatalf("stock applied once, got %d", item.AvailableQuantity)
+	}
+}
+
 func TestRejectRestockRequest_LeavesQuantityUnchanged(t *testing.T) {
 	f := newFixture()
 	f.vendors.approvedVendors["user-1"] = "vendor-1"

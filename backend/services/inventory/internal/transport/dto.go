@@ -104,6 +104,9 @@ type restockRequestResponse struct {
 	RejectionReason   *string    `json:"rejection_reason,omitempty"`
 	CreatedAt         time.Time  `json:"created_at"`
 	DecidedAt         *time.Time `json:"decided_at,omitempty"`
+	// FirstApprovedAt (PW-027): a large request waiting for a second admin.
+	FirstApprovedAt *time.Time `json:"first_approved_at,omitempty"`
+	FirstApprovedBy *string    `json:"first_approved_by,omitempty"`
 }
 
 func toRestockRequestResponse(r *domain.RestockRequest) restockRequestResponse {
@@ -117,6 +120,8 @@ func toRestockRequestResponse(r *domain.RestockRequest) restockRequestResponse {
 		RejectionReason:   r.RejectionReason,
 		CreatedAt:         r.CreatedAt,
 		DecidedAt:         r.DecidedAt,
+		FirstApprovedAt:   r.FirstApprovedAt,
+		FirstApprovedBy:   r.FirstApprovedBy,
 	}
 }
 

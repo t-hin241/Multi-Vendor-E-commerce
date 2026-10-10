@@ -44,6 +44,12 @@ type AccessUseCase struct {
 	// prepared so the switch is safe.
 	Scoped bool
 	Now    func() time.Time
+	// SecondFactor (PW-028), when MFARequired (FEATURE_ADMIN_MFA_REQUIRED),
+	// checks the authenticator code of every reauthentication.
+	SecondFactor interface {
+		Require(ctx context.Context, userID, code string) error
+	}
+	MFARequired bool
 }
 
 func (uc *AccessUseCase) now() time.Time {
@@ -258,7 +264,7 @@ type Proof struct {
 
 // Reauthenticate checks the admin's current password and returns a proof
 // bound to purpose and operation. It is a password re-check, not MFA.
-func (uc *AccessUseCase) Reauthenticate(ctx context.Context, userID, password, purpose, operationHash string) (*Proof, error) {
+func (uc *AccessUseCase) Reauthenticate(ctx context.Context, userID, password, purpose, operationHash string, otpCode ...string) (*Proof, error) {
 	if err := domain.ValidateProofRequest(purpose, operationHash); err != nil {
 		return nil, err
 	}
@@ -275,6 +281,19 @@ func (uc *AccessUseCase) Reauthenticate(ctx context.Context, userID, password, p
 	// bcrypt runs outside any transaction (no connection held).
 	if bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(password)) != nil {
 		return nil, apperror.Unauthorized("Password is incorrect")
+	}
+	// PW-028: the authenticator app is the second factor.
+	if uc.MFARequired {
+		if uc.SecondFactor == nil {
+			return nil, apperror.Internal(errors.New("second factor is required but not configured"))
+		}
+		code := ""
+		if len(otpCode) > 0 {
+			code = strings.TrimSpace(otpCode[0])
+		}
+		if err := uc.SecondFactor.Require(ctx, userID, code); err != nil {
+			return nil, err
+		}
 	}
 	raw := make([]byte, 32)
 	if _, err := rand.Read(raw); err != nil {

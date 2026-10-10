@@ -224,3 +224,41 @@ func TestApplyPolicyPublished_IsIdempotentAndRefusesConflicts(t *testing.T) {
 		EffectiveAt: at, RuleRefs: map[string]string{domain.RuleReturnsWindow: "window-7d", domain.RuleReturnShippingRefund: "seller-pays"}}
 	expectCode(t, f.uc.ApplyPolicyPublished(t.Context(), bad), apperror.CodeValidation)
 }
+
+// PW-013: a shop policy approved between the preview and the checkout is a
+// change the buyer must review too; the preview lists it to confirm.
+func TestPolicySnapshot_ShopPolicyChangeIsRefused(t *testing.T) {
+	f := newCheckoutFixture()
+	f.uc.VersionedPolicies = true
+	publishReturns(t, f, "22222222-0000-0000-0000-000000000001", 1, "window-7d", f.now.Add(-time.Hour))
+	f.product("p1", "vendor-a", 100000)
+	f.cartOf(adapter.CartLine{ProductID: "p1", Quantity: 1})
+
+	preview, err := f.uc.Preview(t.Context(), "buyer-1", f.addressID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(preview.PolicyVersions) != 1 || preview.PolicyVersions["returns"] != 1 {
+		t.Fatalf("no shop policy yet: %v", preview.PolicyVersions)
+	}
+	shop := domain.PolicyVersion{PolicyID: "33333333-0000-0000-0000-000000000001", Scope: "shop", VendorID: "vendor-a", Kind: "returns",
+		Version: 1, ContentHash: "hash-shop", EffectiveAt: f.now.Add(-time.Minute)}
+	if err := f.uc.ApplyPolicyPublished(t.Context(), shop); err != nil {
+		t.Fatal(err)
+	}
+	_, _, err = f.uc.Checkout(t.Context(), "buyer-1", usecase.CheckoutInput{AddressID: f.addressID, IdempotencyKey: "policy-shop-1",
+		AcceptedPolicyVersions: preview.PolicyVersions})
+	expectCode(t, err, domain.CodePolicyChanged)
+
+	preview, err = f.uc.Preview(t.Context(), "buyer-1", f.addressID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if preview.PolicyVersions[domain.ShopPolicyKey("vendor-a")] != 1 || preview.ShopPolicies["vendor-a"].PolicyID != shop.PolicyID {
+		t.Fatalf("the preview lists the shop policy: %v %v", preview.PolicyVersions, preview.ShopPolicies)
+	}
+	if _, _, err := f.uc.Checkout(t.Context(), "buyer-1", usecase.CheckoutInput{AddressID: f.addressID, IdempotencyKey: "policy-shop-2",
+		AcceptedPolicyVersions: preview.PolicyVersions}); err != nil {
+		t.Fatalf("the reviewed shop policy is accepted: %v", err)
+	}
+}

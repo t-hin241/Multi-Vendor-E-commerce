@@ -88,3 +88,15 @@ func TestRequestInterception_ReturnsAReferenceIDWithNoDecisionYet(t *testing.T) 
 		t.Error("expected a non-empty provider reference id")
 	}
 }
+
+func TestCheckAddress_RefusesOnlyTheMarkedStreet(t *testing.T) {
+	p := mock.New("fake-carrier-secret-not-a-real-secret")
+	ok, err := p.CheckAddress(context.Background(), carrier.AddressCheckInput{Province: "HN", District: "D", StreetAddress: "1 Test St"})
+	if err != nil || !ok.Deliverable || ok.Reference == "" {
+		t.Fatalf("deliverable: %+v %v", ok, err)
+	}
+	refused, err := p.CheckAddress(context.Background(), carrier.AddressCheckInput{Province: "HN", District: "D", StreetAddress: "9 Undeliverable Rd"})
+	if err != nil || refused.Deliverable || refused.Reason == "" {
+		t.Fatalf("refused: %+v %v", refused, err)
+	}
+}

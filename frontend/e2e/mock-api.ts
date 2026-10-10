@@ -330,7 +330,13 @@ export class MockApi {
     const method = req.method();
     if (method === "OPTIONS") return this.send(route, 204, {});
     if (path === "/healthz") return this.send(route, 200, { status: "ok" });
-    const body = (req.postDataJSON?.() ?? {}) as Json;
+    // A multipart upload has no JSON body; handlers read headers instead.
+    let body: Json = {};
+    try {
+      body = (req.postDataJSON?.() ?? {}) as Json;
+    } catch {
+      body = {};
+    }
 
     if (path === "/api/auth/refresh" && method === "POST") {
       return this.session

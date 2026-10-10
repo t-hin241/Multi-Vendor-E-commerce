@@ -274,6 +274,12 @@ services:
       IDENTITY_TRUSTED_PROXY_CIDRS: ${IDENTITY_TRUSTED_PROXY_CIDRS:-172.16.0.0/12}
       IDENTITY_ALLOWED_ORIGINS: ${IDENTITY_ALLOWED_ORIGINS:-${ALLOWED_ORIGINS:-http://localhost:3000}}
       IDENTITY_PASSWORD_RESET_URL: ${IDENTITY_PASSWORD_RESET_URL:-http://localhost:3000/reset-password}
+      # PW-022: email verification links (off by default).
+      FEATURE_EMAIL_VERIFICATION_ENABLED: ${FEATURE_EMAIL_VERIFICATION_ENABLED:-false}
+      IDENTITY_EMAIL_VERIFY_URL: ${IDENTITY_EMAIL_VERIFY_URL:-http://localhost:3000/verify-email}
+      # PW-028: admin authenticator apps (secret key from the secret store).
+      IDENTITY_MFA_ENCRYPTION_KEY: ${IDENTITY_MFA_ENCRYPTION_KEY:-}
+      FEATURE_ADMIN_MFA_REQUIRED: ${FEATURE_ADMIN_MFA_REQUIRED:-false}
       # AF-19: deny-by-default admin bundles. Provision grants first.
       FEATURE_ADMIN_SCOPED_PERMISSIONS_ENABLED: ${IDENTITY_FEATURE_ADMIN_SCOPED_PERMISSIONS_ENABLED:-false}
       NOTIFICATION_SERVICE_URL: http://notification:8090
@@ -325,6 +331,10 @@ services:
       # AF-19: payout destination decisions/details need a password proof.
       FEATURE_ADMIN_SCOPED_PERMISSIONS_ENABLED: ${VENDOR_FEATURE_ADMIN_SCOPED_PERMISSIONS_ENABLED:-false}
       SHOP_STAFF_INVITES_PAUSED: ${SHOP_STAFF_INVITES_PAUSED:-false}
+      # PW-022: only accounts that confirmed their email accept invitations.
+      FEATURE_STAFF_REQUIRES_VERIFIED_EMAIL: ${FEATURE_STAFF_REQUIRES_VERIFIED_EMAIL:-false}
+      # PW-042: the carrier checks each return destination through Shipment.
+      FEATURE_RETURN_DESTINATION_CARRIER_CHECK_ENABLED: ${FEATURE_RETURN_DESTINATION_CARRIER_CHECK_ENABLED:-false}
       STAFF_INVITATION_FINGERPRINT_KEY: ${STAFF_INVITATION_FINGERPRINT_KEY:-}
       STAFF_INVITATION_ACCEPT_URL: ${STAFF_INVITATION_ACCEPT_URL:-}
     ports:
@@ -394,6 +404,7 @@ services:
       CATALOG_SERVICE_URL: http://catalog:8083
       ORDER_SERVICE_URL: http://order:8086
       INVENTORY_EXPIRY_ENABLED: ${INVENTORY_EXPIRY_ENABLED:-false}
+      INVENTORY_RESTOCK_SECOND_APPROVAL_QUANTITY: ${INVENTORY_RESTOCK_SECOND_APPROVAL_QUANTITY:-0}
     ports:
       - "${INTERNAL_BIND_ADDRESS:-127.0.0.1}:8084:8084"
 
@@ -543,7 +554,11 @@ services:
       PAYOS_RETURN_URL: ${PAYOS_RETURN_URL:-http://localhost:3000/orders/payment-return}
       PAYOS_CANCEL_URL: ${PAYOS_CANCEL_URL:-http://localhost:3000/orders/payment-cancel}
       VENDOR_SERVICE_URL: http://vendor:8082
+      NOTIFICATION_SERVICE_URL: http://notification:8090
       PAYMENT_WEBHOOK_RATE_PER_MINUTE: ${PAYMENT_WEBHOOK_RATE_PER_MINUTE:-600}
+      # PW-032: reimbursements outside a capture (two admins, separate book).
+      FEATURE_REIMBURSEMENTS_ENABLED: ${FEATURE_REIMBURSEMENTS_ENABLED:-false}
+      PAYMENT_REIMBURSEMENT_MAX_AMOUNT: ${PAYMENT_REIMBURSEMENT_MAX_AMOUNT:-500000}
       # AF-06 manual refund transfers: off by default; the key is required
       # once on (a placeholder with the flag off only disables destinations).
       FEATURE_MANUAL_REFUND_WORKFLOW_ENABLED: ${FEATURE_MANUAL_REFUND_WORKFLOW_ENABLED:-false}
@@ -570,6 +585,8 @@ services:
     <<: *service-defaults
     depends_on:
       postgres:
+        condition: service_healthy
+      minio:
         condition: service_healthy
       nats:
         condition: service_healthy
@@ -606,6 +623,13 @@ services:
       SHIPMENT_CARRIER_PROVIDER: ${SHIPMENT_CARRIER_PROVIDER:-manual}
       SHIPMENT_CARRIER_MOCK_WEBHOOK_SECRET: ${SHIPMENT_CARRIER_MOCK_WEBHOOK_SECRET:-}
       SHIPMENT_ADDRESS_RETENTION_DAYS: ${SHIPMENT_ADDRESS_RETENTION_DAYS:-180}
+      # PW-038: evidence of failure reports (carrier's loss confirmation) in
+      # a private bucket of the shared object storage; lost needs one.
+      SHIPMENT_EVIDENCE_STORAGE_ENDPOINT: minio:9000
+      SHIPMENT_EVIDENCE_STORAGE_ACCESS_KEY: ${MINIO_ROOT_USER:?set MINIO_ROOT_USER in .env}
+      SHIPMENT_EVIDENCE_STORAGE_SECRET_KEY: ${MINIO_ROOT_PASSWORD:?set MINIO_ROOT_PASSWORD in .env}
+      SHIPMENT_EVIDENCE_STORAGE_USE_SSL: "false"
+      SHIPMENT_EVIDENCE_BUCKET: shipment-evidence
     ports:
       - "${INTERNAL_BIND_ADDRESS:-127.0.0.1}:8088:8088"
 
@@ -693,6 +717,11 @@ services:
       context: ./backend
       dockerfile: services/notification/Dockerfile
     environment:
+      # PW-045: shop notices nobody received become admin work items (AF-07).
+      FEATURE_CASE_SLA_ENABLED: ${NOTIFICATION_FEATURE_CASE_SLA_ENABLED:-false}
+      SLA_POLL_INTERVAL: ${SLA_POLL_INTERVAL:-60s}
+      SLA_ON_CALL_ADMIN_IDS: ${SLA_ON_CALL_ADMIN_IDS:-}
+      SLA_ESCALATION_ADMIN_IDS: ${SLA_ESCALATION_ADMIN_IDS:-}
       <<: *service-env-defaults
       INTERNAL_SERVICE_NAME: notification
       REDIS_URL: redis://notification:${NOTIFICATION_REDIS_PASSWORD}@redis-queue:6379/0

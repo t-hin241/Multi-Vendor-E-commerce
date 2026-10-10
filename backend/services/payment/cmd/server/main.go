@@ -188,7 +188,7 @@ func main() {
 	if cfg.VendorActionNotices {
 		settlementUseCase.VendorNotices = vendorNotices
 	}
-	refundRepo := repository.NewRefundRepository(dbPool)
+	refundRepo := repository.NewRefundRepository(dbPool).WithManualSLA(cfg.ManualRefunds.Enabled)
 	refundUseCase := usecase.NewRefundUseCase(refundRepo, roles, log).WithSettlement(tx, settlementUseCase).RequireApprovals(cfg.AdminApprovals)
 	// AF-19: scoped admin permissions (Identity) and maker-checker requests.
 	admins := adminaccess.Client{URL: internalServices.IdentityURL, Key: internalServices.Key}
@@ -238,6 +238,9 @@ func main() {
 		Admin:    transport.NewAdminHandler(reconUseCase, settlementUseCase, log),
 		Approval: transport.NewApprovalHandler(approvalUseCase, log),
 		Manual:   transport.NewManualRefundHandler(manualUseCase, log),
+		Reimbursements: transport.NewReimbursementHandler(&usecase.ReimbursementUseCase{Store: repository.ReimbursementRepository{Pool: dbPool},
+			Audit: repository.NewAuditRepository(dbPool), Tx: tx, Admins: admins, Enabled: cfg.Reimbursements, MaxAmount: cfg.ReimbursementMax,
+			StepUp: cfg.AdminApprovals, Log: log}, log),
 		Holds: transport.NewSettlementHoldHandler(&usecase.SettlementHoldUseCase{Store: repository.SettlementHoldRepository{Pool: dbPool},
 			Vendors: repository.NewPayoutRepository(dbPool), Tx: tx, Log: log}, log),
 		AdminGuard: adminGuard,
@@ -263,40 +266,41 @@ func main() {
 		}
 	}
 	go refundSync.Run(syncCtx, deliverRefund, log)
+	// Shop and buyer notices go to the event bus, or to Notification over
+	// HTTP while the bus is off (PW-045); the event id is the same either way.
+	notifications := adapter.NewHTTPNotificationClient(cfg.NotificationServiceURL, internalServices.Key)
 	if cfg.VendorActionNotices {
-		if bus.Publish {
-			go vendorNotices.Run(syncCtx, func(ctx context.Context, n repository.VendorNotice) error {
-				env, err := events.VendorPayoutActionEvent("payout-notice-"+n.ID, events.VendorPayoutAction{VendorID: n.VendorID, PayoutID: n.PayoutItemID, Outcome: n.Outcome})
-				if err != nil {
-					return err
-				}
-				return bus.Bus.Publish(ctx, env.WithCorrelation(""))
-			}, log)
-		} else {
-			// The notices are kept and relayed once the event bus is back.
-			log.Warn().Msg("payment_vendor_notices_wait_for_event_bus")
-		}
-	}
-	if bus.Publish {
-		// The relay drains even with the workflow off; only the sweep asking
-		// for missing destinations needs the buyer able to give one.
-		var sweep func(context.Context) error
-		if cfg.ManualRefunds.Enabled && manualUseCase.Cipher != nil {
-			sweep = func(ctx context.Context) error {
-				_, err := buyerNotices.QueueMissingDestinations(ctx, 100)
-				return err
+		go vendorNotices.Run(syncCtx, func(ctx context.Context, n repository.VendorNotice) error {
+			eventID := "payout-notice-" + n.ID
+			if !bus.Publish {
+				return notifications.NotifyPayout(ctx, eventID, n.VendorID, n.PayoutItemID, n.Outcome)
 			}
-		}
-		go buyerNotices.Outbox().Run(syncCtx, sweep, func(ctx context.Context, n noticeoutbox.Notice) error {
-			env, err := events.PaymentNotification(n.ID, n.ReferenceID, events.NotificationRequest{UserID: n.UserID, Type: n.Type, ReferenceID: n.ReferenceID})
+			env, err := events.VendorPayoutActionEvent(eventID, events.VendorPayoutAction{VendorID: n.VendorID, PayoutID: n.PayoutItemID, Outcome: n.Outcome})
 			if err != nil {
 				return err
 			}
 			return bus.Bus.Publish(ctx, env.WithCorrelation(""))
 		}, log)
-	} else if cfg.ManualRefunds.Enabled {
-		log.Warn().Msg("payment_buyer_notices_wait_for_event_bus")
 	}
+	// The relay drains even with the workflow off; only the sweep asking for
+	// missing destinations needs the buyer able to give one.
+	var sweep func(context.Context) error
+	if cfg.ManualRefunds.Enabled && manualUseCase.Cipher != nil {
+		sweep = func(ctx context.Context) error {
+			_, err := buyerNotices.QueueMissingDestinations(ctx, 100)
+			return err
+		}
+	}
+	go buyerNotices.Outbox().Run(syncCtx, sweep, func(ctx context.Context, n noticeoutbox.Notice) error {
+		if !bus.Publish {
+			return notifications.Notify(ctx, n.ID, n.UserID, n.Type, n.ReferenceID)
+		}
+		env, err := events.PaymentNotification(n.ID, n.ReferenceID, events.NotificationRequest{UserID: n.UserID, Type: n.Type, ReferenceID: n.ReferenceID})
+		if err != nil {
+			return err
+		}
+		return bus.Bus.Publish(ctx, env.WithCorrelation(""))
+	}, log)
 	bus.Run(syncCtx,
 		eventbus.Subscription{Durable: "payment-settlements", Types: []string{events.VendorOrderSettleable}, Handle: transport.SettleableHandler(settlementUseCase)},
 		eventbus.Subscription{Durable: "payment-rejected-outcomes", Types: []string{events.PaymentOutcomeRejected}, Handle: transport.OutcomeRejectedHandler(orderSync, refundSync)},

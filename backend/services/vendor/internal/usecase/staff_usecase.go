@@ -76,11 +76,14 @@ type StaffUseCase struct {
 	Enabled bool
 	// InvitesPaused (SHOP_STAFF_INVITES_PAUSED) stops new invitations and
 	// added permissions while existing staff keep working.
-	InvitesPaused  bool
-	FingerprintKey []byte
-	AcceptURL      string
-	Now            func() time.Time
-	Log            zerolog.Logger
+	InvitesPaused bool
+	// RequireVerifiedEmail is FEATURE_STAFF_REQUIRES_VERIFIED_EMAIL
+	// (PW-022): only an account that confirmed its email accepts.
+	RequireVerifiedEmail bool
+	FingerprintKey       []byte
+	AcceptURL            string
+	Now                  func() time.Time
+	Log                  zerolog.Logger
 }
 
 func (uc *StaffUseCase) now() time.Time {
@@ -408,6 +411,10 @@ func (uc *StaffUseCase) AcceptInvitation(ctx context.Context, actorID, token str
 	}
 	if !acct.Active || (acct.Role != "buyer" && acct.Role != "vendor") {
 		return nil, shopaccess.Denied("This account cannot join a shop")
+	}
+	// PW-022: the invited address must be proven to belong to the account.
+	if uc.RequireVerifiedEmail && !acct.EmailVerified {
+		return nil, staffError(http.StatusForbidden, "email_not_verified", "Confirm your email address first, then open the invitation again")
 	}
 	email, err := domain.NormalizeEmail(acct.Email)
 	if err != nil {

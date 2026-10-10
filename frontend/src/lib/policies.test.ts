@@ -22,6 +22,7 @@ describe("policy presentation", () => {
       "order.returns_window": "window-7d",
       "order.return_shipping_refund": "none",
     });
+    expect(returnsRuleRefs(7, "none", 5)["order.return_ship_deadline"]).toBe("ship-5d");
   });
 });
 

@@ -19,7 +19,8 @@ var WorkQueues = []telemetry.WorkQueue{
 		UNION ALL SELECT updated_at FROM source_settlement_holds WHERE status = 'preparing') h
 		WHERE t < now() - interval '1 hour'`},
 	{Name: "cancellations_stuck", Severity: "critical", SQL: `SELECT count(*), COALESCE(EXTRACT(EPOCH FROM now() - min(updated_at)), 0)::float8 FROM cancellation_requests
-		WHERE status = 'needs_review' OR (status IN ('stopping_fulfillment', 'refund_pending') AND updated_at < now() - interval '1 hour')`},
+		WHERE (status = 'needs_review' AND (interception_requested_at IS NULL OR updated_at < now() - interval '72 hours'))
+		   OR (status IN ('stopping_fulfillment', 'refund_pending') AND updated_at < now() - interval '1 hour')`},
 	{Name: "delivery_exceptions_stuck", Severity: "critical", SQL: `SELECT count(*), COALESCE(EXTRACT(EPOCH FROM now() - min(updated_at)), 0)::float8 FROM delivery_exceptions
 		WHERE status = 'needs_review' OR (status <> 'resolved' AND updated_at < now() - interval '24 hours')`},
 	{Name: "return_shipping_review", Severity: "warning", SQL: `SELECT count(*), COALESCE(EXTRACT(EPOCH FROM now() - min(updated_at)), 0)::float8 FROM return_requests

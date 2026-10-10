@@ -37,11 +37,14 @@ func (uc *ShipmentUseCase) enqueueException(ctx context.Context, s *domain.Shipm
 
 // FailureReport is a shop's or an admin's report that delivery failed for
 // good: the package came back (returned) or the carrier lost it (lost,
-// admins only, after checking the carrier's evidence).
+// admins only, after checking the carrier's evidence). EvidenceIDs are
+// files the reporter uploaded for the shipment (PW-038); lost needs one
+// when evidence storage is configured.
 type FailureReport struct {
 	Kind            string
 	Reason          string
 	ExpectedVersion int64
+	EvidenceIDs     []string
 }
 
 // ReportFailure records the report on the shipment the caller read
@@ -61,12 +64,22 @@ func (uc *ShipmentUseCase) ReportFailure(ctx context.Context, actor Actor, id st
 	if err != nil {
 		return nil, err
 	}
+	evidence, err := evidenceIDs(in.EvidenceIDs)
+	if err != nil {
+		return nil, err
+	}
+	if to == domain.StatusLost && len(evidence) == 0 && uc.evidenceOn() {
+		return nil, domain.ErrEvidenceRequired
+	}
 	return uc.act(ctx, actor, id, func(ctx context.Context, s *domain.Shipment) error {
 		if s.Status == to {
 			return nil // a retried report
 		}
 		if s.Version != in.ExpectedVersion {
 			return domain.ShipmentChanged()
+		}
+		if err := uc.attachEvidence(ctx, actor, s, in.Kind, evidence); err != nil {
+			return err
 		}
 		now := uc.Now().UTC()
 		change := repository.Change{ReturnedAt: &now}

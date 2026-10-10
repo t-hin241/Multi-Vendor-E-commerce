@@ -25,3 +25,8 @@ var ErrNoWebhook = errors.New("manual carrier mode accepts no webhooks")
 func (Provider) Verify([]byte, string) (carrier.DecisionEvent, error) {
 	return carrier.DecisionEvent{}, ErrNoWebhook
 }
+
+// CheckAddress: manual mode calls no carrier API; an admin verifies.
+func (Provider) CheckAddress(context.Context, carrier.AddressCheckInput) (carrier.AddressCheckResult, error) {
+	return carrier.AddressCheckResult{}, carrier.ErrAddressCheckUnsupported
+}

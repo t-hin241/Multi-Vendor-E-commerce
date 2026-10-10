@@ -31,6 +31,8 @@ type Handlers struct {
 	Manual *ManualRefundHandler
 	// Holds is the settlement hold ledger (00 §6.1).
 	Holds *SettlementHoldHandler
+	// Reimbursements is the PW-032 book.
+	Reimbursements *ReimbursementHandler
 	// AdminGuard enforces AdminRoutes (AF-19).
 	AdminGuard gin.HandlerFunc
 }
@@ -78,6 +80,14 @@ func NewRouter(env string, log zerolog.Logger, jwtManager *authjwt.Manager, h Ha
 		adminGroup.POST("/refund-attempts/:id/submissions", h.Manual.Submit)
 		adminGroup.POST("/refund-attempts/:id/decisions", h.Manual.Decide)
 		adminGroup.GET("/refund-evidence/:id", h.Manual.Evidence)
+
+		// PW-032: reimbursements outside a capture (prepare, approve, pay).
+		if h.Reimbursements != nil {
+			adminGroup.GET("/reimbursements", h.Reimbursements.List)
+			adminGroup.POST("/reimbursements", h.Reimbursements.Create)
+			adminGroup.POST("/reimbursements/:id/decisions", h.Reimbursements.Decide)
+			adminGroup.POST("/reimbursements/:id/payments", h.Reimbursements.Pay)
+		}
 
 		adminGroup.GET("/reconciliation", h.Admin.Overview)
 		adminGroup.GET("/search", h.Admin.Search)

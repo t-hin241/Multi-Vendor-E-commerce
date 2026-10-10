@@ -96,7 +96,7 @@ func main() {
 	reservationRepo := repository.NewReservationRepository(dbPool)
 	restockRequestRepo := repository.NewRestockRequestRepository(dbPool)
 
-	inventoryUseCase := usecase.NewInventoryUseCase(itemRepo, reservationRepo, restockRequestRepo, vendorClient, catalogClient, usecase.Operations{Transactions: repository.Transactions{Pool: dbPool}, Identity: identityclient.Client{URL: internalServices.IdentityURL, Key: internalServices.Key}, Audit: repository.AdminAudit{Pool: dbPool}})
+	inventoryUseCase := usecase.NewInventoryUseCase(itemRepo, reservationRepo, restockRequestRepo, vendorClient, catalogClient, usecase.Operations{Transactions: repository.Transactions{Pool: dbPool}, Identity: identityclient.Client{URL: internalServices.IdentityURL, Key: internalServices.Key}, Audit: repository.AdminAudit{Pool: dbPool}, SecondApprovalQuantity: cfg.SecondApprovalQuantity})
 
 	itemHandler := transport.NewItemHandler(inventoryUseCase, log)
 	internalHandler := transport.NewInternalHandler(inventoryUseCase, log)

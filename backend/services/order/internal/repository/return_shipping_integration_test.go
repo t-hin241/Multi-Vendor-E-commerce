@@ -358,3 +358,110 @@ func TestOverdueAndLostReturnParcels(t *testing.T) {
 		t.Fatalf("goods turning up after all can still be received: %v", err)
 	}
 }
+
+// PW-042: an admin corrects a disputed receipt with a new version; stock
+// goes back once (the sellable count is fixed after the restock ran), and
+// a corrected receipt with nothing wrong requests the refund.
+func TestAdminCorrectsADisputedReturnReceipt(t *testing.T) {
+	pool := orderDB(t)
+	ctx := t.Context()
+	vendor := func(f *returnFixture, rr *domain.ReturnRequest, sellable, damaged int64) *domain.ReturnRequest {
+		t.Helper()
+		got, err := f.uc.RecordReturnReceipt(ctx, usecase.SupportActor{ID: f.vendorUser, Role: "vendor"}, rr.ID,
+			usecase.ReturnReceiptInput{Sellable: sellable, Damaged: damaged, Note: "Kiểm hàng", ExpectedVersion: rr.Version})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return got
+	}
+
+	f := newReturnFixture(t, pool)
+	f.dests.set(destination(1, "79"))
+	rr := f.approvedReturn(t)
+	runDue(t, pool, f.uc)
+	got := vendor(f, f.load(t, rr.ID), 0, 2)
+	corrected, err := f.uc.CorrectReturnReceipt(ctx, f.admin, rr.ID, usecase.ReturnReceiptCorrection{Sellable: 2, Note: "Ảnh cho thấy hàng nguyên vẹn",
+		ExpectedVersion: got.Version})
+	if err != nil || corrected.Status != domain.ReturnRefundPending {
+		t.Fatalf("a clean corrected receipt requests the refund: %+v %v", corrected, err)
+	}
+	runDue(t, pool, f.uc)
+	if f.stock.done[rr.ID] != 2 {
+		t.Fatalf("the corrected sellable units are restocked: %+v", f.stock.done)
+	}
+	if n := countRowsIn(t, pool, `SELECT count(*) FROM return_goods_receipts WHERE return_id = $1`, rr.ID); n != 2 {
+		t.Fatalf("both receipt versions are kept, got %d", n)
+	}
+
+	g := newReturnFixture(t, pool)
+	g.dests.set(destination(1, "79"))
+	other := g.approvedReturn(t)
+	runDue(t, pool, g.uc)
+	got = vendor(g, g.load(t, other.ID), 1, 1)
+	runDue(t, pool, g.uc)
+	if _, err := g.uc.CorrectReturnReceipt(ctx, g.admin, other.ID, usecase.ReturnReceiptCorrection{Sellable: 2, Note: "Sửa", ExpectedVersion: got.Version}); err == nil {
+		t.Fatal("the sellable count is fixed once restocked")
+	}
+	again, err := g.uc.CorrectReturnReceipt(ctx, g.admin, other.ID, usecase.ReturnReceiptCorrection{Sellable: 1, Missing: 1, Note: "Thiếu chứ không vỡ",
+		ExpectedVersion: got.Version})
+	if err != nil || again.Status != domain.ReturnReceived || !again.InspectionDisputed {
+		t.Fatalf("still disputed, still waiting: %+v %v", again, err)
+	}
+	runDue(t, pool, g.uc)
+	if g.stock.done[other.ID] != 1 {
+		t.Fatalf("restocked once: %+v", g.stock.done)
+	}
+}
+
+// PW-042: a parcel lost on the way back is refunded directly by an admin.
+func TestLostReturnParcelIsRefundedDirectly(t *testing.T) {
+	pool := orderDB(t)
+	ctx := t.Context()
+	f := newReturnFixture(t, pool)
+	f.dests.set(destination(1, "79"))
+	rr := f.approvedReturn(t)
+	runDue(t, pool, f.uc)
+	if _, err := f.uc.DecideReturnShipping(ctx, f.admin, rr.ID, usecase.ReturnShippingDecision{Action: "refund_lost", Reason: "Chưa gửi", ExpectedVersion: f.load(t, rr.ID).Version}); err == nil {
+		t.Fatal("a parcel not marked lost is not refunded without a receipt")
+	}
+	sent, _, err := f.dispatch(ctx, f.load(t, rr.ID), "dispatch-key-lost", "VN0042")
+	if err != nil {
+		t.Fatal(err)
+	}
+	lost, err := f.uc.DecideReturnShipping(ctx, f.admin, rr.ID, usecase.ReturnShippingDecision{Action: "mark_lost", Reason: "Hãng xác nhận thất lạc", ExpectedVersion: sent.Version})
+	if err != nil {
+		t.Fatal(err)
+	}
+	refunded, err := f.uc.DecideReturnShipping(ctx, f.admin, rr.ID, usecase.ReturnShippingDecision{Action: "refund_lost", Reason: "Hoàn cho người mua", ExpectedVersion: lost.Version})
+	if err != nil || refunded.Status != domain.ReturnRefundPending {
+		t.Fatalf("refund_lost: %+v %v", refunded, err)
+	}
+	if n := countRowsIn(t, pool, `SELECT count(*) FROM order_refunds WHERE return_request_id = $1`, rr.ID); n != 1 {
+		t.Fatalf("one refund, got %d", n)
+	}
+	if n := countRowsIn(t, pool, `SELECT count(*) FROM order_admin_audit WHERE entity_id = $1 AND action = 'return_shipping_refund_lost'`, rr.ID); n != 1 {
+		t.Fatalf("audited, got %d", n)
+	}
+}
+
+// PW-007: the dispatch deadline is the one the vendor order was sold under
+// (order.return_ship_deadline), not today's configuration.
+func TestReturnDispatchDeadlineFollowsThePolicySoldUnder(t *testing.T) {
+	pool := orderDB(t)
+	ctx := t.Context()
+	f := newReturnFixture(t, pool)
+	f.dests.set(destination(1, "79"))
+	f.uc.ReturnDispatchDays = 7
+	f.uc.Policies = repository.NewPolicyVersionRepository(pool)
+	if _, err := pool.Exec(ctx, `UPDATE vendor_orders SET policy_snapshot = '{"returns_window_days":7,"return_shipping_refund":"none","return_policy_version":"returns-v5","return_ship_days":3}'
+		WHERE id = $1`, f.vendorOrder); err != nil {
+		t.Fatal(err)
+	}
+	rr := f.approvedReturn(t)
+	if rr.DispatchDeadline == nil {
+		t.Fatalf("approved with a deadline: %+v", rr)
+	}
+	if d := time.Until(*rr.DispatchDeadline); d < 71*time.Hour || d > 73*time.Hour {
+		t.Fatalf("3 days from the policy, got %v", d)
+	}
+}

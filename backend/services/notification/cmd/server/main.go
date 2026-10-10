@@ -15,6 +15,7 @@ import (
 
 	"shopee/backend/pkg/adminaccess"
 	"shopee/backend/pkg/adminaudit"
+	"shopee/backend/pkg/casesla"
 	sessionconfig "shopee/backend/pkg/config"
 	"shopee/backend/pkg/eventbus"
 	"shopee/backend/pkg/events"
@@ -96,6 +97,10 @@ func main() {
 		log.Fatal().Err(err).Msg("event bus configuration invalid")
 	}
 
+	slaConfig, err := sessionconfig.LoadCaseSLA()
+	if err != nil {
+		log.Fatal().Err(err).Msg("case deadline configuration invalid")
+	}
 	jwtManager, err := sessionconfig.LoadTokenVerifier()
 	if err != nil {
 		log.Fatal().Err(err).Msg("access token verifier configuration invalid")
@@ -172,7 +177,13 @@ func main() {
 	adminGroup := router.Group("/api/notifications/admin", middleware.RequireAuth(jwtManager), middleware.RequireRole("admin"), adminGuard)
 	bus.RegisterAdmin(adminGroup, roles)
 	adminaudit.Register(adminGroup, "/audit-events",
-		adminaudit.Source{Name: "notification", SQL: repository.AuditSearchSQL + " UNION ALL " + eventbus.InboxAuditSearchSQL, DB: dbPool, Roles: roles}, log)
+		adminaudit.Source{Name: "notification", SQL: repository.AuditSearchSQL + " UNION ALL " + eventbus.InboxAuditSearchSQL + " UNION ALL " + casesla.AuditSearchSQL, DB: dbPool, Roles: roles}, log)
+	// PW-045: shop notices nobody received are admin work items (AF-07).
+	slaStore := casesla.Store{Pool: dbPool}
+	slaPermissions := adminaccess.Client{URL: cfg.IdentityServiceURL, Key: cfg.IdentityServiceKey}
+	casesla.Register(adminGroup, casesla.Service{Repo: slaStore, Roles: roles, Permissions: slaPermissions}, log)
+	go (casesla.Worker{Store: slaStore, Owner: "notification", Config: slaConfig, Roles: roles, Permissions: slaPermissions,
+		Publisher: transport.SLANotices{UseCase: notificationUseCase}, Log: log}).Run(maintenanceCtx)
 
 	resetUseCase := &usecase.PasswordResetUseCase{Source: adapter.ResetSource{URL: cfg.IdentityServiceURL, Key: cfg.ResetDeliveryKey}, Sender: smtpsender.ResetSender{Host: cfg.SMTPHost, Port: cfg.SMTPPort, Username: cfg.SMTPUsername, Password: cfg.SMTPPassword, From: cfg.SMTPFrom, AllowPlaintext: cfg.SMTPAllowPlaintext}}
 	transport.RegisterPasswordReset(router, cfg.ResetDeliveryKey, resetUseCase, log)

@@ -92,6 +92,8 @@ const ACCEPT_ERRORS: Record<string, string> = {
   permission_denied:
     "Lời mời được gửi tới một email khác. Hãy đăng nhập bằng đúng email nhận lời mời.",
   feature_disabled: "Tính năng nhân viên cửa hàng chưa được bật.",
+  email_not_verified:
+    "Hãy xác nhận địa chỉ email của tài khoản trước (mở liên kết trong email xác nhận), rồi mở lại lời mời.",
   not_found: "Không tìm thấy lời mời hoặc lời mời không còn hiệu lực.",
 };
 

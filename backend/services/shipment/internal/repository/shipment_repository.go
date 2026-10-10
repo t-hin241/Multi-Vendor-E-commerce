@@ -22,7 +22,7 @@ const shipmentColumns = `id, vendor_order_id, vendor_id, buyer_id, status, versi
 	recipient_name, phone, province, district, ward, street_address,
 	shipped_at, delivered_at, returned_at, cancelled_at, tracking_updated_at, failed_attempts, last_attempt_reason,
 	intercept_provider_ref, intercept_requested_at, intercept_resolved_at, address_redacted_at,
-	lost_at, attempt_no, original_shipment_id,
+	lost_at, attempt_no, original_shipment_id, intercept_operation,
 	created_at, updated_at, (SELECT due_at FROM case_sla_work_items w WHERE w.resource_type='interception' AND w.resource_id=shipments.id AND w.active), COALESCE((SELECT payload->>'waiting_on' FROM case_sla_work_items w WHERE w.resource_type='interception' AND w.resource_id=shipments.id AND w.active),'')`
 
 type ShipmentRepository struct {
@@ -41,7 +41,7 @@ func scanShipment(row pgx.Row) (*domain.Shipment, error) {
 		&s.RecipientName, &s.Phone, &s.Province, &s.District, &s.Ward, &s.StreetAddress,
 		&s.ShippedAt, &s.DeliveredAt, &s.ReturnedAt, &s.CancelledAt, &s.TrackingUpdatedAt, &s.FailedAttempts, &s.LastAttemptReason,
 		&s.InterceptProviderRef, &s.InterceptRequestedAt, &s.InterceptResolvedAt, &s.AddressRedactedAt,
-		&s.LostAt, &s.AttemptNo, &s.OriginalShipmentID,
+		&s.LostAt, &s.AttemptNo, &s.OriginalShipmentID, &s.InterceptOperation,
 		&s.CreatedAt, &s.UpdatedAt, &s.ActionDueAt, &s.WaitingOn,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -156,6 +156,8 @@ type Change struct {
 	InterceptRef      *string
 	InterceptAt       *time.Time
 	InterceptResolved *time.Time
+	// InterceptOperation (PW-036): the Order operation the interception serves.
+	InterceptOperation *string
 }
 
 // Transition moves a shipment from one status to another only if it is
@@ -177,11 +179,12 @@ func (r *ShipmentRepository) Transition(ctx context.Context, s *domain.Shipment,
 			intercept_requested_at = COALESCE($11, intercept_requested_at),
 			intercept_resolved_at = COALESCE($12, intercept_resolved_at),
 			lost_at = COALESCE($14, lost_at),
+			intercept_operation = COALESCE($15, intercept_operation),
 			updated_at = now()
 		WHERE id = $1 AND status = $2 AND version = $13
 		RETURNING version, updated_at`,
 		s.ID, s.Status, to, c.TrackingNumber, trackingChanged, c.ShippedAt, c.DeliveredAt, c.ReturnedAt, c.CancelledAt,
-		c.InterceptRef, c.InterceptAt, c.InterceptResolved, s.Version, c.LostAt).Scan(&s.Version, &s.UpdatedAt)
+		c.InterceptRef, c.InterceptAt, c.InterceptResolved, s.Version, c.LostAt, c.InterceptOperation).Scan(&s.Version, &s.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return ErrStaleState
 	}
@@ -197,6 +200,9 @@ func (r *ShipmentRepository) Transition(ctx context.Context, s *domain.Shipment,
 	}
 	if c.InterceptAt != nil {
 		s.InterceptRequestedAt = c.InterceptAt
+	}
+	if c.InterceptOperation != nil {
+		s.InterceptOperation = c.InterceptOperation
 	}
 	tx, _ := ctx.Value(txKey{}).(pgx.Tx)
 	i, err := casesla.Sync(ctx, tx, s.SLAStage())

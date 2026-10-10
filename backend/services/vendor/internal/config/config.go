@@ -29,6 +29,9 @@ type Config struct {
 	// ShopStaff is FEATURE_SHOP_STAFF_ENABLED (AF-17); StaffInvitesPaused
 	// is SHOP_STAFF_INVITES_PAUSED.
 	ShopStaff, StaffInvitesPaused bool
+	// StaffRequiresVerifiedEmail is FEATURE_STAFF_REQUIRES_VERIFIED_EMAIL
+	// (PW-022; Identity's FEATURE_EMAIL_VERIFICATION_ENABLED must be on).
+	StaffRequiresVerifiedEmail bool
 	// StaffFingerprintKey keys the hash stored instead of an invited
 	// address; StaffAcceptURL is the page the invitation link opens.
 	StaffFingerprintKey []byte
@@ -36,6 +39,11 @@ type Config struct {
 	// AdminReauth is FEATURE_ADMIN_SCOPED_PERMISSIONS_ENABLED (AF-19):
 	// payout destination decisions and detail reads need a password proof.
 	AdminReauth bool
+	// ReturnDestinationCarrierCheck is
+	// FEATURE_RETURN_DESTINATION_CARRIER_CHECK_ENABLED (PW-042): each new
+	// return destination version is checked by the carrier through
+	// Shipment before an admin needs to.
+	ReturnDestinationCarrierCheck bool
 }
 
 func Load() (Config, error) {
@@ -83,21 +91,46 @@ func Load() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	requireVerified, err := loadStaffRequiresVerifiedEmail()
+	if err != nil {
+		return Config{}, err
+	}
 	adminReauth := false
 	if raw := os.Getenv("FEATURE_ADMIN_SCOPED_PERMISSIONS_ENABLED"); raw != "" {
 		if adminReauth, err = strconv.ParseBool(raw); err != nil {
 			return Config{}, fmt.Errorf("config: FEATURE_ADMIN_SCOPED_PERMISSIONS_ENABLED must be true or false")
 		}
 	}
+	carrierCheck := false
+	if raw := os.Getenv("FEATURE_RETURN_DESTINATION_CARRIER_CHECK_ENABLED"); raw != "" {
+		if carrierCheck, err = strconv.ParseBool(raw); err != nil {
+			return Config{}, fmt.Errorf("config: FEATURE_RETURN_DESTINATION_CARRIER_CHECK_ENABLED must be true or false")
+		}
+	}
 	return Config{
-		AdminReauth: adminReauth,
-		ShopStaff:   staff, StaffInvitesPaused: paused, StaffFingerprintKey: staffKey, StaffAcceptURL: acceptURL,
+		ReturnDestinationCarrierCheck: carrierCheck,
+		AdminReauth:                   adminReauth,
+		StaffRequiresVerifiedEmail:    requireVerified,
+		ShopStaff:                     staff, StaffInvitesPaused: paused, StaffFingerprintKey: staffKey, StaffAcceptURL: acceptURL,
 		VersionedPolicies: versioned,
 		PaymentURL:        envDefault("PAYMENT_SERVICE_URL", "http://payment:8087"), PayoutKey: payoutKey, PayoutServiceKey: payoutServiceKey, Internal: internal, CatalogURL: envDefault("CATALOG_SERVICE_URL", "http://catalog:8083"), OrderURL: envDefault("ORDER_SERVICE_URL", "http://order:8086"), ShipmentURL: envDefault("SHIPMENT_SERVICE_URL", "http://shipment:8088"),
 		Base:                   base,
 		NotificationServiceURL: notificationServiceURL,
 		ObjectStorage:          objectStorageCfg,
 	}, nil
+}
+
+// loadStaffRequiresVerifiedEmail reads FEATURE_STAFF_REQUIRES_VERIFIED_EMAIL.
+func loadStaffRequiresVerifiedEmail() (bool, error) {
+	raw := os.Getenv("FEATURE_STAFF_REQUIRES_VERIFIED_EMAIL")
+	if raw == "" {
+		return false, nil
+	}
+	v, err := strconv.ParseBool(raw)
+	if err != nil {
+		return false, fmt.Errorf("config: FEATURE_STAFF_REQUIRES_VERIFIED_EMAIL must be true or false")
+	}
+	return v, nil
 }
 
 // loadShopStaff reads the AF-17 settings. The fingerprint key and accept

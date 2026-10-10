@@ -88,6 +88,7 @@ var inboxTargets = map[Type]inboxTarget{
 	"sla_cancellation":       {"cancellation", "/admin/cancellations?request_id=%s"},
 	"sla_interception":       {"shipment", "/admin/fulfillment?shipment_id=%s"},
 	"sla_delivery_exception": {"delivery_exception", "/admin/delivery-exceptions?exception_id=%s"},
+	"sla_vendor_action":      {"vendor_action", "/admin/notifications"},
 }
 
 var inboxLinkPattern = regexp.MustCompile(`^/[A-Za-z0-9/_?=&.-]{0,300}$`)

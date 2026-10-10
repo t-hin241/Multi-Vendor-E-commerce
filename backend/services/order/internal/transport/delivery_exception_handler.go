@@ -195,6 +195,8 @@ type receiptRequest struct {
 	ReceivedLines   []receiptLineRequest `json:"received_lines" binding:"required,min=1,max=300,dive"`
 	Note            string               `json:"note" binding:"max=1000"`
 	ExpectedVersion int64                `json:"expected_version" binding:"required,min=1"`
+	// PW-038: images of the step (uploaded first like support evidence).
+	EvidenceIDs []string `json:"evidence_ids" binding:"omitempty,max=5,dive,uuid"`
 }
 
 // Receipt: the shop (returns.handle) records what came back; an admin may
@@ -215,7 +217,7 @@ func (h *DeliveryExceptionHandler) Receipt(c *gin.Context) {
 		lines = append(lines, domain.ReceiptLine{OrderItemID: l.ItemID, Condition: l.Condition, Quantity: l.Quantity})
 	}
 	out, err := h.orders.RecordGoodsReceipt(c.Request.Context(), actorOf(c), id,
-		usecase.ReceiptInput{Lines: lines, Note: req.Note, ExpectedVersion: req.ExpectedVersion})
+		usecase.ReceiptInput{Lines: lines, Note: req.Note, ExpectedVersion: req.ExpectedVersion, EvidenceIDs: req.EvidenceIDs})
 	if err != nil {
 		httpresponse.HandleError(c, h.log, err)
 		return

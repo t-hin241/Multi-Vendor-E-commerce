@@ -29,6 +29,9 @@ type Config struct {
 	PayOSCancelURL    string
 	// VendorServiceURL resolves verified payout destinations for payouts.
 	VendorServiceURL string
+	// NotificationServiceURL takes shop and buyer notices over HTTP when the
+	// event bus is off (PW-045).
+	NotificationServiceURL string
 	// WebhookRatePerMinute bounds webhook deliveries per client IP.
 	WebhookRatePerMinute int64
 	// AdminApprovals is FEATURE_ADMIN_SCOPED_PERMISSIONS_ENABLED (AF-19):
@@ -42,6 +45,10 @@ type Config struct {
 	// SkipOrderHoldQuery is SETTLEMENT_ORDER_HOLD_QUERY=off (PW-001): payout
 	// batches rely on the hold ledger only. Default on (Order is asked too).
 	SkipOrderHoldQuery bool
+	// Reimbursements is FEATURE_REIMBURSEMENTS_ENABLED (PW-032);
+	// ReimbursementMax (PAYMENT_REIMBURSEMENT_MAX_AMOUNT) caps one.
+	Reimbursements   bool
+	ReimbursementMax int64
 }
 
 // ManualRefundConfig: FEATURE_MANUAL_REFUND_WORKFLOW_ENABLED, the keys that
@@ -124,12 +131,22 @@ func Load() (Config, error) {
 	if err != nil {
 		return Config{}, fmt.Errorf("config: FEATURE_VENDOR_ACTION_NOTICES_ENABLED must be true or false")
 	}
+	reimbursements, err := strconv.ParseBool(getEnv("FEATURE_REIMBURSEMENTS_ENABLED", "false"))
+	if err != nil {
+		return Config{}, fmt.Errorf("config: FEATURE_REIMBURSEMENTS_ENABLED must be true or false")
+	}
+	reimbursementMax, err := strconv.ParseInt(getEnv("PAYMENT_REIMBURSEMENT_MAX_AMOUNT", "500000"), 10, 64)
+	if err != nil || reimbursementMax < 1 {
+		return Config{}, fmt.Errorf("config: PAYMENT_REIMBURSEMENT_MAX_AMOUNT must be a positive amount in minor units")
+	}
 
 	return Config{
-		AdminApprovals:   approvals,
+		AdminApprovals: approvals,
+		Reimbursements: reimbursements, ReimbursementMax: reimbursementMax,
 		ManualRefunds:    manual,
 		VendorServiceURL: getEnv("VENDOR_SERVICE_URL", "http://vendor:8082"), WebhookRatePerMinute: rate,
-		Base: base, OrderServiceURL: orderServiceURL, VendorActionNotices: vendorNotices, SkipOrderHoldQuery: orderHoldQuery == "off",
+		Base: base, OrderServiceURL: orderServiceURL, NotificationServiceURL: getEnv("NOTIFICATION_SERVICE_URL", "http://notification:8090"),
+		VendorActionNotices: vendorNotices, SkipOrderHoldQuery: orderHoldQuery == "off",
 		Provider: provider, MockWebhookSecret: mockWebhookSecret, PayOSClientID: payosClientID, PayOSAPIKey: payosAPIKey, PayOSChecksumKey: payosChecksumKey, PayOSBaseURL: getEnv("PAYOS_API_URL", "https://api-merchant.payos.vn"), PayOSReturnURL: payosReturnURL, PayOSCancelURL: payosCancelURL,
 	}, nil
 }

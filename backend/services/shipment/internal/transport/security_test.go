@@ -11,6 +11,7 @@ import (
 
 	"shopee/backend/pkg/adminaccess/adminaccesstest"
 	"shopee/backend/pkg/authjwt/authjwttest"
+	"shopee/backend/pkg/middleware"
 	"shopee/backend/pkg/serviceauth"
 	"shopee/backend/services/shipment/internal/usecase"
 )
@@ -25,6 +26,9 @@ func TestShipmentRoutesAreProtected(t *testing.T) {
 	uc := usecase.NewShipmentUseCase(usecase.Deps{})
 	r := NewRouter("test", zerolog.Nop(), jwt, NewShipmentHandler(uc, zerolog.Nop()), &AdminHandler{}, &VendorShippingMethodHandler{},
 		NewInternalHandler(uc, zerolog.Nop()), NewWebhookHandler(uc, zerolog.Nop()), NewOpsHandler(uc, zerolog.Nop()), adminaccesstest.Guard(AdminRoutes), serviceauth.SharedKey(testKey))
+	// PW-038: evidence routes are registered beside the router, like main.
+	adminGroup := r.Group("/api/shipments/admin", middleware.RequireAuth(jwt), middleware.RequireRole("admin"), adminaccesstest.Guard(AdminRoutes))
+	(EvidenceHandler{Shipments: uc, Log: zerolog.Nop()}).Register(r, jwt, adminGroup)
 	// AF-19: every admin route names the permission bundle it needs.
 	adminaccesstest.AssertCovered(t, r, AdminRoutes)
 	send := func(method, path, body string, headers map[string]string) int {
@@ -44,14 +48,14 @@ func TestShipmentRoutesAreProtected(t *testing.T) {
 		}
 		return map[string]string{"Authorization": "Bearer " + tok}
 	}
-	for _, path := range []string{"/internal/shipments", "/internal/shipments/quotes", "/internal/shipments/by-vendor-order/" + someID + "/cancel", "/internal/shipments/by-vendor-order/" + someID + "/stops", "/internal/shipments/replacement-attempts"} {
+	for _, path := range []string{"/internal/shipments", "/internal/shipments/quotes", "/internal/shipments/by-vendor-order/" + someID + "/cancel", "/internal/shipments/by-vendor-order/" + someID + "/stops", "/internal/shipments/replacement-attempts", "/internal/shipments/address-checks"} {
 		for _, h := range []map[string]string{nil, {serviceauth.Header: "wrong"}, token("admin")} {
 			if code := send("POST", path, `{}`, h); code != http.StatusForbidden {
 				t.Errorf("%s must require the service key, got %d", path, code)
 			}
 		}
 	}
-	vendorActions := []string{"/ready", "/ship", "/tracking", "/failed-attempts", "/deliver", "/return", "/interception-decision"}
+	vendorActions := []string{"/ready", "/ship", "/tracking", "/failed-attempts", "/deliver", "/return", "/interception-decision", "/evidence"}
 	for _, a := range vendorActions {
 		path := "/api/shipments/" + someID + a
 		if code := send("POST", path, `{}`, nil); code != http.StatusUnauthorized {
@@ -68,6 +72,8 @@ func TestShipmentRoutesAreProtected(t *testing.T) {
 		{"POST", "/api/shipments/admin/shipments/" + someID + "/deliver"},
 		{"POST", "/api/shipments/admin/shipments/" + someID + "/interception-decision"},
 		{"POST", "/api/shipments/admin/order-events/" + someID + "/retry"},
+		{"POST", "/api/shipments/admin/shipments/" + someID + "/evidence"},
+		{"GET", "/api/shipments/admin/shipments/" + someID + "/evidence/" + someID},
 	}
 	for _, p := range adminPaths {
 		if code := send(p.method, p.path, `{}`, token("vendor")); code != http.StatusForbidden {

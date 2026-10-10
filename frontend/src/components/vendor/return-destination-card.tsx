@@ -8,6 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import * as api from "@/lib/api-client";
 import { useAuth } from "@/lib/auth-context";
+import { carrierCheckNote } from "@/lib/return-destinations";
 
 // ReturnDestinationCard: the owner chooses which address receives returned
 // goods and when (AF-05). A pickup address is not a return address by
@@ -70,6 +71,9 @@ export function ReturnDestinationCard({ vendorId }: { vendorId: string }) {
                 : "Chờ sàn xác minh; người mua chưa được gửi tới địa chỉ này"}
               {d.rejection_reason && ` · Lý do: ${d.rejection_reason}`}
             </p>
+            {carrierCheckNote(d) && (
+              <p className="text-xs text-muted-foreground">{carrierCheckNote(d)}</p>
+            )}
           </div>
         ) : (
           <p className="text-muted-foreground">

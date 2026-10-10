@@ -9,6 +9,7 @@ import (
 	"github.com/rs/zerolog"
 
 	"shopee/backend/pkg/httpresponse"
+	"shopee/backend/services/shipment/internal/carrier"
 	"shopee/backend/services/shipment/internal/domain"
 	"shopee/backend/services/shipment/internal/usecase"
 )
@@ -116,6 +117,26 @@ func (h *InternalHandler) StopFulfillment(c *gin.Context) {
 	httpresponse.OK(c, http.StatusOK, gin.H{"vendor_order_id": c.Param("id"), "operation_id": req.OperationID, "result": result})
 }
 
+// InterceptFulfillment: Order asks the carrier to stop a package handed
+// over before a paid cancellation was decided (PW-036).
+func (h *InternalHandler) InterceptFulfillment(c *gin.Context) {
+	var req stopFulfillmentRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		httpresponse.Error(c, http.StatusBadRequest, "validation_error", "operation_id is required")
+		return
+	}
+	if _, err := uuid.Parse(c.Param("id")); err != nil {
+		httpresponse.Error(c, http.StatusBadRequest, "validation_error", "Invalid vendor order id")
+		return
+	}
+	result, err := h.shipments.InterceptFulfillment(c.Request.Context(), c.Param("id"), req.OperationID)
+	if err != nil {
+		httpresponse.HandleError(c, h.log, err)
+		return
+	}
+	httpresponse.OK(c, http.StatusOK, gin.H{"vendor_order_id": c.Param("id"), "operation_id": req.OperationID, "result": result})
+}
+
 type destinationRequest struct {
 	RecipientName string `json:"recipient_name" binding:"required,max=200"`
 	Phone         string `json:"phone" binding:"required,max=30"`
@@ -163,4 +184,36 @@ func (h *InternalHandler) CancelForVendorOrder(c *gin.Context) {
 		return
 	}
 	httpresponse.OK(c, http.StatusOK, gin.H{"cancelled": true})
+}
+
+type addressCheckRequest struct {
+	RecipientName string `json:"recipient_name" binding:"max=100"`
+	Phone         string `json:"phone" binding:"max=30"`
+	Province      string `json:"province" binding:"required,max=100"`
+	District      string `json:"district" binding:"required,max=100"`
+	Ward          string `json:"ward" binding:"max=100"`
+	StreetAddress string `json:"street_address" binding:"required,max=300"`
+}
+
+type addressCheckResponse struct {
+	Deliverable bool   `json:"deliverable"`
+	Reason      string `json:"reason,omitempty"`
+	Reference   string `json:"reference,omitempty"`
+}
+
+// CheckAddress (PW-042): the carrier's answer for an address, for Vendor.
+// 501 address_check_unsupported means an operator must verify it.
+func (h *InternalHandler) CheckAddress(c *gin.Context) {
+	var req addressCheckRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		httpresponse.Error(c, http.StatusBadRequest, "validation_error", "province, district and street_address are required")
+		return
+	}
+	r, err := h.shipments.CheckAddress(c.Request.Context(), carrier.AddressCheckInput{RecipientName: req.RecipientName, Phone: req.Phone,
+		Province: req.Province, District: req.District, Ward: req.Ward, StreetAddress: req.StreetAddress})
+	if err != nil {
+		httpresponse.HandleError(c, h.log, err)
+		return
+	}
+	httpresponse.OK(c, http.StatusOK, addressCheckResponse{Deliverable: r.Deliverable, Reason: r.Reason, Reference: r.Reference})
 }

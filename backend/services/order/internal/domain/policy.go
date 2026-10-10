@@ -22,6 +22,10 @@ const (
 	// "none" (legacy: shipping is never refunded on a return) is
 	// implemented; any other value is not ready until Order refunds it.
 	RuleReturnShippingRefund = "order.return_shipping_refund"
+	// RuleReturnShipDeadline (PW-007): how many days after a return is
+	// approved the buyer has to send the parcel back, "ship-<days>d".
+	// Optional; without it the configured ORDER_RETURN_DISPATCH_DAYS applies.
+	RuleReturnShipDeadline = "order.return_ship_deadline"
 
 	ReturnShippingNone = "none"
 
@@ -45,6 +49,21 @@ func ParseReturnsWindow(value string) (int, bool) {
 	return days, true
 }
 
+var returnShipPattern = regexp.MustCompile(`^ship-([0-9]{1,2})d$`)
+
+// ParseReturnShipDeadline reads "ship-7d" (1 to 60 days).
+func ParseReturnShipDeadline(value string) (int, bool) {
+	m := returnShipPattern.FindStringSubmatch(value)
+	if m == nil {
+		return 0, false
+	}
+	days, err := strconv.Atoi(m[1])
+	if err != nil || days < 1 || days > 60 {
+		return 0, false
+	}
+	return days, true
+}
+
 // RuleReadiness tells Vendor whether Order enforces this rule version. A
 // ready answer carries a hash of the rule and its implementation.
 func RuleReadiness(key, value string) (ready bool, ruleHash, reason string) {
@@ -56,6 +75,10 @@ func RuleReadiness(key, value string) (ready bool, ruleHash, reason string) {
 	case RuleReturnShippingRefund:
 		if value != ReturnShippingNone {
 			return false, "", "Order does not refund shipping on returns yet; only \"none\" is enforced"
+		}
+	case RuleReturnShipDeadline:
+		if _, ok := ParseReturnShipDeadline(value); !ok {
+			return false, "", "Order enforces return dispatch deadlines written ship-<1..60>d"
 		}
 	default:
 		return false, "", "Order does not own rule " + key
@@ -94,6 +117,11 @@ func ValidatePolicyVersion(v PolicyVersion) error {
 		if ready, _, _ := RuleReadiness(RuleReturnShippingRefund, v.RuleRefs[RuleReturnShippingRefund]); !ready {
 			return apperror.Validation("A returns policy must cite an enforced return shipping rule")
 		}
+		if ship, ok := v.RuleRefs[RuleReturnShipDeadline]; ok {
+			if ready, _, _ := RuleReadiness(RuleReturnShipDeadline, ship); !ready {
+				return apperror.Validation("A returns policy may only cite an enforced return dispatch deadline")
+			}
+		}
 	}
 	return nil
 }
@@ -121,7 +149,8 @@ type PolicyRef struct {
 	ContentHash string `json:"content_hash"`
 }
 
-func refOf(v PolicyVersion) PolicyRef {
+// RefOf is how a snapshot names a version.
+func RefOf(v PolicyVersion) PolicyRef {
 	return PolicyRef{Kind: v.Kind, PolicyID: v.PolicyID, Version: v.Version, ContentHash: v.ContentHash}
 }
 
@@ -135,7 +164,10 @@ type OrderPolicySnapshot struct {
 	ReturnsWindowDays    int               `json:"returns_window_days"`
 	ReturnShippingRefund string            `json:"return_shipping_refund"`
 	ReturnPolicyVersion  string            `json:"return_policy_version"`
-	TakenAt              time.Time         `json:"taken_at"`
+	// ReturnShipDays (PW-007): the dispatch deadline the returns policy
+	// cites; 0 when it cites none (the configured days apply).
+	ReturnShipDays int       `json:"return_ship_days,omitempty"`
+	TakenAt        time.Time `json:"taken_at"`
 }
 
 // VendorPolicySnapshot is the part a vendor order enforces: the shop's
@@ -145,6 +177,8 @@ type VendorPolicySnapshot struct {
 	ReturnsWindowDays    int        `json:"returns_window_days"`
 	ReturnShippingRefund string     `json:"return_shipping_refund"`
 	ReturnPolicyVersion  string     `json:"return_policy_version"`
+	// ReturnShipDays: the dispatch deadline sold under (PW-007); 0 = config.
+	ReturnShipDays int `json:"return_ship_days,omitempty"`
 }
 
 // BuildPolicySnapshot fixes the marketplace versions in force at t and the
@@ -159,7 +193,7 @@ func BuildPolicySnapshot(active map[string]PolicyVersion, fallback ReturnPolicy,
 	}
 	sort.Strings(kinds)
 	for _, k := range kinds {
-		s.Policies = append(s.Policies, refOf(active[k]))
+		s.Policies = append(s.Policies, RefOf(active[k]))
 	}
 	if returns, ok := active["returns"]; ok {
 		days, ok := ParseReturnsWindow(returns.RuleRefs[RuleReturnsWindow])
@@ -170,6 +204,13 @@ func BuildPolicySnapshot(active map[string]PolicyVersion, fallback ReturnPolicy,
 		s.Source, s.ReturnsWindowDays, s.ReturnShippingRefund = "published", days, shipping
 		s.ReturnPolicyVersion = "returns-v" + strconv.FormatInt(returns.Version, 10)
 		s.Rules[RuleReturnsWindow], s.Rules[RuleReturnShippingRefund] = returns.RuleRefs[RuleReturnsWindow], shipping
+		if ship, cited := returns.RuleRefs[RuleReturnShipDeadline]; cited {
+			days, ok := ParseReturnShipDeadline(ship)
+			if !ok {
+				return nil, apperror.Internal(errUnenforcedPolicy)
+			}
+			s.ReturnShipDays, s.Rules[RuleReturnShipDeadline] = days, ship
+		}
 	}
 	return s, nil
 }
@@ -181,6 +222,21 @@ func (s *OrderPolicySnapshot) VersionsByKind() map[string]int64 {
 	out := map[string]int64{}
 	for _, p := range s.Policies {
 		out[p.Kind] = p.Version
+	}
+	return out
+}
+
+// ShopPolicyKey names a shop's approved policy among the versions a buyer
+// confirms (PW-013), next to the marketplace kinds.
+func ShopPolicyKey(vendorID string) string { return "shop:" + vendorID }
+
+// AcceptedVersions is everything a checkout is placed under that the buyer
+// must have been shown: the marketplace versions by kind and each shop's
+// approved policy version (by ShopPolicyKey); a shop without one is absent.
+func (s *OrderPolicySnapshot) AcceptedVersions(shops map[string]PolicyVersion) map[string]int64 {
+	out := s.VersionsByKind()
+	for vendorID, v := range shops {
+		out[ShopPolicyKey(vendorID)] = v.Version
 	}
 	return out
 }
@@ -201,9 +257,9 @@ func SameVersions(accepted, current map[string]int64) bool {
 // ForVendor derives a vendor order's snapshot.
 func (s *OrderPolicySnapshot) ForVendor(shop *PolicyVersion) *VendorPolicySnapshot {
 	v := &VendorPolicySnapshot{ReturnsWindowDays: s.ReturnsWindowDays, ReturnShippingRefund: s.ReturnShippingRefund,
-		ReturnPolicyVersion: s.ReturnPolicyVersion}
+		ReturnPolicyVersion: s.ReturnPolicyVersion, ReturnShipDays: s.ReturnShipDays}
 	if shop != nil {
-		ref := refOf(*shop)
+		ref := RefOf(*shop)
 		v.ShopPolicy = &ref
 	}
 	return v

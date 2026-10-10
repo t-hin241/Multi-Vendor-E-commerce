@@ -73,7 +73,7 @@ Quy tắc:
    - carrier báo `delivered` sau khi đã mở hồ sơ → `needs_review` → `close`.
 7. Bật cờ Order (giao lại) sau khi các bước trên đạt và có người trực `finance.prepare`.
 
-Người vận hành phải lưu chứng cứ của hãng (mã tham chiếu, ảnh, email) trong lý do khi ghi `lost`. Bản này chưa có tệp đính kèm cho phiếu nhận hàng.
+Người vận hành ghi mã tham chiếu của hãng trong lý do và đính kèm xác nhận của hãng (ảnh/video) khi ghi `lost` (xem "Chứng cứ thất lạc ở Shipment" bên dưới).
 
 ## Rollback
 
@@ -109,3 +109,14 @@ Người vận hành phải lưu chứng cứ của hãng (mã tham chiếu, ả
 - **Integration Inventory:** `TestRecoveryRestockHappensOncePerRecoveryID` (reason `delivery_return_restock`).
 - **Unit:** domain Order/Shipment, route/quyền Order/Shipment/gateway, hợp đồng event.
 - **Vitest:** `src/lib/delivery-exceptions.test.ts`.
+
+## Bổ sung nhóm D (2026-10-10)
+
+- **Chứng cứ phiếu nhận hàng (PW-038):** phiếu (shop) và phiếu sửa (admin) nhận `evidence_ids` (tối đa 5 ảnh, tải lên như ảnh hồ sơ hỗ trợ). Ảnh lỗi hoặc không thuộc người ghi làm phiếu bị từ chối (409 `evidence_unavailable`). Xem ở `/delivery-exceptions/:exceptionID/evidence` (shop có `returns.handle`, admin `support.manage`).
+- **Chứng cứ thất lạc ở Shipment (PW-038):** Shipment giữ chứng cứ của báo thất bại (`lost`/`returned`) trong bucket riêng `SHIPMENT_EVIDENCE_BUCKET` của object storage dùng chung (`SHIPMENT_EVIDENCE_STORAGE_*`; compose dùng MinIO, bucket `shipment-evidence`, tự tạo khi khởi động).
+  - Tải lên trước cho đúng shipment: shop `POST /api/shipments/:id/evidence`, admin `POST /api/shipments/admin/shipments/:id/evidence` (multipart `file`; ảnh JPEG/PNG ≤ 5 MiB được mã hoá lại để bỏ metadata, video MP4 ≤ 50 MiB). Báo thất bại gửi `evidence_ids` (tối đa 5); chỉ gắn được tệp của chính người báo, cho đúng shipment, một lần, trong cùng transaction (409 `evidence_unavailable` thì cả báo cáo bị từ chối).
+  - Khi đã cấu hình kho, `lost` bắt buộc có ít nhất một tệp (422 `evidence_required`). Chưa cấu hình: không nhận tải lên, `lost` không bắt buộc tệp (log `shipment_evidence_storage_not_configured` lúc khởi động).
+  - Xem: `GET …/:id/evidence` và `…/evidence/:evidenceId` (shop của shipment và admin `support.manage`; tệp chưa gắn chỉ người tải thấy). Admin xem ở `/admin/fulfillment` với gói `lost`/`returned`.
+  - Tệp tải lên mà không báo cáo nào dùng bị worker Shipment xoá sau 24 giờ (mỗi giờ). Chứng cứ đã gắn được giữ cùng shipment. Migration Shipment `000013_shipment_evidence` (down từ chối khi đã có chứng cứ gắn).
+- **Ảnh phiếu nhận hàng giữ tối đa 30 ngày (PW-038):** ảnh của phiếu nhận hàng (giao thất bại, trả hàng), phiếu sửa và kiện trả thất lạc ở Order bị xoá 30 ngày sau bước nó chứng minh.
+- **Nhắc hạn tới shop (PW-009):** stage `delivery_goods_receipt` nhắc shop khi tới mốc nhắc và khi quá hạn (khi bật `FEATURE_CASE_SLA_ENABLED` và `FEATURE_VENDOR_ACTION_NOTICES_ENABLED`).

@@ -115,3 +115,9 @@ Không backfill tự động. Đơn đã thanh toán trước khi bật cờ kh�
 - Nhóm `support` mới: Notification migration `000007` mở rộng ràng buộc; nhân viên chọn nhóm "Hỗ trợ khách hàng" ở `/vendor`.
 - Vendor cũng gửi chủ shop thông báo khi địa chỉ nhận trả được xác minh/từ chối (Vendor migration `000013`, loại `return_destination_verified` / `return_destination_rejected`, qua outbox thông báo hiện có).
 - Buyer được nhắc một lần trước hạn gửi hàng trả 48 giờ (`return_dispatch_reminder`, worker của Order) nếu chưa báo đã gửi.
+
+## Bổ sung nhóm D (PW-045, 2026-10-10)
+
+- **Backfill khi bật cờ:** mỗi lần worker Order khởi động với `FEATURE_VENDOR_ACTION_NOTICES_ENABLED=true`, Order xếp thông báo cho việc đang mở: gói `paid`/`processing`, yêu cầu hủy của buyer đang mở, trả hàng `requested`, kiện trả đang về. Dùng cùng target với chuyển trạng thái thật nên không gửi trùng; event mang `backfill: true`. Log `order_vendor_notice_backfill`.
+- **`no_recipient`/`parked` thành work item AF-07:** Notification có bảng hạn AF-07 riêng (migration `000008`), work item `vendor_action_no_recipient`/`vendor_action_parked` (24h, admin) hiện ở `/admin/work-items`; retry hoặc giải quyết thì đóng. Bật nhắc bằng `NOTIFICATION_FEATURE_CASE_SLA_ENABLED` cùng `SLA_ON_CALL_ADMIN_IDS`; thông báo nhắc do Notification tự ghi (không qua event bus).
+- **Payment không có event bus:** thông báo payout và thông báo tài khoản hoàn tiền cho buyer đi qua HTTP `NOTIFICATION_SERVICE_URL` (`/internal/vendor-action-notices`, `/internal/notifications`) khi `EVENT_PUBLISHING=http`, cùng event id như khi qua bus.

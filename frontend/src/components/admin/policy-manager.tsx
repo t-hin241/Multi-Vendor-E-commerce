@@ -200,6 +200,8 @@ function DraftForm({ kind, onCreated }: { kind: api.PolicyKind; onCreated: () =>
     toLocalInput(new Date(Date.now() + 10 * 60_000)),
   );
   const [windowDays, setWindowDays] = useState(7);
+  // PW-007: 0 = no dispatch deadline rule (the configured days apply).
+  const [shipDays, setShipDays] = useState(0);
   const [shipping, setShipping] = useState("none");
   const [error, setError] = useState<unknown>(null);
   const [busy, setBusy] = useState(false);
@@ -218,7 +220,7 @@ function DraftForm({ kind, onCreated }: { kind: api.PolicyKind; onCreated: () =>
           contact,
           // datetime-local is the admin's local time; sent as UTC.
           effective_at: new Date(effectiveAt).toISOString(),
-          rule_refs: kind === "returns" ? returnsRuleRefs(windowDays, shipping) : {},
+          rule_refs: kind === "returns" ? returnsRuleRefs(windowDays, shipping, shipDays) : {},
         }),
       );
       setTitle("");
@@ -291,6 +293,17 @@ function DraftForm({ kind, onCreated }: { kind: api.PolicyKind; onCreated: () =>
               value={windowDays}
               onChange={(e) => setWindowDays(Math.floor(Number(e.target.value)) || 0)}
             />
+            <Label htmlFor="policy-ship-days">
+              Days to send a return back after approval (0: platform default)
+            </Label>
+            <Input
+              id="policy-ship-days"
+              type="number"
+              min={0}
+              max={60}
+              value={shipDays}
+              onChange={(e) => setShipDays(Math.floor(Number(e.target.value)) || 0)}
+            />
             <Label>Shipping fee on returns</Label>
             <Select value={shipping} onValueChange={setShipping}>
               <SelectTrigger>
@@ -317,7 +330,12 @@ function DraftForm({ kind, onCreated }: { kind: api.PolicyKind; onCreated: () =>
         </div>
         <ActionError error={error} />
         <Button
-          disabled={!valid || busy || (kind === "returns" && (windowDays < 1 || windowDays > 365))}
+          disabled={
+            !valid ||
+            busy ||
+            (kind === "returns" &&
+              (windowDays < 1 || windowDays > 365 || shipDays < 0 || shipDays > 60))
+          }
           onClick={submit}
         >
           {busy ? "Saving…" : "Create draft"}

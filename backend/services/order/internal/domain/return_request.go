@@ -96,10 +96,11 @@ type ReturnPolicy struct {
 var returnTransitions = map[ReturnRequestStatus][]ReturnRequestStatus{
 	ReturnRequested:       {ReturnVendorConfirmed, ReturnApproved, ReturnRejected},
 	ReturnVendorConfirmed: {ReturnApproved, ReturnRejected},
-	ReturnApproved:        {ReturnReceived},
-	ReturnReceived:        {ReturnRefundPending},
-	ReturnRefundPending:   {ReturnRefunded, ReturnRefundFailed},
-	ReturnRefundFailed:    {ReturnRefundPending},
+	// PW-042: a parcel lost on the way back is refunded without a receipt.
+	ReturnApproved:      {ReturnReceived, ReturnRefundPending},
+	ReturnReceived:      {ReturnRefundPending},
+	ReturnRefundPending: {ReturnRefunded, ReturnRefundFailed},
+	ReturnRefundFailed:  {ReturnRefundPending},
 }
 
 func CanTransitionReturn(from, to ReturnRequestStatus) bool {

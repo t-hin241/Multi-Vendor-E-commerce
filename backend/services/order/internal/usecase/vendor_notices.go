@@ -80,6 +80,25 @@ func (uc *OrderUseCase) NoticeShopDeadline(ctx context.Context, stage, resourceI
 	return nil
 }
 
+// BackfillVendorNotices (PW-045) queues the shop notices of work already
+// open when FEATURE_VENDOR_ACTION_NOTICES_ENABLED is turned on: paid
+// packages not handed over, buyers' cancellation requests and returns
+// waiting for the shop. Each uses the target its transition would have, so
+// work already told (or told later) is never told twice.
+func (uc *OrderUseCase) BackfillVendorNotices(ctx context.Context) (int64, error) {
+	if !uc.VendorActionNotices || uc.VendorNoticeBackfill == nil {
+		return 0, nil
+	}
+	n, err := uc.VendorNoticeBackfill.BackfillVendorNotices(ctx)
+	if err != nil {
+		return 0, err
+	}
+	if n > 0 {
+		uc.Log.Info().Int64("notices", n).Msg("order_vendor_notice_backfill")
+	}
+	return n, nil
+}
+
 // noticeVendorOfReturn finds the shop of a return's item and queues kind.
 func (uc *OrderUseCase) noticeVendorOfReturn(ctx context.Context, rr *domain.ReturnRequest, kind string) error {
 	if !uc.VendorActionNotices {
@@ -103,7 +122,8 @@ func (uc *OrderUseCase) notifyVendor(ctx context.Context, e *domain.Effect) erro
 	if err := json.Unmarshal(e.Payload, &p); err != nil || p.VendorID == "" || p.ActionKind == "" {
 		return apperror.Validation("invalid vendor notice payload")
 	}
-	a := events.VendorOrderAction{VendorID: p.VendorID, VendorOrderID: p.VendorOrderID, OrderID: e.OrderID, ActionKind: p.ActionKind, ReferenceID: p.ReferenceID}
+	a := events.VendorOrderAction{VendorID: p.VendorID, VendorOrderID: p.VendorOrderID, OrderID: e.OrderID, ActionKind: p.ActionKind, ReferenceID: p.ReferenceID,
+		Backfill: p.Backfill}
 	if uc.Events != nil {
 		return uc.publish(ctx, e, func() (eventbus.Envelope, error) { return events.VendorOrderActionEvent(e.ID, a) })
 	}

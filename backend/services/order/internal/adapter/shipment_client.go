@@ -159,6 +159,24 @@ func (c *HTTPShipmentClient) StopFulfillment(ctx context.Context, vendorOrderID,
 	return "", apperror.Internal(fmt.Errorf("unknown stop result %q", out.Data.Result))
 }
 
+// InterceptFulfillment asks Shipment to have the carrier stop a package
+// already handed over (PW-036); a repeat answers the same.
+func (c *HTTPShipmentClient) InterceptFulfillment(ctx context.Context, vendorOrderID, operationID string) (string, error) {
+	var out struct {
+		Data struct {
+			Result string `json:"result"`
+		} `json:"data"`
+	}
+	if err := c.post(ctx, "/internal/shipments/by-vendor-order/"+url.PathEscape(vendorOrderID)+"/interceptions", map[string]string{"operation_id": operationID}, &out); err != nil {
+		return "", err
+	}
+	switch out.Data.Result {
+	case "requested", "intercepted", "delivered", "not_handed_over":
+		return out.Data.Result, nil
+	}
+	return "", apperror.Internal(fmt.Errorf("unknown interception result %q", out.Data.Result))
+}
+
 // ReplacementAttempt is Order's request for a redelivery (AF-04).
 type ReplacementAttempt struct {
 	OperationID        string             `json:"operation_id"`

@@ -11,11 +11,14 @@ import (
 )
 
 type Config struct {
-	OrderServiceURL   string
-	ExpiryEnabled     bool
-	Base              config.Base
-	VendorServiceURL  string
-	CatalogServiceURL string
+	OrderServiceURL string
+	ExpiryEnabled   bool
+	// SecondApprovalQuantity (PW-027): restock requests of at least this
+	// many units need two admins; 0 (default) turns it off.
+	SecondApprovalQuantity int64
+	Base                   config.Base
+	VendorServiceURL       string
+	CatalogServiceURL      string
 }
 
 func Load() (Config, error) {
@@ -46,7 +49,15 @@ func Load() (Config, error) {
 			return Config{}, fmt.Errorf("INVENTORY_EXPIRY_ENABLED must be a boolean")
 		}
 	}
-	return Config{OrderServiceURL: orderURL, ExpiryEnabled: expiry,
+	var secondApproval int64
+	if raw := os.Getenv("INVENTORY_RESTOCK_SECOND_APPROVAL_QUANTITY"); raw != "" {
+		v, e := strconv.ParseInt(raw, 10, 64)
+		if e != nil || v < 0 {
+			return Config{}, fmt.Errorf("INVENTORY_RESTOCK_SECOND_APPROVAL_QUANTITY must be a non-negative integer")
+		}
+		secondApproval = v
+	}
+	return Config{OrderServiceURL: orderURL, ExpiryEnabled: expiry, SecondApprovalQuantity: secondApproval,
 		Base:              base,
 		VendorServiceURL:  vendorServiceURL,
 		CatalogServiceURL: catalogServiceURL,

@@ -2,8 +2,26 @@
 
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
+import { useState } from "react";
 
+import { ActionError } from "@/components/admin/action-error";
 import { ReasonDialog } from "@/components/admin/confirm-dialogs";
+import {
+  ShipmentEvidenceList,
+  ShipmentEvidencePicker,
+  type PickedEvidence,
+} from "@/components/admin/shipment-evidence";
+import {
+  AlertDialog,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
+import { Textarea } from "@/components/ui/textarea";
 import { SectionHeader } from "@/components/section-header";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -32,6 +50,87 @@ const SECTIONS: { key: string; title: string; hint: string }[] = [
     hint: "Contact the buyer; record a return if the package comes back.",
   },
 ];
+
+// LostReportDialog records the carrier's loss confirmation with its
+// evidence (PW-038): Shipment keeps the files and refuses a lost report
+// without one when evidence storage is on.
+function LostReportDialog({
+  shipment,
+  onDone,
+}: {
+  shipment: api.Shipment;
+  onDone: () => Promise<void>;
+}) {
+  const { callWithAuth } = useAuth();
+  const [open, setOpen] = useState(false);
+  const [reason, setReason] = useState("");
+  const [evidence, setEvidence] = useState<PickedEvidence[]>([]);
+  const [error, setError] = useState<unknown>(null);
+  const [busy, setBusy] = useState(false);
+
+  async function submit() {
+    setError(null);
+    setBusy(true);
+    try {
+      await callWithAuth((token) =>
+        api.reportShipmentFailure(token, "admin", shipment.id, {
+          kind: "lost",
+          reason,
+          expected_version: shipment.version,
+          evidence_ids: evidence.map((e) => e.id),
+        }),
+      );
+      setOpen(false);
+      setReason("");
+      setEvidence([]);
+      await onDone();
+    } catch (err) {
+      setError(err);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <AlertDialog open={open} onOpenChange={setOpen}>
+      <AlertDialogTrigger asChild>
+        <Button size="sm" variant="outline" className="text-destructive">
+          Lost
+        </Button>
+      </AlertDialogTrigger>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>The carrier confirmed the package lost?</AlertDialogTitle>
+          <AlertDialogDescription>
+            Note the carrier&apos;s reference and attach its confirmation (photos or a short video).
+            Order opens a failed-delivery case.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <Textarea
+          value={reason}
+          onChange={(e) => setReason(e.target.value)}
+          placeholder="Reason…"
+          rows={3}
+          autoFocus
+        />
+        <ShipmentEvidencePicker
+          scope="admin"
+          shipmentId={shipment.id}
+          value={evidence}
+          onChange={setEvidence}
+          disabled={busy}
+        />
+        <ActionError error={error} />
+        <AlertDialogFooter>
+          <AlertDialogCancel>Cancel</AlertDialogCancel>
+          <Button variant="destructive" disabled={!reason.trim() || busy} onClick={submit}>
+            {busy ? "Working…" : "Lost"}
+          </Button>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  );
+}
 
 // ShipmentOperations lists fulfillment problems and lets an admin record
 // what the carrier said. Every action needs a reason and is kept on the
@@ -94,6 +193,9 @@ export function ShipmentOperations({ focusID }: { focusID?: string }) {
           {s.failed_attempts > 0 &&
             ` · ${s.failed_attempts} failed attempt(s): ${s.last_attempt_reason ?? ""}`}
         </span>
+        {(s.status === "lost" || s.status === "returned") && (
+          <ShipmentEvidenceList scope="admin" shipmentId={s.id} />
+        )}
       </span>
       <span className="flex flex-wrap gap-2">
         {s.status === "shipped" && (
@@ -110,17 +212,10 @@ export function ShipmentOperations({ focusID }: { focusID?: string }) {
               (token, reason) => api.adminShipmentAction(token, s.id, "return", { reason }),
               true,
             )}
-            {action(
-              "Lost",
-              "The carrier confirmed the package lost? Note the carrier's reference; Order opens a failed-delivery case.",
-              (token, reason) =>
-                api.reportShipmentFailure(token, "admin", s.id, {
-                  kind: "lost",
-                  reason,
-                  expected_version: s.version,
-                }),
-              true,
-            )}
+            <LostReportDialog
+              shipment={s}
+              onDone={() => queryClient.invalidateQueries({ queryKey: ["shipment-operations"] })}
+            />
           </>
         )}
         {s.status === "interception_requested" && (

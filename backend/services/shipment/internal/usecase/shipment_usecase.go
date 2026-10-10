@@ -8,6 +8,7 @@ package usecase
 import (
 	"context"
 	"errors"
+	"strings"
 	"time"
 
 	"github.com/rs/zerolog"
@@ -34,6 +35,8 @@ type Deps struct {
 	Audit         AuditPort
 	Carrier       carrier.Provider
 	Verifier      carrier.Verifier
+	// AddressChecker (PW-042) is the carrier's address validation.
+	AddressChecker carrier.AddressChecker
 	// Simulator is set only with the mock carrier (never in production).
 	Simulator CarrierSimulator
 	// Wake asks the outbox worker to deliver now.
@@ -45,6 +48,10 @@ type Deps struct {
 	// redelivery attempts. AttemptLimit failed attempts open a case.
 	DeliveryResolution bool
 	AttemptLimit       int
+	// Evidence and EvidenceRepo (PW-038) keep the files of failure
+	// reports; without them no upload is accepted and lost needs none.
+	Evidence     EvidenceStore
+	EvidenceRepo EvidenceRepositoryPort
 }
 
 type ShipmentUseCase struct{ Deps }
@@ -532,9 +539,47 @@ func (uc *ShipmentUseCase) CancelForVendorOrder(ctx context.Context, vendorOrder
 		})
 		return mapError(err)
 	case shipment.Status == domain.StatusShipped:
-		return uc.requestInterception(ctx, shipment)
+		return uc.requestInterception(ctx, shipment, nil)
 	}
 	return nil
+}
+
+// Interception results answered to Order for a cancelled package already
+// handed over (PW-036).
+const (
+	InterceptRequested    = "requested"   // the carrier was asked; its decision follows
+	InterceptIntercepted  = "intercepted" // stopped already, on its way back
+	InterceptTooLate      = "delivered"   // delivered, returned or lost: nothing to stop
+	InterceptNotHandedOff = "not_handed_over"
+)
+
+// InterceptFulfillment asks the carrier to stop a package handed over
+// before the buyer's cancellation was decided (PW-036). The operation
+// ("cancellation:<id>") is kept on the shipment: when the carrier accepts,
+// Order is told the goods are coming back (AF-04 exception "returned").
+// A repeat answers the same.
+func (uc *ShipmentUseCase) InterceptFulfillment(ctx context.Context, vendorOrderID, operationID string) (string, error) {
+	shipment, err := uc.Shipments.FindByVendorOrderID(ctx, vendorOrderID)
+	if errors.Is(err, repository.ErrShipmentNotFound) {
+		return InterceptNotHandedOff, nil
+	}
+	if err != nil {
+		return "", apperror.Internal(err)
+	}
+	switch {
+	case shipment.Status == domain.StatusShipped:
+		if err := uc.requestInterception(ctx, shipment, &operationID); err != nil {
+			return "", err
+		}
+		return InterceptRequested, nil
+	case shipment.Status == domain.StatusInterceptionRequested:
+		return InterceptRequested, nil
+	case shipment.Status == domain.StatusCancelled && shipment.ShippedAt != nil:
+		return InterceptIntercepted, nil
+	case shipment.Status == domain.StatusDelivered || shipment.Status == domain.StatusReturned || shipment.Status == domain.StatusLost:
+		return InterceptTooLate, nil
+	}
+	return InterceptNotHandedOff, nil
 }
 
 // Stop results answered to Order for a paid cancellation (AF-03).
@@ -589,7 +634,7 @@ func (uc *ShipmentUseCase) StopFulfillment(ctx context.Context, vendorOrderID, o
 	return result, nil
 }
 
-func (uc *ShipmentUseCase) requestInterception(ctx context.Context, shipment *domain.Shipment) error {
+func (uc *ShipmentUseCase) requestInterception(ctx context.Context, shipment *domain.Shipment, operation *string) error {
 	result, err := uc.Carrier.RequestInterception(ctx, carrier.RequestInterceptionInput{
 		ShipmentID: shipment.ID, TrackingNumber: derefString(shipment.TrackingNumber), CarrierID: derefString(shipment.CarrierID),
 	})
@@ -607,7 +652,7 @@ func (uc *ShipmentUseCase) requestInterception(ctx context.Context, shipment *do
 		now := uc.Now().UTC()
 		note := "Order cancelled: interception requested from the carrier, awaiting its decision"
 		return uc.transition(ctx, s, domain.StatusInterceptionRequested,
-			repository.Change{InterceptRef: &result.ProviderReferenceID, InterceptAt: &now}, Actor{Role: domain.ActorSystem}, &note, nil)
+			repository.Change{InterceptRef: &result.ProviderReferenceID, InterceptAt: &now, InterceptOperation: operation}, Actor{Role: domain.ActorSystem}, &note, nil)
 	})
 	if err != nil {
 		return mapError(err)
@@ -644,7 +689,16 @@ func (uc *ShipmentUseCase) applyInterception(ctx context.Context, s *domain.Ship
 	if reason != "" {
 		note += " (" + reason + ")"
 	}
-	return uc.transition(ctx, s, to, change, actor, &note, key)
+	if err := uc.transition(ctx, s, to, change, actor, &note, key); err != nil {
+		return err
+	}
+	// PW-036: a package intercepted for a buyer's cancellation is coming
+	// back to the shop; Order resolves it as a failed delivery (AF-04).
+	if accepted && s.InterceptOperation != nil && strings.HasPrefix(*s.InterceptOperation, "cancellation:") {
+		back := "Intercepted for " + *s.InterceptOperation + "; the package is on its way back to the shop"
+		return uc.enqueueException(ctx, s, domain.ExceptionReturned, &back)
+	}
+	return nil
 }
 
 // SimulateCarrierDecision stands in for the carrier's callback with the

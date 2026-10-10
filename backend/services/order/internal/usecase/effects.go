@@ -161,6 +161,8 @@ func (uc *OrderUseCase) executeEffect(ctx context.Context, e *domain.Effect) err
 		return uc.closeReturnShipment(ctx, e)
 	case domain.EffectNotifyVendor:
 		return uc.notifyVendor(ctx, e)
+	case domain.EffectInterceptShipment:
+		return uc.interceptShipment(ctx, e)
 	case domain.EffectReportRejectedOutcome:
 		var p domain.RejectedOutcomePayload
 		if err := json.Unmarshal(e.Payload, &p); err != nil {

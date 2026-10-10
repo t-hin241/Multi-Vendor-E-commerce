@@ -9,7 +9,8 @@ import (
 
 // Worker logs fulfillment counters every minute (warn when something needs
 // an operator) and removes buyer contact details from final shipments past
-// the retention period every hour.
+// the retention period every hour, with evidence uploads no report
+// attached (PW-038).
 type Worker struct {
 	Shipments *ShipmentUseCase
 	// Returns, when set, reports return parcels (AF-05).
@@ -23,7 +24,7 @@ type Worker struct {
 func (w Worker) Run(ctx context.Context) {
 	tick := time.NewTicker(time.Minute)
 	defer tick.Stop()
-	lastRedaction := time.Time{}
+	lastRedaction, lastClean := time.Time{}, time.Time{}
 	for {
 		w.report(ctx)
 		w.backfillExceptions(ctx)
@@ -36,6 +37,14 @@ func (w Worker) Run(ctx context.Context) {
 				w.Log.Error().Err(err).Msg("shipment_address_redaction_failed")
 			} else if n > 0 {
 				w.Log.Info().Int64("shipments", n).Msg("shipment_addresses_redacted")
+			}
+		}
+		if time.Since(lastClean) >= time.Hour {
+			lastClean = time.Now()
+			if n, err := w.Shipments.CleanEvidence(ctx); err != nil && ctx.Err() == nil {
+				w.Log.Error().Err(err).Msg("shipment_evidence_cleanup_failed")
+			} else if n > 0 {
+				w.Log.Info().Int("files", n).Msg("shipment_evidence_orphans_removed")
 			}
 		}
 		select {

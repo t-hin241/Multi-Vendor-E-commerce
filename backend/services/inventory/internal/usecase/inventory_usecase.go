@@ -6,7 +6,9 @@ package usecase
 import (
 	"context"
 	"errors"
+	"net/http"
 	"regexp"
+	"time"
 
 	"shopee/backend/pkg/apperror"
 	"shopee/backend/pkg/shopaccess"
@@ -156,6 +158,26 @@ func (uc *InventoryUseCase) approveRestockRequest(ctx context.Context, adminUser
 	}
 	if !domain.CanTransitionRestock(req.Status, domain.RestockApproved) {
 		return nil, apperror.Conflict("Only a pending restock request can be approved")
+	}
+	// PW-027: a large request needs a second, different admin; the first
+	// approval moves no stock.
+	if req.NeedsSecondApproval(uc.ops.SecondApprovalQuantity) {
+		if req.FirstApprovedBy == nil {
+			if err := uc.restockRequests.RecordFirstApproval(ctx, req.ID, adminUserID); err != nil {
+				return nil, inventoryError(err)
+			}
+			if err := uc.ops.audit(ctx, "restock_request", req.ID, adminUserID, "restock_first_approved", nil, map[string]any{
+				"quantity": req.RequestedQuantity, "product_id": req.ProductID}); err != nil {
+				return nil, err
+			}
+			now := time.Now().UTC()
+			req.FirstApprovedBy, req.FirstApprovedAt = &adminUserID, &now
+			return req, nil
+		}
+		if *req.FirstApprovedBy == adminUserID {
+			return nil, &apperror.Error{Code: "self_approval", Status: http.StatusConflict,
+				Message: "A second admin must approve a restock of this size"}
+		}
 	}
 
 	if req.VariantID != nil {

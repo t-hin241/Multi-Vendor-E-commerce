@@ -25,11 +25,15 @@ type ResetDeliveryUseCase struct {
 	Cipher   *TokenCipher
 	Notifier ResetNotifier
 	ResetURL string
-	Log      zerolog.Logger
+	// VerifyURL is the page an email verification link opens (PW-022).
+	VerifyURL string
+	Log       zerolog.Logger
 }
 type ResetMessage struct {
 	Email string `json:"email"`
 	URL   string `json:"url"`
+	// Kind: password_reset, or email_verification (PW-022).
+	Kind string `json:"kind"`
 }
 
 func (u *ResetDeliveryUseCase) Message(ctx context.Context, id string) (*ResetMessage, error) {
@@ -41,13 +45,17 @@ func (u *ResetDeliveryUseCase) Message(ctx context.Context, id string) (*ResetMe
 	if err != nil {
 		return nil, err
 	}
-	link, err := url.Parse(u.ResetURL)
-	if err != nil {
-		return nil, err
+	base := u.ResetURL
+	if d.Kind == "email_verification" {
+		base = u.VerifyURL
 	}
-	// Put the reset token in the URL fragment.
+	link, err := url.Parse(base)
+	if err != nil || base == "" {
+		return nil, errors.New("no link configured for " + d.Kind)
+	}
+	// Put the token in the URL fragment.
 	link.Fragment = "token=" + url.QueryEscape(token)
-	return &ResetMessage{Email: d.Email, URL: link.String()}, nil
+	return &ResetMessage{Email: d.Email, URL: link.String(), Kind: d.Kind}, nil
 }
 func (u *ResetDeliveryUseCase) Run(ctx context.Context) {
 	ticker := time.NewTicker(2 * time.Second)

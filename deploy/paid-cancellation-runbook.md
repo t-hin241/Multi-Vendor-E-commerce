@@ -89,3 +89,11 @@ Nhắc shop luôn bấm "Đã giao cho vận chuyển" ngay lúc bàn giao.
 - **Inventory:** `TestRecoveryRestockHappensOncePerRecoveryID`.
 - **Unit route/quyền:** Order, Shipment, Inventory, gateway.
 - **Vitest:** `src/lib/cancellations.test.ts`.
+
+## Chặn kiện đã bàn giao (PW-036, 2026-10-10)
+
+- Yêu cầu hủy ở `needs_review` với Shipment `handed_over` có thêm quyết định **Intercept parcel** (`decision: intercept`, quyền như duyệt hủy). Order gọi Shipment `/internal/shipments/by-vendor-order/:id/interceptions` (effect `intercept_shipment`); Shipment ghi `intercept_operation = cancellation:<id>` và hỏi hãng.
+- Hãng đồng ý chặn: Shipment phát sự kiện giao thất bại `returned` (cần `FEATURE_DELIVERY_RESOLUTION_ENABLED` ở Shipment). Order mở hồ sơ AF-04 và chuyển yêu cầu hủy sang `transferred` (cuối, liên kết `delivery_exception_id`, nhả hold của yêu cầu hủy). Shop ghi phiếu nhận hàng, admin quyết định hoàn tiền ở hồ sơ AF-04; hàng bán được nhập kho theo phiếu.
+- Hãng từ chối hoặc đã giao: yêu cầu vẫn `needs_review` (timeline có `interception_*`); admin từ chối hủy và hướng dẫn buyer trả hàng.
+- Hàng việc `cancellations_stuck` không tính yêu cầu đang chờ hãng dưới 72 giờ.
+- Migration Order `000029`, Shipment `000012`; down từ chối khi đã có yêu cầu được chặn/chuyển.

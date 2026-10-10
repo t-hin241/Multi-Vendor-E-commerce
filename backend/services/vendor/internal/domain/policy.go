@@ -89,6 +89,7 @@ var ruleCatalog = map[string]struct {
 }{
 	"order.returns_window":         {PolicyReturns, "order"},
 	"order.return_shipping_refund": {PolicyReturns, "order"},
+	"order.return_ship_deadline":   {PolicyReturns, "order"},
 	"shipment.fee_basis":           {PolicyShipping, "shipment"},
 	"shipment.quote_validity":      {PolicyShipping, "shipment"},
 	"payment.payout_method":        {PolicyTerms, "payment"},

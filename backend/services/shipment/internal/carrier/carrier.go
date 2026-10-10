@@ -6,7 +6,10 @@
 // payment/internal/provider's Provider/Verifier split.
 package carrier
 
-import "context"
+import (
+	"context"
+	"errors"
+)
 
 type RequestInterceptionInput struct {
 	ShipmentID     string
@@ -42,4 +45,32 @@ type DecisionEvent struct {
 // act on.
 type Verifier interface {
 	Verify(payload []byte, signatureHeader string) (DecisionEvent, error)
+}
+
+// AddressCheckInput is an address a carrier is asked to confirm it can
+// deliver to and collect from (PW-042: a shop's return destination).
+type AddressCheckInput struct {
+	RecipientName string
+	Phone         string
+	Province      string
+	District      string
+	Ward          string
+	StreetAddress string
+}
+
+// AddressCheckResult is the carrier's answer. Deliverable false comes with
+// the carrier's reason; Reference identifies the check with the carrier.
+type AddressCheckResult struct {
+	Deliverable bool
+	Reason      string
+	Reference   string
+}
+
+// ErrAddressCheckUnsupported: the carrier offers no address check; an
+// operator verifies the address instead.
+var ErrAddressCheckUnsupported = errors.New("carrier: address check not supported")
+
+// AddressChecker asks a carrier's address validation API.
+type AddressChecker interface {
+	CheckAddress(ctx context.Context, in AddressCheckInput) (AddressCheckResult, error)
 }

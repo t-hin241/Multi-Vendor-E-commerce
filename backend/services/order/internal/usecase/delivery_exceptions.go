@@ -146,6 +146,10 @@ func (uc *OrderUseCase) ApplyShipmentException(ctx context.Context, f ShipmentEx
 		if err := uc.noticeGoodsReturned(ctx, d, f.Type); err != nil {
 			return err
 		}
+		// PW-036: an intercepted cancellation continues as this case.
+		if err := uc.transferCancellation(ctx, d); err != nil {
+			return err
+		}
 		opened = d
 		return nil
 	})
@@ -416,6 +420,8 @@ type ReceiptInput struct {
 	Lines           []domain.ReceiptLine
 	Note            string
 	ExpectedVersion int64
+	// EvidenceIDs are the recorder's uploaded images (PW-038).
+	EvidenceIDs []string
 }
 
 // RecordGoodsReceipt records what came back for the current attempt: every
@@ -492,6 +498,9 @@ func (uc *OrderUseCase) RecordGoodsReceipt(ctx context.Context, actor SupportAct
 		g := &domain.GoodsReceipt{ExceptionID: d.ID, ShipmentID: d.CurrentShipmentID, Version: version, RecordedBy: actor.ID,
 			ActorRole: actor.Role, Note: note, Lines: in.Lines}
 		if err := uc.DeliveryExceptions.AddReceipt(ctx, g); err != nil {
+			return err
+		}
+		if err := uc.attachEvidence(ctx, actor.ID, EvidenceDeliveryException, d.ID, in.EvidenceIDs); err != nil {
 			return err
 		}
 		d.Receipt = g

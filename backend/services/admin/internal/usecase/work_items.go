@@ -25,7 +25,9 @@ func (s Service) WorkItems(ctx context.Context, adminID, authorization string, q
 		return nil, e
 	}
 	var calls []call
-	for _, owner := range []struct{ name, path string }{{"order", "/api/orders/admin/work-items"}, {"payment", "/api/payments/admin/work-items"}, {"shipment", "/api/shipments/admin/work-items"}} {
+	for _, owner := range []struct{ name, path string }{{"order", "/api/orders/admin/work-items"}, {"payment", "/api/payments/admin/work-items"}, {"shipment", "/api/shipments/admin/work-items"},
+		// PW-045: shop notices nobody received.
+		{"notification", "/api/notifications/admin/work-items"}} {
 		query := url.Values{}
 		for _, k := range []string{"status", "assignee_id", "limit"} {
 			if v := q.Get(k); v != "" {

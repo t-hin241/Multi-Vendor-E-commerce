@@ -22,6 +22,7 @@ var templates = map[Type]Template{
 	"sla_cancellation": {"v1", "Yêu cầu hủy đơn #%s cần được xử lý", "Yêu cầu hủy sau thanh toán đến hạn hoặc đã quá hạn. Mở /admin/cancellations?request_id=%s để quyết định. Thông báo này không hủy đơn và không hoàn tiền."},
 	"sla_interception": {"v1", "Yêu cầu dừng giao #%s cần được xử lý", "Yêu cầu đến hạn hoặc đã quá hạn. Mở /admin/fulfillment?shipment_id=%s để kiểm tra và liên hệ đơn vị vận chuyển."},
 
+	"sla_vendor_action":      {"v1", "Thông báo cho shop #%s chưa có người nhận", "Thông báo việc của shop chưa tới được ai (chủ shop bị khóa hoặc Vendor không trả lời). Mở /admin/notifications để kiểm tra và gửi lại. Mã sự kiện %s."},
 	"sla_delivery_exception": {"v1", "Hồ sơ giao hàng thất bại #%s cần được xử lý", "Hồ sơ đến hạn hoặc đã quá hạn. Mở /admin/delivery-exceptions?exception_id=%s để kiểm tra chứng cứ và quyết định giao lại hoặc hoàn tiền. Thông báo này không hoàn tiền và không tạo lần giao mới."},
 
 	TypeOrderPaid: {"v1", "Đơn hàng #%s đã được thanh toán",

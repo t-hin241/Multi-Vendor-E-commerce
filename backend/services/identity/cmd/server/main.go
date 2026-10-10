@@ -89,9 +89,13 @@ func main() {
 		log.Fatal().Msg("reset encryption configuration invalid")
 	}
 	transactions := repository.Transactions{Pool: dbPool}
-	authUseCase := usecase.NewAuthUseCase(userRepo, refreshTokenRepo, passwordResetRepo, jwtManager, log, transactions, tokenCipher)
+	// PW-022: email verification links travel like password reset links.
+	verifications := &usecase.EmailVerificationUseCase{Store: repository.EmailVerificationRepository{Pool: dbPool}, Users: userRepo,
+		Tx: transactions, Cipher: tokenCipher, Enabled: cfg.EmailVerification, Log: log}
+	authUseCase := usecase.NewAuthUseCase(userRepo, refreshTokenRepo, passwordResetRepo, jwtManager, log, transactions, tokenCipher).
+		WithEmailVerification(verifications)
 	jwtManager.SetVerifier(authUseCase.ValidateSession)
-	resetDelivery := &usecase.ResetDeliveryUseCase{Store: passwordResetRepo, Cipher: tokenCipher, Notifier: adapter.ResetNotifier{BaseURL: cfg.NotificationURL, Key: cfg.ResetDeliveryKey}, ResetURL: cfg.ResetURL, Log: log}
+	resetDelivery := &usecase.ResetDeliveryUseCase{Store: passwordResetRepo, Cipher: tokenCipher, Notifier: adapter.ResetNotifier{BaseURL: cfg.NotificationURL, Key: cfg.ResetDeliveryKey}, ResetURL: cfg.ResetURL, VerifyURL: cfg.VerifyURL, Log: log}
 	workerCtx, stopWorker := context.WithCancel(ctx)
 	workerDone := make(chan struct{})
 	go func() { defer close(workerDone); resetDelivery.Run(workerCtx) }()
@@ -102,8 +106,16 @@ func main() {
 	internalHandler := transport.NewInternalHandler(authUseCase, log)
 	// AF-19: admin bundles and reauthentication proofs; Identity's own admin
 	// routes use the same table-driven guard as the other services.
+	// PW-028: admin authenticator apps; required on reauthentication with
+	// FEATURE_ADMIN_MFA_REQUIRED.
+	totp := &usecase.TOTPUseCase{Store: repository.TOTPRepository{Pool: dbPool}, Users: userRepo, Tx: transactions, Issuer: "Shopee Multi Vendor", Log: log}
+	if len(cfg.MFAKey) > 0 {
+		if totp.Cipher, err = usecase.NewTokenCipher(cfg.MFAKey); err != nil {
+			log.Fatal().Msg("mfa encryption configuration invalid")
+		}
+	}
 	accessUseCase := &usecase.AccessUseCase{Store: repository.AccessRepository{Pool: dbPool}, Users: userRepo, Tx: transactions,
-		Scoped: cfg.ScopedAdminPermissions}
+		Scoped: cfg.ScopedAdminPermissions, SecondFactor: totp, MFARequired: cfg.MFARequired}
 	accessHandler := transport.NewAccessHandler(accessUseCase, log)
 	adminGuard := adminaccess.Guard(accessUseCase, transport.AdminRoutes, log)
 	go func() {
@@ -121,10 +133,13 @@ func main() {
 		}
 	}()
 
-	router := transport.NewRouter(cfg.Base.Env, log, jwtManager, authHandler, adminHandler, internalHandler, accessHandler, adminGuard, transport.Security{TrustedProxies: cfg.TrustedProxies, Origins: cfg.Origins, ServiceKey: cfg.ServiceKey, Services: cfg.Internal.Verifier, DeliveryKey: cfg.ResetDeliveryKey, RateKey: cfg.RateKey, Redis: redisClient}, resetDelivery,
+	security := transport.Security{TrustedProxies: cfg.TrustedProxies, Origins: cfg.Origins, ServiceKey: cfg.ServiceKey, Services: cfg.Internal.Verifier, DeliveryKey: cfg.ResetDeliveryKey, RateKey: cfg.RateKey, Redis: redisClient}
+	router := transport.NewRouter(cfg.Base.Env, log, jwtManager, authHandler, adminHandler, internalHandler, accessHandler, adminGuard, security, resetDelivery,
 		health.Checker{Name: "postgres", Ping: func(ctx context.Context) error { return dbPool.Ping(ctx) }},
 		health.Checker{Name: "redis", Ping: func(ctx context.Context) error { return redisClient.Ping(ctx).Err() }},
 	)
+	transport.RegisterEmailVerification(router, jwtManager, security, transport.EmailVerificationHandler{UseCase: verifications, Log: log})
+	transport.RegisterTOTP(router, jwtManager, security, transport.TOTPHandler{UseCase: totp, Log: log})
 
 	adminaudit.Register(router.Group("/api/auth/admin", middleware.RequireAuth(jwtManager), middleware.RequireRole("admin"), adminGuard), "/audit-events",
 		adminaudit.Source{Name: "identity", SQL: repository.AuditSearchSQL, DB: dbPool, Roles: adminUseCase}, log)

@@ -145,7 +145,8 @@ func (uc *OrderUseCase) OpenSupportAttachment(ctx context.Context, actor Support
 }
 
 // CleanSupportAttachments deletes uploads never attached after the grace
-// period and evidence of cases closed longer than the retention. The row
+// period, evidence of cases closed longer than the retention and receipt
+// photos older than ReceiptEvidenceRetention (PW-038). The row
 // becomes a tombstone first (so an upload attached meanwhile is kept), then
 // the object is removed; a failed removal leaves an unreachable object in
 // the private bucket and is logged for the operator.
@@ -161,6 +162,13 @@ func (uc *OrderUseCase) CleanSupportAttachments(ctx context.Context, limit int) 
 	expired, err := uc.Support.ListExpiredAttachments(ctx, now.Add(-uc.SupportConfig.AttachmentRetention), limit)
 	if err != nil {
 		return 0, err
+	}
+	if uc.ReceiptEvidence != nil {
+		receipts, err := uc.ReceiptEvidence.ExpiredReceiptEvidence(ctx, now.Add(-ReceiptEvidenceRetention), limit)
+		if err != nil {
+			return 0, err
+		}
+		expired = append(expired, receipts...)
 	}
 	deleted := 0
 	var errs []error

@@ -11,9 +11,12 @@ import (
 	"github.com/rs/zerolog"
 
 	"shopee/backend/pkg/apperror"
+	"shopee/backend/pkg/casesla"
+	"shopee/backend/pkg/config"
 	"shopee/backend/services/notification/internal/adapter"
 	"shopee/backend/services/notification/internal/domain"
 	"shopee/backend/services/notification/internal/repository"
+	"shopee/backend/services/notification/internal/transport"
 	"shopee/backend/services/notification/internal/usecase"
 )
 
@@ -304,5 +307,51 @@ func TestSupportNoticesHaveTheirOwnCategory(t *testing.T) {
 	e.resolve(t)
 	if n := e.count(t, `SELECT count(*) FROM notifications WHERE type = 'vendor_support_case_opened' AND user_id IN ($1, $2)`, e.owner, e.clerk); n != 2 {
 		t.Fatalf("owner and the opted-in clerk, got %d", n)
+	}
+}
+
+// PW-045: an event nobody may receive becomes an admin work item (AF-07)
+// in the same transaction; the retry ends it, and the deadline worker
+// tells the on-call admin as a notification recorded here.
+func TestVendorActionWithoutRecipientIsAWorkItem(t *testing.T) {
+	e := newShopEnv(t)
+	ctx := t.Context()
+	e.dir.list = []adapter.NoticeRecipient{{UserID: e.clerk, Role: "staff"}}
+	locked := e.record(t, "effect-locked-sla", "new_order")
+	e.resolve(t)
+	item := func() (stage string, active bool) {
+		t.Helper()
+		if err := e.pool.QueryRow(ctx, `SELECT payload->>'stage', active FROM case_sla_work_items WHERE resource_type = 'vendor_action' AND resource_id = $1`,
+			locked.ID).Scan(&stage, &active); err != nil {
+			t.Fatal(err)
+		}
+		return stage, active
+	}
+	if stage, active := item(); stage != "vendor_action_no_recipient" || !active {
+		t.Fatalf("no recipient is admin work: %s %v", stage, active)
+	}
+
+	onCall := uuid.NewString()
+	if _, err := e.pool.Exec(ctx, `UPDATE case_sla_work_items SET payload = jsonb_set(payload, '{reminder_at}', to_jsonb(now() - interval '1 minute')),
+		next_check_at = now() - interval '1 second' WHERE resource_id = $1`, locked.ID); err != nil {
+		t.Fatal(err)
+	}
+	worker := casesla.Worker{Store: casesla.Store{Pool: e.pool}, Owner: "notification", Config: config.CaseSLA{Enabled: true, OnCallIDs: []string{onCall}},
+		Roles: roles{}, Publisher: transport.SLANotices{UseCase: e.env.useCase(roles{})}, Log: zerolog.Nop(),
+		// A few seconds ahead: the database clock may run slightly ahead of
+		// the test's, and the outbox row is due at the database's now().
+		Now: func() time.Time { return time.Now().Add(5 * time.Second) }}
+	if err := worker.Tick(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if e.count(t, `SELECT count(*) FROM notifications WHERE user_id = $1 AND type = 'sla_vendor_action' AND reference_id = $2`, onCall, locked.ID) != 1 {
+		t.Fatal("the on-call admin is reminded")
+	}
+
+	if _, err := e.useCase(roles{}).Retry(ctx, uuid.NewString(), locked.ID, "owner unlocked"); err != nil {
+		t.Fatal(err)
+	}
+	if _, active := item(); active {
+		t.Fatal("the retry ends the work item")
 	}
 }

@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import * as api from "@/lib/api-client";
 import { ApiError } from "@/lib/api-client";
 import { useAuth } from "@/lib/auth-context";
+import { carrierCheckNote } from "@/lib/return-destinations";
 
 // ReturnDestinationReview lets an admin verify the address a shop chose
 // for returned goods (AF-05). Approved returns only send buyers to a
@@ -61,6 +62,7 @@ export function ReturnDestinationReview({ vendorId }: { vendorId: string }) {
             v{d.version} · {d.verified ? "verified" : "not verified"}
             {d.rejection_reason && ` · ${d.rejection_reason}`}
           </p>
+          {carrierCheckNote(d) && <p className="text-muted-foreground">{carrierCheckNote(d)}</p>}
           {!d.verified && (
             <div className="flex gap-2">
               <ReasonDialog

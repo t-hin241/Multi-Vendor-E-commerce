@@ -151,6 +151,9 @@ export type User = {
   email: string;
   full_name: string;
   role: Role;
+  // PW-022: the account confirmed it owns its email (absent from older
+  // Identity responses).
+  email_verified?: boolean;
 };
 
 export type AuthResult = {
@@ -196,6 +199,19 @@ export function confirmPasswordReset(
     method: "POST",
     json: { token, new_password: newPassword },
   });
+}
+
+// PW-022: email verification. The confirmation carries the token in the
+// body only; a resend goes to the signed-in account's own address.
+export function confirmEmailVerification(token: string): Promise<{ verified: boolean }> {
+  return request("/api/auth/email-verifications/confirmations", {
+    method: "POST",
+    json: { token },
+  });
+}
+
+export function resendEmailVerification(accessToken: string): Promise<{ sent: boolean }> {
+  return request("/api/auth/email-verifications", { method: "POST", token: accessToken });
 }
 
 // ---------- Admin: users ----------
@@ -473,6 +489,9 @@ export type RestockRequest = {
   rejection_reason?: string;
   created_at: string;
   decided_at?: string;
+  // PW-027: a large request approved once, waiting for a second admin.
+  first_approved_at?: string;
+  first_approved_by?: string;
 };
 
 export function requestRestock(
@@ -2144,13 +2163,80 @@ export function reportShipmentFailure(
   token: string,
   scope: "vendor" | "admin",
   shipmentId: string,
-  input: { kind: "returned" | "lost"; reason: string; expected_version: number },
+  input: {
+    kind: "returned" | "lost";
+    reason: string;
+    expected_version: number;
+    evidence_ids?: string[];
+  },
 ): Promise<Shipment> {
   const path =
     scope === "vendor"
       ? `/api/shipments/${shipmentId}/failure-reports`
       : `/api/shipments/admin/shipments/${shipmentId}/failure-reports`;
   return shipmentAction(token, path, input);
+}
+
+// Shipment evidence (PW-038): photos or a video proving a failure report
+// (the carrier's loss confirmation), kept by Shipment. A file is uploaded
+// for one shipment and cited by the report (evidence_ids).
+export type ShipmentEvidence = {
+  id: string;
+  content_type: "image/jpeg" | "image/png" | "video/mp4";
+  size_bytes: number;
+  state: "uploaded" | "attached";
+  report_kind?: "lost" | "returned";
+  owner_role: "vendor" | "admin";
+  created_at: string;
+};
+
+function shipmentEvidencePath(scope: "vendor" | "admin", shipmentId: string) {
+  return scope === "vendor"
+    ? `/api/shipments/${shipmentId}/evidence`
+    : `/api/shipments/admin/shipments/${shipmentId}/evidence`;
+}
+
+export function uploadShipmentEvidence(
+  token: string,
+  scope: "vendor" | "admin",
+  shipmentId: string,
+  file: File,
+): Promise<ShipmentEvidence> {
+  const form = new FormData();
+  form.append("file", file);
+  return request<ShipmentEvidence>(shipmentEvidencePath(scope, shipmentId), {
+    method: "POST",
+    token,
+    form,
+  });
+}
+
+export function listShipmentEvidence(
+  token: string,
+  scope: "vendor" | "admin",
+  shipmentId: string,
+): Promise<ShipmentEvidence[]> {
+  return request<ShipmentEvidence[]>(shipmentEvidencePath(scope, shipmentId), { token });
+}
+
+export async function fetchShipmentEvidence(
+  token: string,
+  scope: "vendor" | "admin",
+  shipmentId: string,
+  evidenceId: string,
+): Promise<Blob> {
+  const res = await fetch(
+    `${API_BASE_URL}${shipmentEvidencePath(scope, shipmentId)}/${evidenceId}`,
+    {
+      headers: { Authorization: `Bearer ${token}` },
+      credentials: "include",
+      cache: "no-store",
+    },
+  );
+  if (!res.ok) {
+    throw new ApiError(res.status, "evidence_unavailable", "Không tải được tệp chứng cứ.");
+  }
+  return res.blob();
 }
 
 // resolveInterception records the carrier's answer after calling it.
@@ -3275,6 +3361,45 @@ export function uploadSupportAttachment(
   });
 }
 
+// Receipt evidence (PW-038): images of a return's receipt or lost parcel,
+// and of a failed delivery's receipt, for the shop and admins.
+export type ReceiptEvidenceKind = "return" | "delivery_exception";
+
+function receiptEvidencePath(scope: "vendor" | "admin", kind: ReceiptEvidenceKind, refId: string) {
+  const resource = kind === "return" ? "return-requests" : "delivery-exceptions";
+  return `/api/orders/${scope}/${resource}/${refId}/evidence`;
+}
+
+export function listReceiptEvidence(
+  token: string,
+  scope: "vendor" | "admin",
+  kind: ReceiptEvidenceKind,
+  refId: string,
+): Promise<SupportAttachment[]> {
+  return request<SupportAttachment[]>(receiptEvidencePath(scope, kind, refId), { token });
+}
+
+export async function fetchReceiptEvidence(
+  token: string,
+  scope: "vendor" | "admin",
+  kind: ReceiptEvidenceKind,
+  refId: string,
+  attachmentId: string,
+): Promise<Blob> {
+  const res = await fetch(
+    `${API_BASE_URL}${receiptEvidencePath(scope, kind, refId)}/${attachmentId}`,
+    {
+      headers: { Authorization: `Bearer ${token}` },
+      credentials: "include",
+      cache: "no-store",
+    },
+  );
+  if (!res.ok) {
+    throw new ApiError(res.status, "attachment_unavailable", "Không tải được ảnh.");
+  }
+  return res.blob();
+}
+
 // fetchSupportAttachment reads a private evidence image with the caller's
 // token (an <img src> cannot send it); the caller shows it from a blob URL.
 export async function fetchSupportAttachment(
@@ -3762,9 +3887,111 @@ export function revokeAdminPermission(
 // one-time proof valid for five minutes. The password is never stored.
 export function reauthenticate(
   token: string,
-  input: { password: string; purpose: string; operation_hash: string },
+  input: { password: string; purpose: string; operation_hash: string; otp_code?: string },
 ): Promise<{ proof: string; expires_at: string }> {
   return request("/api/auth/reauthentications", { method: "POST", token, json: input });
+}
+
+// PW-032: reimbursements outside a capture (marketplace funds).
+export type ReimbursementReason = "return_shipping_fee" | "goodwill" | "other";
+export type Reimbursement = {
+  id: string;
+  order_id: string;
+  buyer_id: string;
+  reason_code: ReimbursementReason;
+  reason: string;
+  amount: number;
+  currency: string;
+  status: "requested" | "approved" | "paid" | "rejected";
+  requested_by: string;
+  decided_by?: string;
+  decision_reason?: string;
+  destination_masked?: string;
+  bank_reference?: string;
+  paid_at?: string;
+  version: number;
+  created_at: string;
+};
+
+export const REIMBURSEMENT_DECIDE_PURPOSE = "payment.reimbursement.decide";
+
+export function reimbursementDecisionRef(id: string, version: number, approve: boolean): string {
+  return `reimbursement:${id}:v${version}:${approve ? "approve" : "reject"}`;
+}
+
+export function listReimbursements(token: string, status = ""): Promise<Reimbursement[]> {
+  return request<Reimbursement[]>("/api/payments/admin/reimbursements", {
+    token,
+    query: { status: status || undefined },
+  });
+}
+
+export function createReimbursement(
+  token: string,
+  input: {
+    order_id: string;
+    reason_code: ReimbursementReason;
+    reason: string;
+    amount: number;
+    currency: string;
+  },
+  idempotencyKey: string,
+): Promise<Reimbursement> {
+  return request<Reimbursement>("/api/payments/admin/reimbursements", {
+    method: "POST",
+    token,
+    headers: { "Idempotency-Key": idempotencyKey },
+    json: input,
+  });
+}
+
+export function decideReimbursement(
+  token: string,
+  id: string,
+  input: {
+    decision: "approve" | "reject";
+    reason: string;
+    expected_version: number;
+    proof?: string;
+  },
+): Promise<Reimbursement> {
+  return request<Reimbursement>(`/api/payments/admin/reimbursements/${id}/decisions`, {
+    method: "POST",
+    token,
+    json: input,
+  });
+}
+
+export function payReimbursement(
+  token: string,
+  id: string,
+  input: { bank_reference: string; expected_version: number },
+): Promise<Reimbursement> {
+  return request<Reimbursement>(`/api/payments/admin/reimbursements/${id}/payments`, {
+    method: "POST",
+    token,
+    json: input,
+  });
+}
+
+// PW-028: the admin's authenticator app (second factor of reauthentication).
+export type MFAStatus = {
+  enrolled: boolean;
+  recovery_codes_left: number;
+  enrollment_possible: boolean;
+};
+export type TOTPEnrollment = { secret: string; otpauth_uri: string };
+
+export function getMFAStatus(token: string): Promise<MFAStatus> {
+  return request<MFAStatus>("/api/auth/mfa", { token });
+}
+
+export function startTOTP(token: string): Promise<TOTPEnrollment> {
+  return request<TOTPEnrollment>("/api/auth/mfa/totp", { method: "POST", token });
+}
+
+export function confirmTOTP(token: string, code: string): Promise<{ recovery_codes: string[] }> {
+  return request("/api/auth/mfa/totp/confirmations", { method: "POST", token, json: { code } });
 }
 
 export type ApprovalKind = "refund_resolution" | "payout_item_resolution" | "settlement_adjustment";
@@ -4208,7 +4435,9 @@ export type CancellationStatus =
   | "refund_pending"
   | "resolved"
   | "rejected"
-  | "needs_review";
+  | "needs_review"
+  // PW-036: intercepted after handover, continued as a failed-delivery case.
+  | "transferred";
 
 export type CancellationRequest = {
   id: string;
@@ -4230,6 +4459,8 @@ export type CancellationRequest = {
   decision_reason?: string;
   review_reason?: string;
   resolved_at?: string;
+  interception_requested_at?: string;
+  delivery_exception_id?: string;
   action_due_at?: string;
   waiting_on?: string;
   version: number;
@@ -4306,7 +4537,7 @@ export function decideCancellation(
   token: string,
   id: string,
   input: {
-    decision: "approve" | "reject" | "retry_refund";
+    decision: "approve" | "reject" | "retry_refund" | "intercept";
     reason: string;
     expected_version: number;
     restock?: boolean;
@@ -4448,6 +4679,7 @@ export function recordGoodsReceipt(
     received_lines: { item_id: string; quantity: number; condition: GoodsCondition }[];
     note?: string;
     expected_version: number;
+    evidence_ids?: string[];
   },
 ): Promise<DeliveryException> {
   return request<DeliveryException>(`/api/orders/${scope}/delivery-exceptions/${id}/receipts`, {
@@ -4542,6 +4774,7 @@ export function recordReturnGoodsReceipt(
     missing_quantity: number;
     note?: string;
     expected_version: number;
+    evidence_ids?: string[];
   },
 ): Promise<ReturnRequest> {
   return request<ReturnRequest>(`/api/orders/${scope}/return-requests/${returnId}/goods-receipts`, {
@@ -4578,7 +4811,11 @@ export function authorizeReturnShipping(
 export function decideReturnShipping(
   token: string,
   returnId: string,
-  input: { action: "refund" | "mark_lost"; reason: string; expected_version: number },
+  input: {
+    action: "refund" | "mark_lost" | "refund_lost";
+    reason: string;
+    expected_version: number;
+  },
 ): Promise<ReturnRequest> {
   return request<ReturnRequest>(
     `/api/orders/admin/return-requests/${returnId}/shipping-decisions`,
@@ -4587,6 +4824,25 @@ export function decideReturnShipping(
       token,
       json: input,
     },
+  );
+}
+
+// correctReturnReceipt (PW-042): an admin's new receipt version for a
+// disputed return; the sellable count is fixed once restocked.
+export function correctReturnReceipt(
+  token: string,
+  returnId: string,
+  input: {
+    sellable_quantity: number;
+    damaged_quantity: number;
+    missing_quantity: number;
+    note: string;
+    expected_version: number;
+  },
+): Promise<ReturnRequest> {
+  return request<ReturnRequest>(
+    `/api/orders/admin/return-requests/${returnId}/receipt-corrections`,
+    { method: "POST", token, json: input },
   );
 }
 
@@ -4605,6 +4861,14 @@ export type ReturnDestination = {
   verified_at?: string;
   rejection_reason?: string;
   updated_at: string;
+  // PW-042: verified by the carrier's address check, not a person, and the
+  // carrier's answer for this version.
+  verified_by_carrier?: boolean;
+  carrier_check?: {
+    result: "deliverable" | "undeliverable" | "unsupported";
+    reason?: string;
+    checked_at: string;
+  };
 };
 
 export function getReturnDestination(token: string, vendorId: string): Promise<ReturnDestination> {

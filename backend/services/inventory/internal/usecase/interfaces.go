@@ -33,6 +33,7 @@ type RestockRequestRepositoryPort interface {
 	ListByStatus(ctx context.Context, status string, limit, offset int) ([]*domain.RestockRequest, error)
 	ListByVendor(ctx context.Context, vendorID string, limit, offset int) ([]*domain.RestockRequest, error)
 	UpdateStatus(ctx context.Context, id string, status domain.RestockStatus, adminUserID string, reason *string) error
+	RecordFirstApproval(ctx context.Context, id, adminUserID string) error
 }
 
 // VendorGateway lets the use case check vendor approval without owning any

@@ -19,6 +19,9 @@ func TestRuleReadinessOnlyForEnforcedRules(t *testing.T) {
 		{domain.RuleReturnsWindow, "7 days", false},
 		{domain.RuleReturnShippingRefund, "none", true},
 		{domain.RuleReturnShippingRefund, "seller-fault-outbound", false},
+		{domain.RuleReturnShipDeadline, "ship-7d", true},
+		{domain.RuleReturnShipDeadline, "ship-61d", false},
+		{domain.RuleReturnShipDeadline, "7", false},
 		{"payment.settlement", "v1", false},
 	}
 	for _, tc := range cases {
@@ -78,5 +81,22 @@ func TestBuildPolicySnapshot(t *testing.T) {
 	active["returns"] = domain.PolicyVersion{Kind: "returns", Version: 4, RuleRefs: map[string]string{domain.RuleReturnsWindow: "window-14d", domain.RuleReturnShippingRefund: "buyer-friendly"}}
 	if _, err := domain.BuildPolicySnapshot(active, fallback, at); err == nil {
 		t.Fatal("a returns policy citing an unenforced rule can never be snapshotted")
+	}
+}
+
+// PW-007: a returns policy may cite the dispatch deadline; the vendor order
+// keeps it, and an unenforced value is refused.
+func TestPolicySnapshotKeepsTheDispatchDeadline(t *testing.T) {
+	at := time.Date(2026, 10, 7, 0, 0, 0, 0, time.UTC)
+	active := map[string]domain.PolicyVersion{"returns": {PolicyID: "r", Kind: "returns", Version: 5, ContentHash: "h",
+		RuleRefs: map[string]string{domain.RuleReturnsWindow: "window-7d", domain.RuleReturnShippingRefund: "none", domain.RuleReturnShipDeadline: "ship-3d"}}}
+	s, err := domain.BuildPolicySnapshot(active, domain.ReturnPolicy{Version: "window-7d", WindowDays: 7}, at)
+	if err != nil || s.ReturnShipDays != 3 || s.Rules[domain.RuleReturnShipDeadline] != "ship-3d" || s.ForVendor(nil).ReturnShipDays != 3 {
+		t.Fatalf("dispatch deadline: %v %+v", err, s)
+	}
+	bad := domain.PolicyVersion{PolicyID: "r2", Scope: "marketplace", Kind: "returns", Version: 6, ContentHash: "h", EffectiveAt: at,
+		RuleRefs: map[string]string{domain.RuleReturnsWindow: "window-7d", domain.RuleReturnShippingRefund: "none", domain.RuleReturnShipDeadline: "ship-90d"}}
+	if err := domain.ValidatePolicyVersion(bad); err == nil {
+		t.Fatal("an unenforced dispatch deadline is refused")
 	}
 }

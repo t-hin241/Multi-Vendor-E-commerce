@@ -239,3 +239,16 @@ Người dùng không bị đăng xuất: gặp 401, frontend tự refresh một
 ## Quyền admin theo bundle và phê duyệt hai người (AF-19)
 
 Xem `deploy/admin-permissions-runbook.md`: migration, cờ `FEATURE_ADMIN_SCOPED_PERMISSIONS_ENABLED`, lệnh `bootstrap-access`, luồng phê duyệt và rollback.
+
+## Xác minh email (PW-022, 2026-10-10)
+
+- `FEATURE_EMAIL_VERIFICATION_ENABLED=true` cùng `IDENTITY_EMAIL_VERIFY_URL` (trang `/verify-email`, HTTPS ở staging/production): tài khoản mới nhận liên kết xác nhận (48 giờ, dùng một lần, gửi qua hàng đợi `password_reset_deliveries` với `kind = email_verification`, Notification gửi email "Confirm your email address"). Người dùng đã đăng nhập gửi lại bằng `POST /api/auth/email-verifications` (một phút một lần).
+- Vendor `FEATURE_STAFF_REQUIRES_VERIFIED_EMAIL=true`: chỉ tài khoản đã xác nhận email mới nhận được lời mời nhân viên (403 `email_not_verified`, trang lời mời có nút gửi lại). Bật sau khi Identity đã bật xác minh và báo trước cho người được mời; tài khoản cũ chưa xác minh cho tới khi tự mở liên kết.
+- Migration `000006`; down từ chối khi đã có email được xác minh hoặc liên kết đã phát.
+
+## Xác thực hai bước cho admin (PW-028, 2026-10-10)
+
+- `IDENTITY_MFA_ENCRYPTION_KEY` (base64 32 byte, lấy từ secret store, không ghi vào file) bật việc đăng ký authenticator ở `/admin/security`; secret mã hoá AES-GCM, mã khôi phục (8 mã) chỉ lưu hash.
+- `FEATURE_ADMIN_MFA_REQUIRED=true`: mọi xác thực lại cho thao tác tiền (AF-19) cần mật khẩu và mã 6 số (hoặc một mã khôi phục); mỗi mã dùng một lần. Admin chưa đăng ký nhận 403 `mfa_enrollment_required`. Trước khi bật: mọi admin tài chính đã đăng ký và cất mã khôi phục.
+- Mất điện thoại và hết mã khôi phục: chưa có thao tác đặt lại qua giao diện; admin nền tảng xoá dòng `admin_totp` của người đó (có ghi release record) để họ đăng ký lại.
+- Migration `000007`; down từ chối khi đã có admin đăng ký.

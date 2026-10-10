@@ -81,3 +81,9 @@ Không có thao tác sửa `reserved_quantity` trực tiếp. Lệch số reserv
 - Không chạy migration down `000005`: nó xóa operation, outbox và audit, làm mất bằng chứng terminal state. Không hoàn tác tồn kho bằng migration.
 - Migration down `000006` chỉ xóa bảng kiểm kê; movement `stock_count` vẫn còn trong sổ.
 - Image Order cũ không kiểm tra receipt, image Inventory cũ không có state machine. Rollback Order trước Inventory, và chỉ khi đã chấp nhận mất các bảo vệ này.
+
+## Duyệt hai người cho nhập kho lớn (PW-027)
+
+- `INVENTORY_RESTOCK_SECOND_APPROVAL_QUANTITY` (mặc định `0` = tắt): yêu cầu nhập kho từ số lượng này trở lên cần hai admin khác nhau. Lần duyệt đầu chỉ ghi người duyệt (`first_approved_by`), yêu cầu vẫn `pending` và kho không đổi; lần duyệt của admin thứ hai mới cộng kho. Người duyệt đầu bấm lại nhận 409 `self_approval`; DB cũng chặn một người là cả hai người duyệt.
+- Migration `000009`: down từ chối khi đã có yêu cầu mang lần duyệt đầu.
+- Việc chưa quyết: có đưa tạo lô payout vào phê duyệt hay không (Payment).

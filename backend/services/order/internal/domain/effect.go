@@ -39,6 +39,9 @@ const (
 	// AF-08: tell a shop it has work (Notification resolves who). Target
 	// is "<action_kind>:<reference>", so each fact is told once.
 	EffectNotifyVendor EffectKind = "notify_vendor"
+	// PW-036: ask Shipment to intercept a cancelled package already handed
+	// over (target: the cancellation request id).
+	EffectInterceptShipment EffectKind = "intercept_shipment"
 )
 
 // RejectedOutcomePayload is what a report_rejected_outcome effect sends.
@@ -87,6 +90,9 @@ type VendorNoticePayload struct {
 	VendorOrderID string `json:"vendor_order_id"`
 	ActionKind    string `json:"action_kind"`
 	ReferenceID   string `json:"reference_id"`
+	// Backfill: queued for work already open when the notices were turned
+	// on (PW-045), not by the transition itself.
+	Backfill bool `json:"backfill,omitempty"`
 }
 
 // NewVendorNoticeEffect tells the shop of vendorOrderID about one piece of

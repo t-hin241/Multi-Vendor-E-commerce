@@ -132,6 +132,8 @@ type reauthRequest struct {
 	Password      string `json:"password" binding:"required,max=200"`
 	Purpose       string `json:"purpose" binding:"required,max=64"`
 	OperationHash string `json:"operation_hash" binding:"required,max=200"`
+	// OTPCode (PW-028): the authenticator code, or a recovery code.
+	OTPCode string `json:"otp_code" binding:"omitempty,max=20"`
 }
 
 // Reauthenticate re-checks the password and returns a one-time proof.
@@ -143,7 +145,7 @@ func (h *AccessHandler) Reauthenticate(c *gin.Context) {
 		httpresponse.Error(c, http.StatusBadRequest, "validation_error", "password, purpose and operation_hash are required")
 		return
 	}
-	proof, err := h.access.Reauthenticate(c.Request.Context(), middleware.GetUserID(c), req.Password, req.Purpose, req.OperationHash)
+	proof, err := h.access.Reauthenticate(c.Request.Context(), middleware.GetUserID(c), req.Password, req.Purpose, req.OperationHash, req.OTPCode)
 	if err != nil {
 		httpresponse.HandleError(c, h.log, err)
 		return

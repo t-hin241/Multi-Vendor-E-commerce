@@ -299,3 +299,81 @@ func TestCancellationAfterHandoverAndFailedRefundNeedReview(t *testing.T) {
 		t.Fatal("a refund retry never restocks again")
 	}
 }
+
+type interceptShipment struct {
+	mu     sync.Mutex
+	result string
+	ops    []string
+}
+
+func (s *interceptShipment) InterceptFulfillment(_ context.Context, _, operationID string) (string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.ops = append(s.ops, operationID)
+	return s.result, nil
+}
+
+// PW-036: a package handed over before the cancellation was decided is
+// intercepted at the carrier; when it comes back as a failed delivery the
+// request is transferred to that case (final, linked, its hold released)
+// and the case resolves the goods and the refund.
+func TestHandedOverCancellationIsInterceptedAndTransferred(t *testing.T) {
+	pool := orderDB(t)
+	ctx := t.Context()
+	f := newCancelFixture(t, pool)
+	f.uc.DeliveryExceptions = repository.DeliveryExceptionRepository{Pool: pool}
+	interceptor := &interceptShipment{result: "requested"}
+	f.uc.Interceptions = interceptor
+	f.stops.result = domain.StopHandedOver
+	repo := repository.CancellationRepository{Pool: pool}
+	c, err := f.request(ctx, "buyer", f.buyer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runDue(t, pool, f.uc)
+	c, _ = repo.FindByID(ctx, c.ID)
+	if _, err := f.uc.DecideCancellation(ctx, f.admin, c.ID, usecase.CancellationDecision{Decision: "intercept", Reason: "x", ExpectedVersion: c.Version}); err == nil {
+		t.Fatal("a request not handed over cannot be intercepted")
+	}
+	if _, err := f.uc.DecideCancellation(ctx, f.admin, c.ID, usecase.CancellationDecision{Decision: "approve", Reason: "ok", ExpectedVersion: c.Version}); err != nil {
+		t.Fatal(err)
+	}
+	runDue(t, pool, f.uc)
+	c, _ = repo.FindByID(ctx, c.ID)
+	if c.Status != domain.CancelNeedsReview {
+		t.Fatalf("handed over: review, got %s", c.Status)
+	}
+	intercepted, err := f.uc.DecideCancellation(ctx, f.admin, c.ID, usecase.CancellationDecision{Decision: "intercept", Reason: "Buyer still wants to cancel",
+		ExpectedVersion: c.Version})
+	if err != nil || intercepted.InterceptionRequestedAt == nil {
+		t.Fatalf("intercept: %+v %v", intercepted, err)
+	}
+	runDue(t, pool, f.uc)
+	if len(interceptor.ops) != 1 || interceptor.ops[0] != "cancellation:"+c.ID {
+		t.Fatalf("Shipment asked once with the request: %v", interceptor.ops)
+	}
+	if _, err := f.uc.DecideCancellation(ctx, f.admin, c.ID, usecase.CancellationDecision{Decision: "intercept", Reason: "again",
+		ExpectedVersion: intercepted.Version}); err == nil {
+		t.Fatal("one interception per request")
+	}
+
+	shipment := uuid.NewString()
+	if err := f.uc.ApplyShipmentException(ctx, usecase.ShipmentExceptionFact{EventID: uuid.NewString(), ShipmentID: shipment, VendorOrderID: f.vendorOrder,
+		Type: domain.FactReturned, AttemptNo: 1, Reason: "Intercepted for cancellation:" + c.ID}); err != nil {
+		t.Fatal(err)
+	}
+	c, _ = repo.FindByID(ctx, c.ID)
+	if c.Status != domain.CancelTransferred || c.DeliveryExceptionID == nil {
+		t.Fatalf("transferred to the failed-delivery case: %+v", c)
+	}
+	if c.HoldStatus != nil && *c.HoldStatus != domain.HoldReleasing && *c.HoldStatus != domain.HoldReleased {
+		t.Fatalf("the request's hold is released, got %v", *c.HoldStatus)
+	}
+	if n := countRowsIn(t, pool, `SELECT count(*) FROM delivery_exceptions WHERE id = $1 AND vendor_order_id = $2 AND status = 'awaiting_goods'`,
+		*c.DeliveryExceptionID, f.vendorOrder); n != 1 {
+		t.Fatal("the case waits for the shop to record the goods")
+	}
+	if open, err := repo.FindOpen(ctx, f.vendorOrder); err != nil || open != nil {
+		t.Fatalf("a transferred request is no longer open: %+v %v", open, err)
+	}
+}

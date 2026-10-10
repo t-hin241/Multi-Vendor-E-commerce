@@ -25,11 +25,49 @@ type ReturnDestination struct {
 	UpdatedAt       time.Time
 	// Address is the designated address as it is now.
 	Address *VendorAddress
+	// CarrierCheck is the carrier's last address check (PW-042).
+	CarrierCheck *CarrierAddressCheck
 }
 
-// Verified: an admin checked this exact version.
+// Carrier address check results (PW-042).
+const (
+	CarrierDeliverable   = "deliverable"
+	CarrierUndeliverable = "undeliverable"
+	CarrierUnsupported   = "unsupported"
+)
+
+// CarrierAddressCheck is the carrier's answer for one destination version.
+type CarrierAddressCheck struct {
+	Version   int64
+	Result    string
+	Reason    *string
+	Reference *string
+	CheckedAt time.Time
+}
+
+// Verified: an admin, or the carrier's address check, checked this exact
+// version.
 func (d *ReturnDestination) Verified() bool {
 	return d.VerifiedVersion != nil && *d.VerifiedVersion == d.Version
+}
+
+// VerifiedByCarrier: the current version was verified by the carrier's
+// address check, not by a person.
+func (d *ReturnDestination) VerifiedByCarrier() bool {
+	return d.Verified() && d.VerifiedBy == nil
+}
+
+// CurrentCarrierCheck is the carrier's check of the current version.
+func (d *ReturnDestination) CurrentCarrierCheck() *CarrierAddressCheck {
+	if d.CarrierCheck == nil || d.CarrierCheck.Version != d.Version {
+		return nil
+	}
+	return d.CarrierCheck
+}
+
+// AwaitsDecision: nobody verified or rejected the current version.
+func (d *ReturnDestination) AwaitsDecision() bool {
+	return !d.Verified() && d.RejectionReason == nil
 }
 
 // ValidateReceivingHours: when the shop accepts parcels, shown to buyers.

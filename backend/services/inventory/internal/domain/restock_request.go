@@ -32,8 +32,18 @@ type RestockRequest struct {
 	RejectionReason   *string
 	DecidedBy         *string
 	DecidedAt         *time.Time
-	CreatedAt         time.Time
-	UpdatedAt         time.Time
+	// FirstApprovedBy (PW-027): the first of two admins a large request
+	// needs; the stock moves on the second, different admin's approval.
+	FirstApprovedBy *string
+	FirstApprovedAt *time.Time
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
+}
+
+// NeedsSecondApproval reports whether a request of this size needs two
+// admins (threshold 0: never).
+func (r *RestockRequest) NeedsSecondApproval(threshold int64) bool {
+	return threshold > 0 && r.RequestedQuantity >= threshold
 }
 
 // CanTransitionRestock enforces that only a pending request can be decided.

@@ -120,7 +120,7 @@ func (h *OpsHandler) FailureReport(c *gin.Context) {
 		return
 	}
 	s, err := h.shipments.ReportFailure(c.Request.Context(), admin(c), c.Param("id"),
-		usecase.FailureReport{Kind: req.Kind, Reason: req.Reason, ExpectedVersion: req.ExpectedVersion})
+		usecase.FailureReport{Kind: req.Kind, Reason: req.Reason, ExpectedVersion: req.ExpectedVersion, EvidenceIDs: req.EvidenceIDs})
 	h.respond(c, s, err)
 }
 

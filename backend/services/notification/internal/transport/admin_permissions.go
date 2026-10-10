@@ -13,4 +13,4 @@ var AdminRoutes = adminaccess.Routes{
 	"GET /api/notifications/admin/vendor-actions":            adminaccess.SupportManage,
 	"GET /api/notifications/admin/vendor-actions/summary":    adminaccess.SupportManage,
 	"POST /api/notifications/admin/vendor-actions/:id/retry": adminaccess.SupportManage,
-}.Merge(adminaccess.Shared("/api/notifications/admin", true, false, true))
+}.Merge(adminaccess.Shared("/api/notifications/admin", true, true, true))

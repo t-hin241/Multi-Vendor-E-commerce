@@ -23,6 +23,9 @@ type Operations struct {
 	Transactions Transactions
 	Identity     Identity
 	Audit        Audit
+	// SecondApprovalQuantity (PW-027): restock requests of at least this
+	// many units need two different admins; 0 turns it off.
+	SecondApprovalQuantity int64
 }
 
 // audit fails closed: without an audit store an admin decision is refused.

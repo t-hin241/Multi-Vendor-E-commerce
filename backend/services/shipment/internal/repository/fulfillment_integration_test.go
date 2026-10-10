@@ -509,3 +509,54 @@ func TestAddressRetentionAndOperationsView(t *testing.T) {
 		t.Fatalf("a paid package not shipped for days must show up: %+v %v", ops, err)
 	}
 }
+
+// PW-036: a package handed over before a paid cancellation was decided is
+// intercepted for that request; when the carrier accepts, Order is told
+// the goods are coming back (exception "returned"), once. A plain order
+// cancellation's interception tells nothing more than before.
+func TestInterceptionForACancellationReportsTheGoodsComingBack(t *testing.T) {
+	e := newEnv(t, false)
+	ctx := t.Context()
+	e.uc.DeliveryResolution = true
+	vendor := usecase.Actor{ID: e.userA, Role: domain.ActorVendor}
+	admin := usecase.Actor{ID: uuid.NewString(), Role: domain.ActorAdmin}
+
+	s := e.paidShipment(t)
+	if r, err := e.uc.InterceptFulfillment(ctx, s.VendorOrderID, "cancellation:req-1"); err != nil || r != usecase.InterceptNotHandedOff {
+		t.Fatalf("nothing to intercept before handover: %q %v", r, err)
+	}
+	if _, err := e.uc.MarkShipped(ctx, vendor, s.ID, "TRACK-PW036"); err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		if r, err := e.uc.InterceptFulfillment(ctx, s.VendorOrderID, "cancellation:req-1"); err != nil || r != usecase.InterceptRequested {
+			t.Fatalf("interception requested: %q %v", r, err)
+		}
+	}
+	if e.count(t, `SELECT count(*) FROM shipments WHERE id = $1 AND status = 'interception_requested' AND intercept_operation = 'cancellation:req-1'`, s.ID) != 1 {
+		t.Fatal("the interception keeps the request it serves")
+	}
+	if _, err := e.uc.ResolveInterception(ctx, admin, s.ID, true, "Carrier stopped it at the hub"); err != nil {
+		t.Fatal(err)
+	}
+	if e.count(t, `SELECT count(*) FROM shipment_outbox WHERE shipment_id = $1 AND event_type = 'exception_returned'`, s.ID) != 1 {
+		t.Fatal("Order learns the goods are coming back")
+	}
+	if r, err := e.uc.InterceptFulfillment(ctx, s.VendorOrderID, "cancellation:req-1"); err != nil || r != usecase.InterceptIntercepted {
+		t.Fatalf("a repeat answers intercepted: %q %v", r, err)
+	}
+
+	plain := e.paidShipment(t)
+	if _, err := e.uc.MarkShipped(ctx, vendor, plain.ID, "TRACK-PW036-2"); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.uc.CancelForVendorOrder(ctx, plain.VendorOrderID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.uc.ResolveInterception(ctx, admin, plain.ID, true, "Stopped"); err != nil {
+		t.Fatal(err)
+	}
+	if e.count(t, `SELECT count(*) FROM shipment_outbox WHERE shipment_id = $1 AND event_type LIKE 'exception_%'`, plain.ID) != 0 {
+		t.Fatal("a plain order cancellation reports no exception")
+	}
+}

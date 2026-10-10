@@ -20,6 +20,7 @@ const STATUS_OPTIONS = [
   "refund_pending",
   "resolved",
   "rejected",
+  "transferred",
   "",
 ] as const;
 
@@ -60,7 +61,10 @@ function CancellationCard({ request: r }: { request: api.CancellationRequest }) 
   const [error, setError] = useState<unknown>(null);
   const [restock, setRestock] = useState(r.origin === "buyer");
 
-  async function decide(decision: "approve" | "reject" | "retry_refund", reason: string) {
+  async function decide(
+    decision: "approve" | "reject" | "retry_refund" | "intercept",
+    reason: string,
+  ) {
     setError(null);
     try {
       await callWithAuth((t) =>
@@ -106,6 +110,17 @@ function CancellationCard({ request: r }: { request: api.CancellationRequest }) 
         )}
         {r.stop_result && <p>Shipment: {r.stop_result.replace(/_/g, " ")}</p>}
         {r.review_reason && <p className="text-destructive">{r.review_reason}</p>}
+        {r.delivery_exception_id && (
+          <p>
+            Continued as{" "}
+            <a
+              className="underline"
+              href={`/admin/delivery-exceptions?exception_id=${r.delivery_exception_id}`}
+            >
+              failed-delivery case {r.delivery_exception_id.slice(0, 8)}
+            </a>
+          </p>
+        )}
         {r.refund_id && <p className="font-mono text-xs">refund {r.refund_id.slice(0, 8)}</p>}
         {r.decision_reason && (
           <p className="text-muted-foreground">Decision: {r.decision_reason}</p>
@@ -151,6 +166,24 @@ function CancellationCard({ request: r }: { request: api.CancellationRequest }) 
               confirmLabel="Reject"
               onConfirm={(reason) => decide("reject", reason)}
             />
+          )}
+          {r.status === "needs_review" &&
+            r.stop_result === "handed_over" &&
+            !r.refund_id &&
+            !r.interception_requested_at && (
+              <ReasonDialog
+                variant="default"
+                trigger={<Button size="sm">Intercept parcel</Button>}
+                title="Ask the carrier to stop this package?"
+                description="If the carrier stops it, the package comes back as a failed-delivery case: the shop records the goods and the refund is decided there."
+                confirmLabel="Intercept"
+                onConfirm={(reason) => decide("intercept", reason)}
+              />
+            )}
+          {r.status === "needs_review" && r.interception_requested_at && (
+            <span className="text-xs text-muted-foreground">
+              Interception requested; waiting for the carrier.
+            </span>
           )}
           {r.status === "needs_review" && r.refund_id && (
             <ReasonDialog

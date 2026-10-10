@@ -12,6 +12,8 @@ import (
 
 	"shopee/backend/pkg/events"
 	"shopee/backend/services/order/internal/domain"
+	"shopee/backend/services/order/internal/repository"
+	"shopee/backend/services/order/internal/usecase"
 )
 
 // vendorNotices records the HTTP path (EVENT_PUBLISHING=http).
@@ -194,5 +196,46 @@ func TestVendorIsToldOfReturnsAndCancellations(t *testing.T) {
 	}
 	if n := len(vendorNoticeTargets(t, pool, own.order)); n != 0 {
 		t.Fatalf("shop told about its own request: %d", n)
+	}
+}
+
+// PW-045: turning the shop notices on queues the work already open (paid
+// packages, returns waiting for the shop) once, marked as backfill, and
+// never repeats work that was already told.
+func TestVendorNoticeBackfillTellsOpenWorkOnce(t *testing.T) {
+	pool := orderDB(t)
+	ctx := t.Context()
+	f := newReturnFixture(t, pool)
+	rr, err := f.uc.CreateReturn(ctx, f.buyer, usecase.ReturnInput{OrderID: f.order, ItemID: f.item, Quantity: 1, Reason: "Sai màu"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	paid, paidVO, _ := paidSupportOrder(t, pool, f.buyer)
+	told, toldVO, toldVendor := paidSupportOrder(t, pool, f.buyer)
+	already := domain.NewVendorNoticeEffect(told, toldVendor, toldVO, events.VendorActionNewOrder, toldVO)
+	if err := repository.NewEffectRepository(pool).Enqueue(ctx, already); err != nil {
+		t.Fatal(err)
+	}
+
+	f.uc.VendorActionNotices = true
+	f.uc.VendorNoticeBackfill = repository.VendorNoticeBackfill{Pool: pool}
+	for range 2 {
+		if _, err := f.uc.BackfillVendorNotices(ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if p, ok := vendorNoticeTargets(t, pool, f.order)[events.VendorActionReturnRequested+":"+rr.ID]; !ok || !p.Backfill || p.VendorID != f.vendor {
+		t.Fatalf("the open return is told as backfill: %+v", p)
+	}
+	if p, ok := vendorNoticeTargets(t, pool, paid)[events.VendorActionNewOrder+":"+paidVO]; !ok || !p.Backfill || p.VendorOrderID != paidVO {
+		t.Fatalf("the paid package is told as backfill: %+v", p)
+	}
+	targets := vendorNoticeTargets(t, pool, told)
+	if p := targets[events.VendorActionNewOrder+":"+toldVO]; len(targets) != 1 || p.Backfill {
+		t.Fatalf("work already told is not told again: %+v", targets)
+	}
+	if n := countRowsIn(t, pool, `SELECT count(*) FROM order_effects WHERE kind = 'notify_vendor' AND order_id = ANY($1::uuid[])`,
+		[]string{f.order, paid, told}); n != 3 {
+		t.Fatalf("one notice per piece of work, got %d", n)
 	}
 }

@@ -104,7 +104,10 @@ type Shipment struct {
 	InterceptProviderRef *string
 	InterceptRequestedAt *time.Time
 	InterceptResolvedAt  *time.Time
-	AddressRedactedAt    *time.Time
+	// InterceptOperation (PW-036): the Order operation an interception
+	// serves ("cancellation:<id>"); nil for a plain order cancellation.
+	InterceptOperation *string
+	AddressRedactedAt  *time.Time
 	// AttemptNo counts fulfillment attempts of the vendor order (AF-04): a
 	// redelivery is attempt 2 with OriginalShipmentID set to attempt 1.
 	AttemptNo          int

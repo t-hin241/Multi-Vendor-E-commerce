@@ -87,6 +87,11 @@ export function RestockModeration() {
                   <TableCell>+{r.requested_quantity}</TableCell>
                   <TableCell>
                     <RestockStatusBadge status={r.status} />
+                    {r.status === "pending" && r.first_approved_at && (
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        Approved once; waiting for a second admin.
+                      </p>
+                    )}
                     {r.status === "rejected" && r.rejection_reason && (
                       <p className="mt-1 text-xs text-muted-foreground">{r.rejection_reason}</p>
                     )}
@@ -101,7 +106,11 @@ export function RestockModeration() {
                             </Button>
                           }
                           title="Approve this restock request?"
-                          description={`Adds ${r.requested_quantity} to available stock immediately.`}
+                          description={
+                            r.first_approved_at
+                              ? `Second approval: adds ${r.requested_quantity} to available stock. The first approver cannot give it.`
+                              : `Adds ${r.requested_quantity} to available stock, unless its size needs a second admin.`
+                          }
                           confirmLabel="Approve"
                           onConfirm={() => handleApprove(r.id)}
                         />

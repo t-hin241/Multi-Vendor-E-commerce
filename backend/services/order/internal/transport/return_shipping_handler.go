@@ -100,6 +100,8 @@ type goodsReceiptRequest struct {
 	Missing         *int64 `json:"missing_quantity" binding:"required,min=0"`
 	Note            string `json:"note" binding:"max=1000"`
 	ExpectedVersion int64  `json:"expected_version" binding:"required,min=1"`
+	// PW-038: images of the step (uploaded first like support evidence).
+	EvidenceIDs []string `json:"evidence_ids" binding:"omitempty,max=5,dive,uuid"`
 }
 
 // GoodsReceipt: the shop (returns.handle) or an admin records what came
@@ -119,7 +121,7 @@ func (h *ReturnHandler) GoodsReceipt(c *gin.Context) {
 		actor.Role = "admin"
 	}
 	item, err := h.orders.RecordReturnReceipt(c.Request.Context(), actor, c.Param("id"), usecase.ReturnReceiptInput{Sellable: *req.Sellable,
-		Damaged: *req.Damaged, Missing: *req.Missing, Note: req.Note, ExpectedVersion: req.ExpectedVersion})
+		Damaged: *req.Damaged, Missing: *req.Missing, Note: req.Note, ExpectedVersion: req.ExpectedVersion, EvidenceIDs: req.EvidenceIDs})
 	if err != nil {
 		httpresponse.HandleError(c, h.log, err)
 		return
@@ -155,24 +157,58 @@ func (h *ReturnHandler) AuthorizeShipping(c *gin.Context) {
 }
 
 type shippingDecisionRequest struct {
-	Action          string `json:"action" binding:"required,oneof=refund mark_lost"`
+	Action          string `json:"action" binding:"required,oneof=refund mark_lost refund_lost"`
 	Reason          string `json:"reason" binding:"required,max=500"`
 	ExpectedVersion int64  `json:"expected_version" binding:"required,min=1"`
+	// PW-038: images of the step (uploaded first like support evidence).
+	EvidenceIDs []string `json:"evidence_ids" binding:"omitempty,max=5,dive,uuid"`
 }
 
-// ShippingDecision: refund a disputed inspection in full, or mark a parcel
-// lost on the way back.
+// ShippingDecision: refund a disputed inspection in full, mark a parcel
+// lost on the way back, or refund a lost parcel (PW-042).
 func (h *ReturnHandler) ShippingDecision(c *gin.Context) {
 	if !validID(c, c.Param("id")) {
 		return
 	}
 	var req shippingDecisionRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		httpresponse.Error(c, http.StatusBadRequest, "validation_error", "action (refund|mark_lost), reason and expected_version are required")
+		httpresponse.Error(c, http.StatusBadRequest, "validation_error", "action (refund|mark_lost|refund_lost), reason and expected_version are required")
 		return
 	}
 	item, err := h.orders.DecideReturnShipping(c.Request.Context(), middleware.GetUserID(c), c.Param("id"),
-		usecase.ReturnShippingDecision{Action: req.Action, Reason: req.Reason, ExpectedVersion: req.ExpectedVersion})
+		usecase.ReturnShippingDecision{Action: req.Action, Reason: req.Reason, ExpectedVersion: req.ExpectedVersion, EvidenceIDs: req.EvidenceIDs})
+	if err != nil {
+		httpresponse.HandleError(c, h.log, err)
+		return
+	}
+	httpresponse.OK(c, http.StatusOK, toReturnResponse(item))
+}
+
+type receiptCorrectionRequest struct {
+	Sellable        *int64 `json:"sellable_quantity" binding:"required,min=0"`
+	Damaged         *int64 `json:"damaged_quantity" binding:"required,min=0"`
+	Missing         *int64 `json:"missing_quantity" binding:"required,min=0"`
+	Note            string `json:"note" binding:"required,max=500"`
+	ExpectedVersion int64  `json:"expected_version" binding:"required,min=1"`
+	// PW-038: images of the step (uploaded first like support evidence).
+	EvidenceIDs []string `json:"evidence_ids" binding:"omitempty,max=5,dive,uuid"`
+}
+
+// ReceiptCorrection: an admin records a new version of a disputed receipt
+// (PW-042); the sellable count is fixed once the units are back in stock.
+func (h *ReturnHandler) ReceiptCorrection(c *gin.Context) {
+	if !validID(c, c.Param("id")) {
+		return
+	}
+	var req receiptCorrectionRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		httpresponse.Error(c, http.StatusBadRequest, "validation_error",
+			"sellable_quantity, damaged_quantity, missing_quantity, note and expected_version are required")
+		return
+	}
+	item, err := h.orders.CorrectReturnReceipt(c.Request.Context(), middleware.GetUserID(c), c.Param("id"), usecase.ReturnReceiptCorrection{
+		Sellable: *req.Sellable, Damaged: *req.Damaged, Missing: *req.Missing, Note: req.Note, ExpectedVersion: req.ExpectedVersion,
+		EvidenceIDs: req.EvidenceIDs})
 	if err != nil {
 		httpresponse.HandleError(c, h.log, err)
 		return

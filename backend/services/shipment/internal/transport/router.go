@@ -7,6 +7,7 @@ package transport
 import (
 	"context"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -118,6 +119,8 @@ func NewRouter(
 
 	// AF-02/PW-010: Vendor asks before citing a Shipment rule in a policy.
 	r.GET("/internal/policy-rules/readiness", internal.Allow("vendor"), policyrules.Handler(domain.RuleReadiness))
+	// PW-042: Vendor has the carrier check a shop's return destination.
+	r.POST("/internal/shipments/address-checks", internal.Allow("vendor"), internalHandler.CheckAddress)
 
 	internalGroup := r.Group("/internal/shipments", internal.Allow("order"))
 	{
@@ -125,6 +128,7 @@ func NewRouter(
 		internalGroup.POST("/quotes", internalHandler.Quote)
 		internalGroup.POST("/by-vendor-order/:id/cancel", internalHandler.CancelForVendorOrder)
 		internalGroup.POST("/by-vendor-order/:id/stops", internalHandler.StopFulfillment)
+		internalGroup.POST("/by-vendor-order/:id/interceptions", internalHandler.InterceptFulfillment)
 		internalGroup.POST("/replacement-attempts", internalHandler.ReplacementAttempt)
 	}
 
@@ -135,14 +139,19 @@ func NewRouter(
 	return r
 }
 
-// boundRequest caps processing time and body size.
+// boundRequest caps processing time and body size; an evidence upload
+// (PW-038) may carry a video.
 func boundRequest() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		ctx, cancel := context.WithTimeout(c.Request.Context(), 30*time.Second)
+		limit, timeout := int64(1<<20), 30*time.Second
+		if c.Request.Method == http.MethodPost && strings.HasSuffix(c.FullPath(), "/:id/evidence") {
+			limit, timeout = domain.MaxEvidenceVideoBytes+(1<<20), 2*time.Minute
+		}
+		ctx, cancel := context.WithTimeout(c.Request.Context(), timeout)
 		defer cancel()
 		c.Request = c.Request.WithContext(ctx)
 		if c.Request.Body != nil {
-			c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 1<<20)
+			c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, limit)
 		}
 		c.Next()
 	}

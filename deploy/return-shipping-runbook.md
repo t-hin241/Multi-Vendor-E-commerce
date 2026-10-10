@@ -90,3 +90,17 @@ Vendor không có cờ: địa chỉ nhận trả chỉ là dữ liệu của sh
 - **Integration Vendor:** `TestReturnDestinationNeedsVerificationOfTheCurrentVersion`.
 - **Unit:** domain Order (`TestReturnShippingRules`) và Shipment; route/quyền Order, gateway.
 - **Vitest:** `src/lib/return-shipping.test.ts`.
+
+## Bổ sung nhóm D (2026-10-10)
+
+- **Kiện trả thất lạc hoàn tiền trực tiếp (PW-042):** sau `mark_lost`, admin chọn "Refund lost parcel" ở `/admin/returns` (action `refund_lost`, quyền `finance.prepare`, cần lý do, có audit). Refund tính trên gói hàng như hoàn tiền trả hàng thường; không nhập kho. Không còn phải mở hồ sơ hỗ trợ.
+- **Sửa phiếu nhận hàng trả (PW-042):** khi phiếu có hàng hỏng/thiếu (trả hàng ở `received`, chờ admin), admin ghi phiên bản phiếu mới (`POST /api/orders/admin/return-requests/:id/receipt-corrections`, cần ghi chú). Sau khi effect nhập kho đã chạy, số "bán được" không đổi được (409); phiếu sửa không còn hàng hỏng/thiếu thì tự yêu cầu hoàn tiền. Mọi phiên bản phiếu được giữ.
+- **Chứng cứ (PW-038):** phiếu nhận hàng, phiếu sửa và `mark_lost` nhận `evidence_ids` (tối đa 5 ảnh JPEG/PNG, tải lên qua `/support-attachments` như hồ sơ hỗ trợ, cần cấu hình kho ảnh hỗ trợ `SUPPORT_ATTACHMENT_STORAGE_*` và `SUPPORT_ATTACHMENT_BUCKET` riêng tư). Ảnh của người khác, ảnh đã dùng hoặc đã xoá làm bước đó bị từ chối (409 `evidence_unavailable`), không lưu nửa vời. Shop và admin xem ở `/return-requests/:id/evidence`. Ảnh chứng cứ phiếu được giữ tối đa 30 ngày kể từ bước nó chứng minh, rồi worker Order xoá (dòng thành tombstone, object bị xoá; cùng vòng dọn ảnh hồ sơ hỗ trợ mỗi phút).
+- **Xác minh địa chỉ nhận trả qua hãng vận chuyển (PW-042):** bật `FEATURE_RETURN_DESTINATION_CARRIER_CHECK_ENABLED` ở Vendor. Mỗi 30 giây Vendor gửi các phiên bản địa chỉ đang chờ (chưa xác minh, chưa bị từ chối, chưa hỏi hãng) sang Shipment `POST /internal/shipments/address-checks` (khoá dịch vụ, chỉ `vendor`); Shipment hỏi API kiểm địa chỉ của hãng (`carrier.AddressChecker`).
+  - Hãng phục vụ được → phiên bản được xác minh, `verified_by` để trống (không phải người), audit `return_destination_carrier_verified` (actor là chủ shop đã gửi phiên bản đó), chủ shop nhận thông báo như khi admin xác minh.
+  - Hãng không phục vụ được → bị từ chối với lý do "Carrier address check: …", audit `return_destination_carrier_rejected`, chủ shop được báo và sửa địa chỉ.
+  - Hãng không có kiểm tra địa chỉ (chế độ `manual`, 501 `address_check_unsupported`) → ghi kết quả `unsupported`, để admin xác minh như cũ. Lỗi mạng/hãng (503) → không ghi gì, thử lại vòng sau.
+  - Admin vẫn quyết định được mọi phiên bản (ghi đè kết quả của hãng); quyết định của admin trong lúc chờ hãng được giữ. Kết quả hãng hiện ở thẻ địa chỉ của shop và nút "Return address" của admin.
+  - Migration Vendor `000014_return_destination_carrier_check` (cột `carrier_check_*`, hai action audit mới; down tự từ chối khi đã có audit của hãng). Sửa địa chỉ giờ cũng xoá lý do từ chối cũ.
+  - Rollback: tắt cờ; địa chỉ đã được hãng xác minh vẫn giữ trạng thái. Khi chưa tích hợp hãng thật, mock (`SHIPMENT_CARRIER_PROVIDER=mock`, chỉ local) từ chối đường có chữ `UNDELIVERABLE`.
+- **Hạn gửi theo chính sách (PW-007):** chính sách đổi trả có thể dẫn rule `order.return_ship_deadline` (`ship-<1..60>d`); trả hàng của đơn bán theo phiên bản đó dùng số ngày này, đơn khác vẫn dùng `ORDER_RETURN_DISPATCH_DAYS`. Quá hạn vẫn vào stage SLA `return_dispatch_review` như trước.

@@ -36,6 +36,13 @@ type CancellationPort interface {
 	Counts(ctx context.Context, olderThan time.Time) (open, needsReview, stale int64, err error)
 }
 
+// FulfillmentInterceptor is Shipment asking the carrier to stop a package
+// already handed over (PW-036); it answers requested, intercepted,
+// delivered or not_handed_over.
+type FulfillmentInterceptor interface {
+	InterceptFulfillment(ctx context.Context, vendorOrderID, operationID string) (string, error)
+}
+
 // FulfillmentStopper is Shipment stopping a vendor order before handover.
 type FulfillmentStopper interface {
 	StopFulfillment(ctx context.Context, vendorOrderID, operationID string) (string, error)
@@ -298,7 +305,7 @@ func (uc *OrderUseCase) ListCancellations(ctx context.Context, status string, li
 
 // CancellationDecision is an admin's decision.
 type CancellationDecision struct {
-	Decision        string // approve, reject, retry_refund
+	Decision        string // approve, reject, retry_refund, intercept (PW-036)
 	Reason          string
 	ExpectedVersion int64
 	// Restock: the units never left the warehouse and go back to stock.
@@ -379,8 +386,34 @@ func (uc *OrderUseCase) DecideCancellation(ctx context.Context, adminID, id stri
 			if err := uc.requestCancellationRefund(ctx, c, adminID, reason); err != nil {
 				return err
 			}
+		case "intercept":
+			// PW-036: stop the package at the carrier; when it comes back the
+			// failed-delivery case takes over the goods and the money.
+			if uc.Interceptions == nil {
+				return apperror.Conflict("Intercepting packages is not available")
+			}
+			if c.Status != domain.CancelNeedsReview || c.StopResult == nil || *c.StopResult != domain.StopHandedOver || c.RefundID != nil {
+				return apperror.Conflict("Only a request whose package was already handed over can be intercepted")
+			}
+			if c.InterceptionRequestedAt != nil {
+				return apperror.Conflict("An interception was already requested for this package")
+			}
+			c.InterceptionRequestedAt = &now
+			review := "Interception requested from the carrier; the package returns as a failed-delivery case"
+			c.ReviewReason = &review
+			if err := uc.Cancellations.Save(ctx, c); err != nil {
+				return err
+			}
+			status := string(c.Status)
+			if err := uc.Cancellations.AddEvent(ctx, &domain.CancellationEvent{RequestID: c.ID, ActorID: &adminID, ActorRole: "admin",
+				Action: "interception_requested", FromStatus: &status, ToStatus: status, Note: reason}); err != nil {
+				return err
+			}
+			if err := uc.Effects.Enqueue(ctx, domain.Effect{OrderID: c.OrderID, Kind: domain.EffectInterceptShipment, Target: c.ID}); err != nil {
+				return err
+			}
 		default:
-			return apperror.Validation("decision must be approve, reject or retry_refund")
+			return apperror.Validation("decision must be approve, reject, retry_refund or intercept")
 		}
 		result = c
 		return uc.audit(ctx, domain.AdminAction{ActorID: adminID, Action: "cancellation_" + in.Decision, EntityType: domain.AuditCancellation,
@@ -461,6 +494,69 @@ func (uc *OrderUseCase) stopFulfillment(ctx context.Context, e *domain.Effect) e
 		}
 		return uc.requestCancellationRefund(ctx, c, *c.DecidedBy, ptr("Paid order cancelled before handover"))
 	})
+}
+
+// interceptShipment is the intercept_shipment effect (PW-036): ask
+// Shipment, then record its answer on the request's timeline.
+func (uc *OrderUseCase) interceptShipment(ctx context.Context, e *domain.Effect) error {
+	if uc.Cancellations == nil || uc.Interceptions == nil {
+		return errHoldsNotWired
+	}
+	c, err := uc.Cancellations.FindByID(ctx, e.Target)
+	if err != nil {
+		return appError(err)
+	}
+	if c.Status != domain.CancelNeedsReview {
+		return nil
+	}
+	result, err := uc.Interceptions.InterceptFulfillment(ctx, c.VendorOrderID, cancellationTarget+c.ID)
+	if err != nil {
+		return err
+	}
+	return uc.withOrder(ctx, c.OrderID, func(ctx context.Context) error {
+		c, err := uc.Cancellations.FindByID(ctx, e.Target)
+		if err != nil || c.Status != domain.CancelNeedsReview {
+			return err
+		}
+		note := "Carrier interception: " + strings.ReplaceAll(result, "_", " ")
+		if result == "delivered" {
+			review := "The package was delivered before the interception; the buyer can ask for a return"
+			c.ReviewReason = &review
+			if err := uc.Cancellations.Save(ctx, c); err != nil {
+				return err
+			}
+		}
+		status := string(c.Status)
+		uc.Log.Info().Str("request_id", c.ID).Str("result", result).Msg("order_cancellation_interception")
+		return uc.Cancellations.AddEvent(ctx, &domain.CancellationEvent{RequestID: c.ID, ActorRole: "system", Action: "interception_" + result,
+			FromStatus: &status, ToStatus: status, Note: &note})
+	})
+}
+
+// transferCancellation (PW-036) hands an intercepted request to the
+// failed-delivery case opened when its package came back, in that case's
+// transaction: the request is final and links the case; its payout hold
+// is released (the case holds its own).
+func (uc *OrderUseCase) transferCancellation(ctx context.Context, d *domain.DeliveryException) error {
+	if uc.Cancellations == nil {
+		return nil
+	}
+	c, err := uc.Cancellations.FindOpen(ctx, d.VendorOrderID)
+	if errors.Is(err, repository.ErrCancellationNotFound) || (err == nil && c == nil) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if c.Status != domain.CancelNeedsReview || c.InterceptionRequestedAt == nil {
+		return nil
+	}
+	c.DeliveryExceptionID = &d.ID
+	note := "The intercepted package is coming back: failed-delivery case " + d.ID + " resolves the goods and the refund"
+	if err := uc.moveCancellation(ctx, c, domain.CancelTransferred, "system", nil, "transferred_to_delivery_exception", &note); err != nil {
+		return err
+	}
+	return uc.releaseCancellationHold(ctx, c)
 }
 
 // requestCancellationRefund refunds what is left of the vendor order

@@ -13,13 +13,15 @@ func (r *PasswordResetRepository) InvalidateForUser(ctx context.Context, userID 
 	if _, err := connection(ctx, r.pool).Exec(ctx, `UPDATE password_reset_tokens SET used_at=COALESCE(used_at,now()) WHERE user_id=$1`, userID); err != nil {
 		return err
 	}
-	_, err := connection(ctx, r.pool).Exec(ctx, `UPDATE password_reset_deliveries SET encrypted_token=NULL,status='expired',lease_until=NULL WHERE user_id=$1 AND encrypted_token IS NOT NULL`, userID)
+	_, err := connection(ctx, r.pool).Exec(ctx, `UPDATE password_reset_deliveries SET encrypted_token=NULL,status='expired',lease_until=NULL WHERE user_id=$1 AND kind='password_reset' AND encrypted_token IS NOT NULL`, userID)
 	return err
 }
 
 type ResetDelivery struct {
 	ID, UserID, Email string
 	EncryptedToken    []byte
+	// Kind: password_reset, or email_verification (PW-022).
+	Kind string
 }
 
 func (r *PasswordResetRepository) ClaimDelivery(ctx context.Context) (string, error) {
@@ -37,7 +39,13 @@ func (r *PasswordResetRepository) ClaimDelivery(ctx context.Context) (string, er
 }
 func (r *PasswordResetRepository) ReadDelivery(ctx context.Context, id string) (*ResetDelivery, error) {
 	d := &ResetDelivery{}
-	err := r.pool.QueryRow(ctx, `SELECT d.id,d.user_id,u.email,d.encrypted_token FROM password_reset_deliveries d JOIN password_reset_tokens t ON t.id=d.reset_id JOIN users u ON u.id=d.user_id WHERE d.id=$1 AND d.status='sending' AND d.lease_until>now() AND d.expires_at>now() AND t.used_at IS NULL AND t.expires_at>now() AND u.is_active`, id).Scan(&d.ID, &d.UserID, &d.Email, &d.EncryptedToken)
+	err := r.pool.QueryRow(ctx, `SELECT d.id,d.user_id,COALESCE(v.email,u.email),d.encrypted_token,d.kind FROM password_reset_deliveries d
+		JOIN users u ON u.id=d.user_id
+		LEFT JOIN password_reset_tokens t ON t.id=d.reset_id
+		LEFT JOIN email_verification_tokens v ON v.id=d.verification_id
+		WHERE d.id=$1 AND d.status='sending' AND d.lease_until>now() AND d.expires_at>now() AND u.is_active
+		  AND ((d.kind='password_reset' AND t.used_at IS NULL AND t.expires_at>now())
+		    OR (d.kind='email_verification' AND v.used_at IS NULL AND v.expires_at>now()))`, id).Scan(&d.ID, &d.UserID, &d.Email, &d.EncryptedToken, &d.Kind)
 	return d, err
 }
 func (r *PasswordResetRepository) FinishDelivery(ctx context.Context, id string, success bool) error {

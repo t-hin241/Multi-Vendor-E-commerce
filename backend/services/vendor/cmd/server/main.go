@@ -127,7 +127,8 @@ func main() {
 	staffUseCase := &usecase.StaffUseCase{Staff: repository.StaffRepository{Pool: dbPool}, Vendors: vendorRepo,
 		Accounts: identityclient.Client{URL: cfg.Internal.IdentityURL, Key: cfg.Internal.Key}, Tx: ops.Tx,
 		Mailer: adapter.NewStaffInvitationMailer(cfg.NotificationServiceURL, cfg.Internal.Key), Enabled: cfg.ShopStaff,
-		InvitesPaused: cfg.StaffInvitesPaused, FingerprintKey: cfg.StaffFingerprintKey, AcceptURL: cfg.StaffAcceptURL, Log: log}
+		InvitesPaused: cfg.StaffInvitesPaused, FingerprintKey: cfg.StaffFingerprintKey, AcceptURL: cfg.StaffAcceptURL, Log: log,
+		RequireVerifiedEmail: cfg.StaffRequiresVerifiedEmail}
 	go staffUseCase.RunInvitationDelivery(workerCtx)
 
 	vendorHandler := transport.NewVendorHandler(vendorUseCase, log)
@@ -152,8 +153,14 @@ func main() {
 		Proofs: adminaccess.Client{URL: cfg.Internal.IdentityURL, Key: cfg.Internal.Key}, RequireProof: cfg.AdminReauth}
 	(transport.PayoutHandler{UseCase: payoutUC, Log: log, AdminGuard: adminGuard}).Register(router, middleware.RequireAuth(jwtManager), cfg.PayoutServiceKey, cfg.Internal.Verifier)
 	// AF-05: where returned goods go; Order reads the verified one.
-	(transport.ReturnDestinationHandler{UseCase: &usecase.ReturnDestinationUseCase{Destinations: returnDestinations, Addresses: addressRepo,
-		Vendors: vendorRepo, Audit: auditLogRepo, Ops: ops}, Log: log, AdminGuard: adminGuard}).Register(router, middleware.RequireAuth(jwtManager), cfg.Internal.Verifier)
+	returnDestinationUseCase := &usecase.ReturnDestinationUseCase{Destinations: returnDestinations, Addresses: addressRepo,
+		Vendors: vendorRepo, Audit: auditLogRepo, Ops: ops, Log: log}
+	if cfg.ReturnDestinationCarrierCheck {
+		// PW-042: the carrier checks each new version through Shipment.
+		returnDestinationUseCase.Carrier = adapter.NewAddressCheckClient(cfg.ShipmentURL, cfg.Internal.Key)
+		go returnDestinationUseCase.RunCarrierChecks(workerCtx)
+	}
+	(transport.ReturnDestinationHandler{UseCase: returnDestinationUseCase, Log: log, AdminGuard: adminGuard}).Register(router, middleware.RequireAuth(jwtManager), cfg.Internal.Verifier)
 
 	dashboard := usecase.Dashboard{Vendors: vendorUseCase, Orders: adapter.ReportClient{URL: cfg.OrderURL, Key: cfg.Internal.Key}, Payments: adapter.ReportClient{URL: cfg.PaymentURL, Key: cfg.Internal.Key},
 		Access: staffUseCase}

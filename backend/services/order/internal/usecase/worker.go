@@ -30,6 +30,9 @@ func (w OrderWorker) Run(ctx context.Context) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	lastReport := time.Time{}
+	if _, err := uc.BackfillVendorNotices(ctx); err != nil && ctx.Err() == nil {
+		uc.Log.Error().Err(err).Msg("order_vendor_notice_backfill_failed")
+	}
 	for {
 		if _, err := uc.ProcessCartConsumptions(ctx, batch); err != nil && ctx.Err() == nil {
 			uc.Log.Error().Err(err).Msg("order_cart_consume_worker_failed")

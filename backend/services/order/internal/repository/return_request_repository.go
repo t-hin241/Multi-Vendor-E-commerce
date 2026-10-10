@@ -195,6 +195,26 @@ func (r *ReturnRequestRepository) SaveShipping(ctx context.Context, rr *domain.R
 	return r.syncSLA(ctx, rr)
 }
 
+// CorrectReceipt (PW-042) applies an admin's corrected receipt to a
+// received return still waiting for its refund decision: the units to
+// restock and whether the inspection is disputed. Compare-and-set on the
+// version; the status does not change.
+func (r *ReturnRequestRepository) CorrectReceipt(ctx context.Context, rr *domain.ReturnRequest, sellable int64, disputed bool, note *string) error {
+	err := connection(ctx, r.pool).QueryRow(ctx, `UPDATE return_requests SET restock = $3 > 0, restock_quantity = $3, inspection_disputed = $4,
+		inspection_note = COALESCE($5, inspection_note), version = version + 1, updated_at = now()
+		WHERE id = $1 AND version = $2 AND status = 'received' RETURNING version, updated_at`,
+		rr.ID, rr.Version, sellable, disputed, note).Scan(&rr.Version, &rr.UpdatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ErrStaleState
+	}
+	if err != nil {
+		return err
+	}
+	restock := sellable > 0
+	rr.RestockQuantity, rr.InspectionDisputed, rr.Restock = &sellable, disputed, &restock
+	return r.syncSLA(ctx, rr)
+}
+
 // SetReturnShipment records Shipment's parcel id without a version bump
 // (the buyer's view does not become stale).
 func (r *ReturnRequestRepository) SetReturnShipment(ctx context.Context, returnID, shipmentID string) error {

@@ -43,6 +43,7 @@ type ManualRefundStore interface {
 	FindEvidence(ctx context.Context, id string) (*domain.RefundEvidence, error)
 	OrphanEvidence(ctx context.Context, before time.Time, limit int) ([]*domain.RefundEvidence, error)
 	Counts(ctx context.Context, now time.Time, overdue time.Duration) (repository.ManualRefundCounts, error)
+	RestageLegacySLA(ctx context.Context, limit int) (int, error)
 }
 
 // DestinationCipher seals refund destinations (adapter.DestinationCipher).
@@ -786,7 +787,8 @@ func (uc *ManualRefundUseCase) Report(ctx context.Context) {
 		Int64("executing_past_lease", c.ExecutingOverdue).Int64("ready_over_24h", c.ReadyWithoutClaimant).Msg("manual_refund_report")
 }
 
-// Run expires claims, cleans orphan uploads and reports every minute.
+// Run expires claims, cleans orphan uploads, moves pre-workflow refund
+// deadlines and reports every minute.
 func (uc *ManualRefundUseCase) Run(ctx context.Context) {
 	tick := time.NewTicker(time.Minute)
 	defer tick.Stop()
@@ -796,6 +798,12 @@ func (uc *ManualRefundUseCase) Run(ctx context.Context) {
 		}
 		if _, err := uc.CleanupEvidence(ctx, 50); err != nil && ctx.Err() == nil {
 			uc.Log.Error().Err(err).Msg("refund_evidence_cleanup_failed")
+		}
+		// PW-017: refunds opened before the workflow move to its deadlines.
+		if uc.Enabled {
+			if _, err := uc.Store.RestageLegacySLA(ctx, 50); err != nil && ctx.Err() == nil {
+				uc.Log.Error().Err(err).Msg("refund_deadline_restage_failed")
+			}
 		}
 		uc.Report(ctx)
 		select {

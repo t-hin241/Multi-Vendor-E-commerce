@@ -12,7 +12,9 @@ or changes a payment-link expiry. Admin only reads the owner APIs.
 | Order | Support waiting for vendor / resolution follow-up | 48 hours |
 | Order | Return requested or vendor-confirmed, awaiting decision | 48 hours from request; confirmation does not reset it |
 | Shipment | Interception requested | 4 hours from interception request |
-| Payment | Existing `awaiting_provider_refund` queue | 72 hours from refund request |
+| Payment | Refund awaiting a receipt, manual workflow off (`awaiting_refund_receipt`) | 72 hours from refund request |
+| Payment | Manual workflow (AF-06): submitted account awaiting verification (`refund_destination_verification`) | 24 hours from submission |
+| Payment | Manual workflow: verified account, transfer not submitted (`manual_refund_ready`; claiming keeps it) | 72 hours from verification |
 
 All deadlines are UTC elapsed time. The original case has an outer seven-day
 limit. Waiting for a buyer pauses the operator's remaining budget, but not the
@@ -20,15 +22,18 @@ outer limit. Repeated messages, assignment and vendor confirmation do not renew
 the budget. A new stage snapshots `case-sla-v1`; reopen advances the deadline
 version and keeps the original outer deadline and breach history.
 
-The working tree does not yet contain AF-03 paid-cancellation cases, AF-04
-delivery-exception cases, AF-05 reverse-shipment cases, or AF-06
-`ready/submitted/unknown` manual-transfer stages. The interception and existing
-refund queue above are the implemented stages, **not a claim that those plans
-are implemented**. When their aggregates exist, their owners must supply the
-new stage mapping in the same transaction as the aggregate transition. The
-72-hour existing refund follow-up must then move to the actual ready stage;
-never apply it to submitted/unknown transfers. AF-08/09 vendor/inbox delivery
-is also separate: current notices go to responsible/on-call/escalation admins.
+AF-03 cancellations, AF-04 delivery exceptions and AF-05 return shipping have
+their own stages (see the owners' runbooks). Under the manual refund workflow
+(PW-017) a refund has no admin deadline while the buyer has not given an
+account (the buyer is reminded instead), and none once a transfer is
+`submitted` or `unknown` (the manual refund review queues follow those). The
+outer limit of a manual refund counts from the first submitted account. Open
+refunds still on `awaiting_refund_receipt` when the workflow is turned on are
+moved to their manual stage by Payment's minute worker. Since PW-009 a stage
+waiting on the shop (support reply, failed-delivery goods receipt) also tells
+the shop at its reminder and when overdue (`vendor_action_required`), once per
+deadline version; escalations stay with admins. Admin notices go to the
+responsible, on-call and escalation admins.
 
 ## Rollout
 

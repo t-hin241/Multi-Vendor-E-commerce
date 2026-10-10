@@ -119,6 +119,8 @@ type failureReportRequest struct {
 	Kind            string `json:"kind" binding:"required,oneof=returned lost"`
 	Reason          string `json:"reason" binding:"required,max=500"`
 	ExpectedVersion int64  `json:"expected_version" binding:"required,min=1"`
+	// EvidenceIDs (PW-038): files uploaded for this shipment.
+	EvidenceIDs []string `json:"evidence_ids" binding:"max=5"`
 }
 
 type interceptionDecisionRequest struct {

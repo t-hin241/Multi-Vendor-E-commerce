@@ -22,7 +22,7 @@ var ErrRestockRequestNotFound = errors.New("repository: restock request not foun
 
 const restockRequestSelectColumns = `
 	SELECT id, inventory_item_id, product_id, variant_id, vendor_id, requested_quantity,
-	       status, requested_by, rejection_reason, decided_by, decided_at, created_at, updated_at
+	       status, requested_by, rejection_reason, decided_by, decided_at, first_approved_by, first_approved_at, created_at, updated_at
 	`
 
 func (r *RestockRequestRepository) Create(ctx context.Context, req *domain.RestockRequest) error {
@@ -82,10 +82,25 @@ func (r *RestockRequestRepository) UpdateStatus(ctx context.Context, id string, 
 	return nil
 }
 
+// RecordFirstApproval (PW-027) records the first of two approvals of a
+// pending request; it stays pending.
+func (r *RestockRequestRepository) RecordFirstApproval(ctx context.Context, id, adminUserID string) error {
+	tag, err := connection(ctx, r.pool).Exec(ctx, `UPDATE restock_requests SET first_approved_by = $2, first_approved_at = now(), updated_at = now()
+		WHERE id = $1 AND status = 'pending' AND first_approved_by IS NULL`, id, adminUserID)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrRestockRequestNotFound
+	}
+	return nil
+}
+
 func scanRestockRequest(row pgx.Row) (*domain.RestockRequest, error) {
 	var req domain.RestockRequest
 	err := row.Scan(&req.ID, &req.InventoryItemID, &req.ProductID, &req.VariantID, &req.VendorID, &req.RequestedQuantity,
-		&req.Status, &req.RequestedBy, &req.RejectionReason, &req.DecidedBy, &req.DecidedAt, &req.CreatedAt, &req.UpdatedAt)
+		&req.Status, &req.RequestedBy, &req.RejectionReason, &req.DecidedBy, &req.DecidedAt, &req.FirstApprovedBy, &req.FirstApprovedAt,
+		&req.CreatedAt, &req.UpdatedAt)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrRestockRequestNotFound
@@ -100,7 +115,8 @@ func scanRestockRequests(rows pgx.Rows) ([]*domain.RestockRequest, error) {
 	for rows.Next() {
 		var req domain.RestockRequest
 		err := rows.Scan(&req.ID, &req.InventoryItemID, &req.ProductID, &req.VariantID, &req.VendorID, &req.RequestedQuantity,
-			&req.Status, &req.RequestedBy, &req.RejectionReason, &req.DecidedBy, &req.DecidedAt, &req.CreatedAt, &req.UpdatedAt)
+			&req.Status, &req.RequestedBy, &req.RejectionReason, &req.DecidedBy, &req.DecidedAt, &req.FirstApprovedBy, &req.FirstApprovedAt,
+			&req.CreatedAt, &req.UpdatedAt)
 		if err != nil {
 			return nil, err
 		}

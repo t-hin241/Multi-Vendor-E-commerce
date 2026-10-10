@@ -33,6 +33,8 @@ type userResponse struct {
 	Email    string `json:"email"`
 	FullName string `json:"full_name"`
 	Role     string `json:"role"`
+	// EmailVerified (PW-022): the account proved it owns Email.
+	EmailVerified bool `json:"email_verified"`
 }
 
 type authResponse struct {
@@ -43,7 +45,7 @@ type authResponse struct {
 }
 
 func toUserResponse(u *domain.User) userResponse {
-	return userResponse{ID: u.ID, Email: u.Email, FullName: u.FullName, Role: string(u.Role)}
+	return userResponse{ID: u.ID, Email: u.Email, FullName: u.FullName, Role: string(u.Role), EmailVerified: u.EmailVerifiedAt != nil}
 }
 
 // adminUserResponse includes account status and creation time for admin listings.

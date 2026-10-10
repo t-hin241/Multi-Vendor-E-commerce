@@ -60,6 +60,9 @@ type VendorOrderAction struct {
 	// ReferenceID is the request the work is about (cancellation or return
 	// id); the vendor order id for a new order.
 	ReferenceID string `json:"reference_id"`
+	// Backfill (PW-045): the work was already open when the notices were
+	// turned on; same reference, so it is still one notice per piece of work.
+	Backfill bool `json:"backfill,omitempty"`
 }
 
 func VendorOrderActionEvent(eventID string, a VendorOrderAction) (eventbus.Envelope, error) {

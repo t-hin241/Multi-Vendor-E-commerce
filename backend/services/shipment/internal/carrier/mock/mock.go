@@ -15,6 +15,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 
 	"context"
 
@@ -87,4 +88,15 @@ func (p *Provider) Verify(payload []byte, signatureHeader string) (carrier.Decis
 		Accepted:            evt.Accepted,
 		Reason:              evt.Reason,
 	}, nil
+}
+
+// CheckAddress stands in for a carrier's address validation: a street
+// containing "UNDELIVERABLE" is refused, anything else accepted. Local
+// testing only.
+func (p *Provider) CheckAddress(_ context.Context, in carrier.AddressCheckInput) (carrier.AddressCheckResult, error) {
+	ref := "mock_addr_" + uuid.NewString()
+	if strings.Contains(strings.ToUpper(in.StreetAddress), "UNDELIVERABLE") {
+		return carrier.AddressCheckResult{Reason: "The carrier does not serve this street", Reference: ref}, nil
+	}
+	return carrier.AddressCheckResult{Deliverable: true, Reference: ref}, nil
 }

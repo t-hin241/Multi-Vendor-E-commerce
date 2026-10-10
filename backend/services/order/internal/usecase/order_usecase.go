@@ -48,10 +48,18 @@ type Deps struct {
 	// BuyerNotices is the outbox of buyer notices without an order
 	// (PW-009: support requests received or closed).
 	BuyerNotices BuyerNoticePort
+	// VendorNoticeBackfill queues notices of work open before the shop
+	// notices were turned on (PW-045).
+	VendorNoticeBackfill interface {
+		BackfillVendorNotices(ctx context.Context) (int64, error)
+	}
 	// Cancellations, Stops and Recoveries run AF-03 (paid cancellation);
 	// PaidCancellation is FEATURE_PAID_CANCELLATION_ENABLED (new requests).
-	Cancellations    CancellationPort
-	Stops            FulfillmentStopper
+	Cancellations CancellationPort
+	Stops         FulfillmentStopper
+	// Interceptions stop a package already handed over (PW-036); nil
+	// refuses the intercept decision.
+	Interceptions    FulfillmentInterceptor
 	Recoveries       StockRecoverer
 	PaidCancellation bool
 	// DeliveryExceptions and Replacements run AF-04 (failed delivery);
@@ -95,6 +103,9 @@ type Deps struct {
 
 	// Attachments is the private evidence store; nil turns attachments off.
 	Attachments AttachmentStore
+	// ReceiptEvidence links evidence uploads to goods receipts and lost
+	// return parcels (PW-038); nil refuses evidence ids.
+	ReceiptEvidence ReceiptEvidencePort
 
 	ReturnPolicy  domain.ReturnPolicy
 	SupportPolicy domain.SupportPolicy

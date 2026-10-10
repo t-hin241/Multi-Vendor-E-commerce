@@ -1,6 +1,6 @@
 import { request } from "./api-client";
 
-export type SLAOwner = "order" | "payment" | "shipment";
+export type SLAOwner = "order" | "payment" | "shipment" | "notification";
 export type WorkItem = {
   id: string;
   resource_type: string;
@@ -26,6 +26,7 @@ export const ownerPaths: Record<SLAOwner, string> = {
   order: "/api/orders/admin/work-items",
   payment: "/api/payments/admin/work-items",
   shipment: "/api/shipments/admin/work-items",
+  notification: "/api/notifications/admin/work-items",
 };
 export function workItems(
   token: string,
@@ -39,6 +40,7 @@ export function workItems(
       order_cursor: cursors.order,
       payment_cursor: cursors.payment,
       shipment_cursor: cursors.shipment,
+      notification_cursor: cursors.notification,
     },
   });
 }

@@ -193,8 +193,9 @@ type checkoutRequest struct {
 	AddressID           string `json:"address_id" binding:"required,uuid"`
 	CartVersion         *int64 `json:"cart_version" binding:"omitempty,min=1"`
 	ExpectedTotalAmount *int64 `json:"expected_total_amount" binding:"omitempty,min=1"`
-	// AcceptedPolicyVersions: kind → version the buyer was shown (AF-02).
-	AcceptedPolicyVersions map[string]int64 `json:"accepted_policy_versions" binding:"omitempty,max=10"`
+	// AcceptedPolicyVersions: kind → version the buyer was shown (AF-02),
+	// plus "shop:<vendor_id>" → version of each shop's policy (PW-013).
+	AcceptedPolicyVersions map[string]int64 `json:"accepted_policy_versions" binding:"omitempty,max=110"`
 }
 
 type previewRequest struct {
@@ -221,6 +222,13 @@ type previewResponse struct {
 	// is placed under; send policy_versions back as accepted_policy_versions.
 	PolicyVersions map[string]int64        `json:"policy_versions,omitempty"`
 	Policies       *policySnapshotResponse `json:"policies,omitempty"`
+	// ShopPolicies: the approved policy of each shop in the cart that has one.
+	ShopPolicies []shopPolicyResponse `json:"shop_policies,omitempty"`
+}
+
+type shopPolicyResponse struct {
+	VendorID string `json:"vendor_id"`
+	policyRefResponse
 }
 
 func toPreviewResponse(p *usecase.CheckoutPreview) previewResponse {
@@ -231,8 +239,12 @@ func toPreviewResponse(p *usecase.CheckoutPreview) previewResponse {
 			ShippingFeeAmount: v.ShippingFeeAmount, ShippingError: v.ShippingError, ItemCount: v.ItemCount})
 	}
 	if p.Policies != nil {
-		resp.PolicyVersions = p.Policies.VersionsByKind()
+		resp.PolicyVersions = p.PolicyVersions
 		resp.Policies = toPolicySnapshotResponse(p.Policies)
+		for vendorID, ref := range p.ShopPolicies {
+			resp.ShopPolicies = append(resp.ShopPolicies, shopPolicyResponse{VendorID: vendorID, policyRefResponse: toPolicyRef(ref)})
+		}
+		sort.Slice(resp.ShopPolicies, func(i, j int) bool { return resp.ShopPolicies[i].VendorID < resp.ShopPolicies[j].VendorID })
 	}
 	return resp
 }

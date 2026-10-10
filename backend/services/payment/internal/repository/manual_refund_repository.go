@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"shopee/backend/pkg/casesla"
 	"shopee/backend/services/payment/internal/domain"
 )
 
@@ -142,9 +143,12 @@ func (r ManualRefundRepository) AddDestination(ctx context.Context, d *domain.Re
 	if err := q.QueryRow(ctx, `SELECT COALESCE(MAX(version), 0) + 1 FROM refund_destinations WHERE refund_id = $1`, d.RefundID).Scan(&d.Version); err != nil {
 		return err
 	}
-	return q.QueryRow(ctx, `INSERT INTO refund_destinations (refund_id, version, bank_code, account_last4, ciphertext, key_version, status, submitted_by, submitted_at)
+	if err := q.QueryRow(ctx, `INSERT INTO refund_destinations (refund_id, version, bank_code, account_last4, ciphertext, key_version, status, submitted_by, submitted_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id`,
-		d.RefundID, d.Version, d.BankCode, d.AccountLast4, d.Ciphertext, d.KeyVersion, d.Status, d.SubmittedBy, d.SubmittedAt).Scan(&d.ID)
+		d.RefundID, d.Version, d.BankCode, d.AccountLast4, d.Ciphertext, d.KeyVersion, d.Status, d.SubmittedBy, d.SubmittedAt).Scan(&d.ID); err != nil {
+		return err
+	}
+	return r.SyncSLA(ctx, d.RefundID, d.SubmittedAt)
 }
 
 // DecideDestination records a verification decision on a pending version.
@@ -154,7 +158,14 @@ func (r ManualRefundRepository) DecideDestination(ctx context.Context, d *domain
 	if err == nil && tag.RowsAffected() != 1 {
 		return ErrStaleState
 	}
-	return err
+	if err != nil {
+		return err
+	}
+	at := time.Now().UTC()
+	if d.DecidedAt != nil {
+		at = *d.DecidedAt
+	}
+	return r.SyncSLA(ctx, d.RefundID, at)
 }
 
 // ActiveAttempt is the refund's ready/executing/submitted/unknown attempt.
@@ -193,8 +204,11 @@ func (r ManualRefundRepository) CreateAttempt(ctx context.Context, a *domain.Man
 	if isUniqueViolation(err, "manual_refund_attempts_active_idx") {
 		return ErrAttemptActiveExists
 	}
+	if err != nil {
+		return err
+	}
 	a.UpdatedAt = a.CreatedAt
-	return err
+	return r.SyncSLA(ctx, a.RefundID, a.CreatedAt)
 }
 
 // SaveAttempt writes an attempt's new state if it still has version
@@ -216,7 +230,60 @@ func (r ManualRefundRepository) SaveAttempt(ctx context.Context, a *domain.Manua
 		return ErrStaleState
 	}
 	a.Version, a.UpdatedAt = expected+1, at
-	return nil
+	return r.SyncSLA(ctx, a.RefundID, at)
+}
+
+// SyncSLA (PW-017) moves the refund's deadline to its manual workflow
+// stage, entered at `at`, in the caller's transaction (every destination
+// and attempt write calls it).
+func (r ManualRefundRepository) SyncSLA(ctx context.Context, refundID string, at time.Time) error {
+	tx, ok := ctx.Value(txKey{}).(pgx.Tx)
+	if !ok {
+		return errors.New("refund deadline sync requires a transaction")
+	}
+	refund, err := scanRefund(tx.QueryRow(ctx, `SELECT `+refundColumns+` FROM payment_refunds WHERE id = $1`, refundID))
+	if err != nil {
+		return err
+	}
+	dest, err := r.LatestDestination(ctx, refundID)
+	if errors.Is(err, ErrDestinationNotFound) {
+		dest = nil
+	} else if err != nil {
+		return err
+	}
+	attempt, err := r.ActiveAttempt(ctx, refundID)
+	if errors.Is(err, ErrAttemptNotFound) {
+		attempt = nil
+	} else if err != nil {
+		return err
+	}
+	_, err = casesla.Sync(ctx, tx, domain.ManualSLAStage(*refund, dest, attempt, at.UTC()))
+	return err
+}
+
+// RestageLegacySLA moves open refunds still on the pre-workflow deadline
+// (awaiting_refund_receipt) to their manual stage, once the workflow is on.
+func (r ManualRefundRepository) RestageLegacySLA(ctx context.Context, limit int) (int, error) {
+	rows, err := r.Pool.Query(ctx, `SELECT resource_id FROM case_sla_work_items
+		WHERE resource_type = 'refund' AND active AND payload->>'stage' = 'awaiting_refund_receipt' ORDER BY created_at LIMIT $1`, limit)
+	if err != nil {
+		return 0, err
+	}
+	ids, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return 0, err
+	}
+	for _, id := range ids {
+		if err := (Transactions{Pool: r.Pool}).Run(ctx, func(ctx context.Context) error {
+			if _, err := r.LockRefund(ctx, id); err != nil {
+				return err
+			}
+			return r.SyncSLA(ctx, id, time.Now().UTC())
+		}); err != nil {
+			return 0, err
+		}
+	}
+	return len(ids), nil
 }
 
 // ExpiredClaims lists executing attempts whose lease ran out.

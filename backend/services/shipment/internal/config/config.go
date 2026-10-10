@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"shopee/backend/pkg/config"
+	"shopee/backend/pkg/platform/objectstorage"
 )
 
 type Config struct {
@@ -31,6 +32,10 @@ type Config struct {
 	// off): open return parcels Order authorizes. Parcels already open keep
 	// moving when it is turned off.
 	ReturnShipping bool
+	// Evidence (PW-038, SHIPMENT_EVIDENCE_*) is the private bucket of the
+	// shared object storage for failure report evidence; nil without
+	// SHIPMENT_EVIDENCE_STORAGE_ENDPOINT (no uploads, lost needs none).
+	Evidence *objectstorage.PrivateConfig
 }
 
 func Load() (Config, error) {
@@ -83,12 +88,38 @@ func Load() (Config, error) {
 		return Config{}, fmt.Errorf("config: SHIPMENT_DELIVERY_ATTEMPT_LIMIT must be between 1 and 5")
 	}
 
+	evidence, err := evidenceStorage()
+	if err != nil {
+		return Config{}, err
+	}
+
 	return Config{
 		Base: base, VendorServiceURL: vendorServiceURL, OrderServiceURL: orderServiceURL,
 		CarrierProvider: carrierProvider, CarrierMockWebhookSecret: carrierMockWebhookSecret,
 		AddressRetention:   time.Duration(retentionDays) * 24 * time.Hour,
 		DeliveryResolution: deliveryResolution, AttemptLimit: attemptLimit, ReturnShipping: returnShipping,
+		Evidence: evidence,
 	}, nil
+}
+
+func evidenceStorage() (*objectstorage.PrivateConfig, error) {
+	endpoint := os.Getenv("SHIPMENT_EVIDENCE_STORAGE_ENDPOINT")
+	if endpoint == "" {
+		return nil, nil
+	}
+	private := objectstorage.PrivateConfig{Endpoint: endpoint}
+	var err error
+	if private.AccessKey, err = requireEnv("SHIPMENT_EVIDENCE_STORAGE_ACCESS_KEY"); err != nil {
+		return nil, err
+	}
+	if private.SecretKey, err = requireEnv("SHIPMENT_EVIDENCE_STORAGE_SECRET_KEY"); err != nil {
+		return nil, err
+	}
+	if private.Bucket, err = requireEnv("SHIPMENT_EVIDENCE_BUCKET"); err != nil {
+		return nil, err
+	}
+	private.UseSSL, _ = strconv.ParseBool(os.Getenv("SHIPMENT_EVIDENCE_STORAGE_USE_SSL"))
+	return &private, nil
 }
 
 func getEnv(key, fallback string) string {

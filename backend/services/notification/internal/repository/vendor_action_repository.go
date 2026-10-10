@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"shopee/backend/pkg/casesla"
 	"shopee/backend/pkg/middleware"
 	"shopee/backend/services/notification/internal/domain"
 )
@@ -101,7 +102,22 @@ func (r VendorActionRepository) Complete(ctx context.Context, id string, attempt
 	if tag.RowsAffected() == 0 {
 		return ErrStale
 	}
-	return nil
+	return r.syncDeadline(ctx, id)
+}
+
+// syncDeadline (PW-045) keeps the event's AF-07 work item in step with its
+// status, in the caller's transaction.
+func (r VendorActionRepository) syncDeadline(ctx context.Context, id string) error {
+	tx, ok := ctx.Value(txKey{}).(pgx.Tx)
+	if !ok {
+		return errors.New("vendor action deadline sync requires a transaction")
+	}
+	a, err := scanVendorAction(tx.QueryRow(ctx, `SELECT `+vendorActionColumns+` FROM vendor_action_events WHERE id = $1`, id))
+	if err != nil {
+		return err
+	}
+	_, err = casesla.Sync(ctx, tx, a.SLAStage(time.Now().UTC()))
+	return err
 }
 
 // Requeue puts an event that needs review back to pending with a fresh set
@@ -114,7 +130,10 @@ func (r VendorActionRepository) Requeue(ctx context.Context, id string) (*domain
 	if errors.Is(err, ErrNotFound) {
 		return nil, ErrStale
 	}
-	return a, err
+	if err != nil {
+		return nil, err
+	}
+	return a, r.syncDeadline(ctx, id)
 }
 
 // VendorActionFilter narrows the admin list.

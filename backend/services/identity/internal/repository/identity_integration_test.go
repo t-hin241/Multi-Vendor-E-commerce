@@ -193,7 +193,7 @@ func setup(t *testing.T) *fixture {
 		}
 		admin.Close()
 	})
-	for _, name := range []string{"000002_identity_core.up.sql", "000003_identity_sessions.up.sql", "000004_audit_search.up.sql", "000005_admin_permissions.up.sql"} {
+	for _, name := range []string{"000002_identity_core.up.sql", "000003_identity_sessions.up.sql", "000004_audit_search.up.sql", "000005_admin_permissions.up.sql", "000006_email_verification.up.sql", "000007_admin_totp.up.sql"} {
 		sql, e := os.ReadFile(filepath.Join("..", "..", "migrations", name))
 		if e != nil {
 			t.Fatal(e)
@@ -436,5 +436,68 @@ func TestIntegrationCookieCSRFAndRateLimit(t *testing.T) {
 	}
 	if request("/api/auth/login", `{"email":"UNKNOWN@example.invalid","password":"synthetic-password"}`, "http://localhost:3000", nil).Code != 429 {
 		t.Fatal("account rate limit not enforced")
+	}
+}
+
+// PW-022: a new account is sent a one-time link to confirm its email
+// (queued like a reset link, token encrypted); the link verifies once,
+// expires with a new link or a changed address, and a resend waits a minute.
+func TestIntegrationEmailVerification(t *testing.T) {
+	f := setup(t)
+	ctx := t.Context()
+	verifications := &usecase.EmailVerificationUseCase{Store: repository.EmailVerificationRepository{Pool: f.pool}, Users: f.users, Tx: f.tx,
+		Cipher: f.cipher, Enabled: true, Log: zerolog.Nop()}
+	f.auth.WithEmailVerification(verifications)
+	delivery := &usecase.ResetDeliveryUseCase{Store: f.resets, Cipher: f.cipher, ResetURL: "https://shop.example.invalid/reset-password",
+		VerifyURL: "https://shop.example.invalid/verify-email", Log: zerolog.Nop()}
+	link := func() string {
+		t.Helper()
+		id, err := f.resets.ClaimDelivery(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		m, err := delivery.Message(ctx, id)
+		if err != nil || m.Kind != "email_verification" || !strings.HasPrefix(m.URL, "https://shop.example.invalid/verify-email#token=") {
+			t.Fatalf("verification message: %+v %v", m, err)
+		}
+		if err := f.resets.FinishDelivery(ctx, id, true); err != nil {
+			t.Fatal(err)
+		}
+		return strings.TrimPrefix(m.URL, "https://shop.example.invalid/verify-email#token=")
+	}
+	user := f.register(t).User
+	first := link()
+	if err := verifications.Resend(ctx, user.ID); err == nil {
+		t.Fatal("a resend waits a minute")
+	}
+	if _, err := f.pool.Exec(ctx, `UPDATE email_verification_tokens SET created_at = now() - interval '2 minutes'`); err != nil {
+		t.Fatal(err)
+	}
+	if err := verifications.Resend(ctx, user.ID); err != nil {
+		t.Fatal(err)
+	}
+	second := link()
+	if err := verifications.Confirm(ctx, first); err == nil {
+		t.Fatal("a newer link voids the older one")
+	}
+	if err := f.auth.RequestPasswordReset(ctx, "buyer@example.invalid"); err != nil {
+		t.Fatal(err)
+	}
+	if err := verifications.Confirm(ctx, second); err != nil {
+		t.Fatal(err)
+	}
+	me, err := f.auth.Me(ctx, user.ID)
+	if err != nil || me.EmailVerifiedAt == nil {
+		t.Fatalf("verified: %+v %v", me, err)
+	}
+	if err := verifications.Confirm(ctx, second); err == nil {
+		t.Fatal("a link verifies once")
+	}
+	if err := verifications.Resend(ctx, user.ID); err == nil {
+		t.Fatal("a verified address needs no link")
+	}
+	var resets int
+	if err := f.pool.QueryRow(ctx, `SELECT count(*) FROM password_reset_deliveries WHERE kind = 'password_reset' AND encrypted_token IS NOT NULL`).Scan(&resets); err != nil || resets != 1 {
+		t.Fatalf("a password reset still queues its own delivery: %d %v", resets, err)
 	}
 }

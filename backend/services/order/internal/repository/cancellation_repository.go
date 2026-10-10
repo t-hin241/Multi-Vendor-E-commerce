@@ -23,6 +23,7 @@ type CancellationRepository struct{ Pool *pgxpool.Pool }
 const cancellationColumns = `id, order_id, vendor_order_id, vendor_id, buyer_id, origin, requested_by, reason_code, reason, status, policy_version,
 	hold_id, hold_status, hold_note, stop_result, restock, inventory_recovery_ref, refund_id, decided_by, decided_at, decision_reason,
 	review_reason, resolved_at, idempotency_key, request_hash, version, created_at, updated_at,
+	interception_requested_at, delivery_exception_id,
 	(SELECT due_at FROM case_sla_work_items w WHERE w.resource_type = 'cancellation' AND w.resource_id = cancellation_requests.id AND w.active),
 	COALESCE((SELECT payload->>'waiting_on' FROM case_sla_work_items w WHERE w.resource_type = 'cancellation'
 		AND w.resource_id = cancellation_requests.id AND w.active), '')`
@@ -32,7 +33,7 @@ func scanCancellation(row pgx.Row) (*domain.CancellationRequest, error) {
 	err := row.Scan(&c.ID, &c.OrderID, &c.VendorOrderID, &c.VendorID, &c.BuyerID, &c.Origin, &c.RequestedBy, &c.ReasonCode, &c.Reason, &c.Status,
 		&c.PolicyVersion, &c.HoldID, &c.HoldStatus, &c.HoldNote, &c.StopResult, &c.Restock, &c.RecoveryRef, &c.RefundID, &c.DecidedBy, &c.DecidedAt,
 		&c.DecisionReason, &c.ReviewReason, &c.ResolvedAt, &c.IdempotencyKey, &c.RequestHash, &c.Version, &c.CreatedAt, &c.UpdatedAt,
-		&c.ActionDueAt, &c.WaitingOn)
+		&c.InterceptionRequestedAt, &c.DeliveryExceptionID, &c.ActionDueAt, &c.WaitingOn)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrCancellationNotFound
 	}
@@ -113,7 +114,7 @@ func (r CancellationRepository) FindByKey(ctx context.Context, requesterID, key 
 // FindOpen is the vendor order's open request, or nil.
 func (r CancellationRepository) FindOpen(ctx context.Context, vendorOrderID string) (*domain.CancellationRequest, error) {
 	c, err := scanCancellation(connection(ctx, r.Pool).QueryRow(ctx, `SELECT `+cancellationColumns+` FROM cancellation_requests
-		WHERE vendor_order_id = $1 AND status NOT IN ('rejected', 'resolved')`, vendorOrderID))
+		WHERE vendor_order_id = $1 AND status NOT IN ('rejected', 'resolved', 'transferred')`, vendorOrderID))
 	if errors.Is(err, ErrCancellationNotFound) {
 		return nil, nil
 	}
@@ -145,7 +146,7 @@ func (r CancellationRepository) ListForVendor(ctx context.Context, vendorID, sta
 // List is the admin queue: "open" lists every request not yet final.
 func (r CancellationRepository) List(ctx context.Context, status string, limit, offset int) ([]*domain.CancellationRequest, error) {
 	rows, err := connection(ctx, r.Pool).Query(ctx, `SELECT `+cancellationColumns+` FROM cancellation_requests
-		WHERE ($1 = '' OR status = $1 OR ($1 = 'open' AND status NOT IN ('rejected', 'resolved')))
+		WHERE ($1 = '' OR status = $1 OR ($1 = 'open' AND status NOT IN ('rejected', 'resolved', 'transferred')))
 		ORDER BY created_at, id LIMIT $2 OFFSET $3`, status, limit, offset)
 	return collectCancellations(rows, err)
 }
@@ -154,9 +155,10 @@ func (r CancellationRepository) List(ctx context.Context, status string, limit, 
 func (r CancellationRepository) Save(ctx context.Context, c *domain.CancellationRequest) error {
 	err := connection(ctx, r.Pool).QueryRow(ctx, `UPDATE cancellation_requests SET status = $3, stop_result = $4, restock = $5,
 		inventory_recovery_ref = $6, refund_id = $7, decided_by = $8, decided_at = $9, decision_reason = $10, review_reason = $11,
-		resolved_at = $12, version = version + 1, updated_at = now() WHERE id = $1 AND version = $2 RETURNING version, updated_at`,
+		resolved_at = $12, interception_requested_at = $13, delivery_exception_id = $14, version = version + 1, updated_at = now()
+		WHERE id = $1 AND version = $2 RETURNING version, updated_at`,
 		c.ID, c.Version, c.Status, c.StopResult, c.Restock, c.RecoveryRef, c.RefundID, c.DecidedBy, c.DecidedAt, c.DecisionReason,
-		c.ReviewReason, c.ResolvedAt).Scan(&c.Version, &c.UpdatedAt)
+		c.ReviewReason, c.ResolvedAt, c.InterceptionRequestedAt, c.DeliveryExceptionID).Scan(&c.Version, &c.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return ErrStaleState
 	}
@@ -228,6 +230,6 @@ func (r CancellationRepository) ClaimHandover(ctx context.Context, vendorOrderID
 func (r CancellationRepository) Counts(ctx context.Context, olderThan time.Time) (open, needsReview, stale int64, err error) {
 	err = connection(ctx, r.Pool).QueryRow(ctx, `SELECT count(*), count(*) FILTER (WHERE status = 'needs_review'),
 		count(*) FILTER (WHERE status IN ('stopping_fulfillment', 'refund_pending') AND updated_at < $1)
-		FROM cancellation_requests WHERE status NOT IN ('rejected', 'resolved')`, olderThan).Scan(&open, &needsReview, &stale)
+		FROM cancellation_requests WHERE status NOT IN ('rejected', 'resolved', 'transferred')`, olderThan).Scan(&open, &needsReview, &stale)
 	return open, needsReview, stale, err
 }

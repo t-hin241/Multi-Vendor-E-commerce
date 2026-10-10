@@ -55,6 +55,8 @@ func (c Client) RequireRole(ctx context.Context, userID, role string) error {
 type Account struct {
 	ID, Email, Role string
 	Active          bool
+	// EmailVerified (PW-022): the account proved it owns Email.
+	EmailVerified bool
 }
 
 // Account reads one account. A missing account is Forbidden; an
@@ -83,10 +85,11 @@ func (c Client) Account(ctx context.Context, userID string) (Account, error) {
 		Data struct {
 			ID, Email, Role string
 			Active          bool `json:"is_active"`
+			EmailVerified   bool `json:"email_verified"`
 		}
 	}
 	if json.NewDecoder(io.LimitReader(resp.Body, 16*1024)).Decode(&body) != nil || body.Data.ID != userID {
 		return Account{}, apperror.Internal(fmt.Errorf("invalid identity response"))
 	}
-	return Account{ID: body.Data.ID, Email: body.Data.Email, Role: body.Data.Role, Active: body.Data.Active}, nil
+	return Account{ID: body.Data.ID, Email: body.Data.Email, Role: body.Data.Role, Active: body.Data.Active, EmailVerified: body.Data.EmailVerified}, nil
 }

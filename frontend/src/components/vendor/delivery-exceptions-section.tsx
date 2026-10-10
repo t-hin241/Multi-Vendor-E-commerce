@@ -7,6 +7,8 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { ReceiptEvidence } from "@/components/orders/receipt-evidence";
+import { AttachmentPicker, type PickedAttachment } from "@/components/support/attachment-picker";
 import * as api from "@/lib/api-client";
 import { useAuth } from "@/lib/auth-context";
 import {
@@ -61,6 +63,9 @@ export function VendorDeliveryExceptionsSection({
                       .join(", ")}
                   </p>
                 )}
+                {d.receipt && (
+                  <ReceiptEvidence scope="vendor" kind="delivery_exception" refId={d.id} />
+                )}
                 {d.status === "redelivery_pending" && (
                   <p className="text-xs">
                     Người mua đồng ý giao lại: lần giao mới đã được tạo trong mục vận chuyển; phí
@@ -99,6 +104,7 @@ function ReceiptForm({
     Object.fromEntries(items.map((i) => [i.id, { sellable: i.quantity }])),
   );
   const [note, setNote] = useState("");
+  const [evidence, setEvidence] = useState<PickedAttachment[]>([]);
   const [error, setError] = useState<string | null>(null);
   const save = useMutation({
     mutationFn: (lines: ReturnType<typeof receiptLines>["lines"]) =>
@@ -107,6 +113,7 @@ function ReceiptForm({
           received_lines: lines,
           note: note.trim() || undefined,
           expected_version: d.version,
+          evidence_ids: evidence.map((a) => a.id),
         }),
       ),
     onSuccess: async () => {
@@ -168,6 +175,15 @@ function ReceiptForm({
         value={note}
         placeholder="Ghi chú (ví dụ: hộp móp, thiếu phụ kiện)"
         onChange={(e) => setNote(e.target.value)}
+      />
+      <AttachmentPicker
+        scope="vendor"
+        value={evidence}
+        onChange={setEvidence}
+        max={5}
+        maxBytes={5 * 1024 * 1024}
+        disabled={save.isPending}
+        label="Thêm ảnh kiện hàng"
       />
       {error && <p className="text-xs text-destructive">{error}</p>}
       <Button

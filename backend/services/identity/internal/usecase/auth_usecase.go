@@ -30,6 +30,14 @@ type AuthUseCase struct {
 	log            zerolog.Logger
 	tx             Transactions
 	cipher         *TokenCipher
+	// verifications sends a new account its email link (PW-022); nil: none.
+	verifications *EmailVerificationUseCase
+}
+
+// WithEmailVerification makes registration send the first email link.
+func (uc *AuthUseCase) WithEmailVerification(v *EmailVerificationUseCase) *AuthUseCase {
+	uc.verifications = v
+	return uc
 }
 
 func NewAuthUseCase(
@@ -91,6 +99,9 @@ func (uc *AuthUseCase) register(ctx context.Context, user *domain.User) (*AuthRe
 			return nil, apperror.Conflict("Email is already registered")
 		}
 		return nil, apperror.Internal(err)
+	}
+	if err := uc.verifications.OnRegister(ctx, user); err != nil {
+		return nil, err
 	}
 
 	return uc.issueTokens(ctx, user)

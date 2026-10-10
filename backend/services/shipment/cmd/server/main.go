@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"shopee/backend/pkg/casesla"
+	"time"
 
 	"shopee/backend/pkg/adminaudit"
 	"shopee/backend/pkg/middleware"
@@ -18,6 +19,7 @@ import (
 	"shopee/backend/pkg/health"
 	"shopee/backend/pkg/identityclient"
 	"shopee/backend/pkg/logger"
+	"shopee/backend/pkg/platform/objectstorage"
 	"shopee/backend/pkg/platform/postgres"
 	"shopee/backend/pkg/shutdown"
 	"shopee/backend/pkg/telemetry"
@@ -125,9 +127,9 @@ func main() {
 	}
 	if cfg.CarrierProvider == "mock" {
 		mockCarrier := mock.New(cfg.CarrierMockWebhookSecret)
-		deps.Carrier, deps.Verifier, deps.Simulator = mockCarrier, mockCarrier, mockCarrier
+		deps.Carrier, deps.Verifier, deps.Simulator, deps.AddressChecker = mockCarrier, mockCarrier, mockCarrier, mockCarrier
 	} else {
-		deps.Carrier, deps.Verifier = manual.Provider{}, manual.Provider{}
+		deps.Carrier, deps.Verifier, deps.AddressChecker = manual.Provider{}, manual.Provider{}, manual.Provider{}
 	}
 	wake := make(chan struct{}, 1)
 	deps.Wake = func() {
@@ -135,6 +137,18 @@ func main() {
 		case wake <- struct{}{}:
 		default:
 		}
+	}
+	if cfg.Evidence != nil {
+		// PW-038: failure report evidence in Shipment's private bucket.
+		storeCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		evidenceStore, err := objectstorage.NewPrivateClient(storeCtx, *cfg.Evidence)
+		cancel()
+		if err != nil {
+			log.Fatal().Err(err).Msg("shipment evidence storage unavailable")
+		}
+		deps.Evidence, deps.EvidenceRepo = evidenceStore, repository.EvidenceRepository{Pool: dbPool}
+	} else {
+		log.Warn().Msg("shipment_evidence_storage_not_configured")
 	}
 	shipmentUseCase := usecase.NewShipmentUseCase(deps)
 	adminConfig := usecase.AdminConfig{Tx: repository.Transactions{Pool: dbPool}, Identity: identityclient.Client{URL: internalServices.IdentityURL, Key: internalServices.Key},
@@ -208,6 +222,7 @@ func main() {
 
 	adminGroup := router.Group("/api/shipments/admin", middleware.RequireAuth(jwtManager), middleware.RequireRole("admin"), adminGuard)
 	(transport.ReturnShipmentHandler{Returns: returnShipments, Log: log}).Register(router, adminGroup, internalServices.Verifier)
+	(transport.EvidenceHandler{Shipments: shipmentUseCase, Log: log}).Register(router, jwtManager, adminGroup)
 	slaRoles := identityclient.Client{URL: internalServices.IdentityURL, Key: internalServices.Key}
 	slaStore := casesla.Store{Pool: dbPool}
 	casesla.Register(adminGroup, casesla.Service{Repo: slaStore, Roles: slaRoles, Permissions: adminaccess.Client{URL: internalServices.IdentityURL, Key: internalServices.Key}}, log)

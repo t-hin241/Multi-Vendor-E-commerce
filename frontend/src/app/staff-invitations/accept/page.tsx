@@ -23,6 +23,9 @@ export default function AcceptStaffInvitationPage() {
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [joined, setJoined] = useState<api.ShopMember | null>(null);
+  // PW-022: the account must confirm its email before joining.
+  const [needsVerification, setNeedsVerification] = useState(false);
+  const [resent, setResent] = useState<string | null>(null);
 
   useEffect(() => {
     token.current = readInvitationToken(window.location.hash);
@@ -43,6 +46,7 @@ export default function AcceptStaffInvitationPage() {
       setSelectedVendorId(member.vendor_id);
       await queryClient.invalidateQueries({ queryKey: queryKeys.accessibleShops() });
     } catch (err) {
+      setNeedsVerification(err instanceof api.ApiError && err.code === "email_not_verified");
       setError(
         err instanceof api.ApiError && err.status > 0 && err.status < 500
           ? acceptErrorMessage(err.code, err.message)
@@ -104,6 +108,27 @@ export default function AcceptStaffInvitationPage() {
             {error}
           </p>
         )}
+        {needsVerification && (
+          <Button
+            variant="outline"
+            className="self-start"
+            onClick={async () => {
+              try {
+                await callWithAuth((t) => api.resendEmailVerification(t));
+                setResent(
+                  "Đã gửi email xác nhận tới " +
+                    user.email +
+                    ". Mở liên kết trong email rồi quay lại đây.",
+                );
+              } catch (err) {
+                setResent(describeApiError(err, "Chưa gửi được email xác nhận."));
+              }
+            }}
+          >
+            Gửi email xác nhận
+          </Button>
+        )}
+        {resent && <p className="text-sm text-muted-foreground">{resent}</p>}
         <Button className="self-start" disabled={pending} onClick={accept}>
           Chấp nhận lời mời
         </Button>

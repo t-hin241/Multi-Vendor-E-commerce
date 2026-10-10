@@ -10,6 +10,7 @@ import { StatusFilter } from "@/components/admin/status-filter";
 import { SectionHeader } from "@/components/section-header";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { ReceiptEvidence } from "@/components/orders/receipt-evidence";
 import * as api from "@/lib/api-client";
 import { useAuth } from "@/lib/auth-context";
 import {
@@ -125,6 +126,7 @@ function DeliveryExceptionCard({ exception: listed }: { exception: api.DeliveryE
             Goods received (v{d.receipt.version}, {d.receipt.actor_role}):{" "}
             {d.receipt.lines.map((l) => `${l.quantity} ${l.condition}`).join(", ")}
             {d.receipt.note && ` — ${d.receipt.note}`}
+            <ReceiptEvidence scope="admin" kind="delivery_exception" refId={d.id} />
           </p>
         ) : (
           d.carrier_outcome === "returned" && (

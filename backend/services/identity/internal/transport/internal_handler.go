@@ -27,5 +27,6 @@ func (h *InternalHandler) GetUser(c *gin.Context) {
 		return
 	}
 
-	httpresponse.OK(c, http.StatusOK, gin.H{"id": user.ID, "email": user.Email, "full_name": user.FullName, "role": user.Role, "is_active": user.IsActive})
+	httpresponse.OK(c, http.StatusOK, gin.H{"id": user.ID, "email": user.Email, "full_name": user.FullName, "role": user.Role, "is_active": user.IsActive,
+		"email_verified": user.EmailVerifiedAt != nil})
 }

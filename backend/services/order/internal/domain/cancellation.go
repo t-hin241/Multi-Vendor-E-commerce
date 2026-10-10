@@ -29,10 +29,17 @@ const (
 	// CancelNeedsReview: the package was already handed over, or the
 	// refund failed; an admin must act.
 	CancelNeedsReview CancellationStatus = "needs_review"
+	// CancelTransferred (PW-036): the package was intercepted after
+	// handover and came back; the failed-delivery case (AF-04) linked by
+	// DeliveryExceptionID resolves the goods and the money. Final.
+	CancelTransferred CancellationStatus = "transferred"
 )
 
-// Open requests fence the handover; rejected and resolved ones do not.
-func (s CancellationStatus) Open() bool { return s != CancelRejected && s != CancelResolved }
+// Open requests fence the handover; rejected, resolved and transferred
+// ones do not.
+func (s CancellationStatus) Open() bool {
+	return s != CancelRejected && s != CancelResolved && s != CancelTransferred
+}
 
 var cancellationTransitions = map[CancellationStatus][]CancellationStatus{
 	CancelPreparing:     {CancelRequested, CancelRejected},
@@ -40,7 +47,7 @@ var cancellationTransitions = map[CancellationStatus][]CancellationStatus{
 	CancelStopping:      {CancelApproved, CancelNeedsReview},
 	CancelApproved:      {CancelRefundPending, CancelResolved},
 	CancelRefundPending: {CancelResolved, CancelNeedsReview},
-	CancelNeedsReview:   {CancelRefundPending, CancelRejected, CancelResolved},
+	CancelNeedsReview:   {CancelRefundPending, CancelRejected, CancelResolved, CancelTransferred},
 }
 
 func CanTransitionCancellation(from, to CancellationStatus) bool {
@@ -89,11 +96,16 @@ type CancellationRequest struct {
 	DecisionReason *string
 	ReviewReason   *string
 	ResolvedAt     *time.Time
-	IdempotencyKey *string
-	RequestHash    *string
-	Version        int64
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
+	// InterceptionRequestedAt and DeliveryExceptionID (PW-036): the admin
+	// asked the carrier to stop a package already handed over; the case it
+	// was transferred to once the package came back.
+	InterceptionRequestedAt *time.Time
+	DeliveryExceptionID     *string
+	IdempotencyKey          *string
+	RequestHash             *string
+	Version                 int64
+	CreatedAt               time.Time
+	UpdatedAt               time.Time
 	// ActionDueAt and WaitingOn come from the case SLA work item (AF-07).
 	ActionDueAt *time.Time
 	WaitingOn   string

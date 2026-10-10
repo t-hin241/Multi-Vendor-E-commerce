@@ -48,6 +48,16 @@ type returnDestinationResponse struct {
 	VerifiedAt      *time.Time `json:"verified_at,omitempty"`
 	RejectionReason *string    `json:"rejection_reason,omitempty"`
 	UpdatedAt       time.Time  `json:"updated_at"`
+	// PW-042: verified by the carrier's address check rather than a person,
+	// and the carrier's answer for this version.
+	VerifiedByCarrier bool                  `json:"verified_by_carrier"`
+	CarrierCheck      *carrierCheckResponse `json:"carrier_check,omitempty"`
+}
+
+type carrierCheckResponse struct {
+	Result    string    `json:"result"`
+	Reason    *string   `json:"reason,omitempty"`
+	CheckedAt time.Time `json:"checked_at"`
 }
 
 func toReturnDestination(d *domain.ReturnDestination) returnDestinationResponse {
@@ -55,6 +65,10 @@ func toReturnDestination(d *domain.ReturnDestination) returnDestinationResponse 
 		Verified: d.Verified(), RejectionReason: d.RejectionReason, UpdatedAt: d.UpdatedAt}
 	if d.Verified() {
 		out.VerifiedAt = d.VerifiedAt
+		out.VerifiedByCarrier = d.VerifiedByCarrier()
+	}
+	if c := d.CurrentCarrierCheck(); c != nil {
+		out.CarrierCheck = &carrierCheckResponse{Result: c.Result, Reason: c.Reason, CheckedAt: c.CheckedAt}
 	}
 	if a := d.Address; a != nil {
 		out.RecipientName, out.Phone, out.Province, out.District, out.Ward, out.StreetAddress =

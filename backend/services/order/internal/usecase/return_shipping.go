@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"strconv"
 	"strings"
 	"time"
@@ -23,6 +24,7 @@ type ReturnShippingPort interface {
 	SetReturnShipment(ctx context.Context, returnID, shipmentID string) error
 	AddReceipt(ctx context.Context, g *domain.ReturnReceipt) error
 	LatestReceipt(ctx context.Context, returnID string) (*domain.ReturnReceipt, error)
+	CorrectReceipt(ctx context.Context, rr *domain.ReturnRequest, sellable int64, disputed bool, note *string) error
 	ListDispatchOverdue(ctx context.Context, now time.Time, limit int) ([]*domain.ReturnRequest, error)
 	ListDispatchDueSoon(ctx context.Context, now, until time.Time, limit int) ([]*domain.ReturnRequest, error)
 	ShippingCounts(ctx context.Context) (missing, overdue, inTransit, disputed int64, err error)
@@ -94,6 +96,27 @@ func (uc *OrderUseCase) dispatchDays() int {
 		return uc.ReturnDispatchDays
 	}
 	return domain.DefaultReturnDispatchDays
+}
+
+// returnShipDays is the dispatch deadline a return gets (PW-007): the one
+// the vendor order was sold under when its returns policy cites
+// order.return_ship_deadline, otherwise the configured days.
+func (uc *OrderUseCase) returnShipDays(ctx context.Context, rr *domain.ReturnRequest) (int, error) {
+	if uc.Policies == nil {
+		return uc.dispatchDays(), nil
+	}
+	vendorOrderID, _, err := uc.Returns.VendorOf(ctx, rr.ID)
+	if err != nil {
+		return 0, err
+	}
+	snapshot, err := uc.Policies.VendorSnapshot(ctx, vendorOrderID)
+	if err != nil {
+		return 0, err
+	}
+	if snapshot != nil && snapshot.ReturnShipDays > 0 {
+		return snapshot.ReturnShipDays, nil
+	}
+	return uc.dispatchDays(), nil
 }
 
 // AdminDecideReturnWithTerms approves or rejects a return. With return
@@ -168,8 +191,12 @@ func (uc *OrderUseCase) authorizeReturnShipping(ctx context.Context, rr *domain.
 		return uc.Returns.AddEvent(ctx, &domain.ReturnEvent{ReturnID: rr.ID, ActorUserID: &adminID, ActorRole: "admin",
 			Action: "shipping_destination_missing", ToStatus: string(rr.Status), Note: reason})
 	}
+	days, err := uc.returnShipDays(ctx, rr)
+	if err != nil {
+		return err
+	}
 	now := uc.Now().UTC()
-	deadline := now.Add(time.Duration(uc.dispatchDays()) * 24 * time.Hour)
+	deadline := now.Add(time.Duration(days) * 24 * time.Hour)
 	waiting := domain.ShippingAwaitingDispatch
 	rr.AuthorizationVersion++
 	rr.AuthorizedAt, rr.AuthorizedBy, rr.Destination = &now, &adminID, destination
@@ -380,6 +407,8 @@ type ReturnReceiptInput struct {
 	Sellable, Damaged, Missing int64
 	Note                       string
 	ExpectedVersion            int64
+	// EvidenceIDs are the recorder's uploaded images (PW-038).
+	EvidenceIDs []string
 }
 
 // RecordReturnReceipt records the goods that came back: sellable units go
@@ -433,6 +462,9 @@ func (uc *OrderUseCase) RecordReturnReceipt(ctx context.Context, actor SupportAc
 		if err := uc.ReturnShipping.AddReceipt(ctx, g); err != nil {
 			return err
 		}
+		if err := uc.attachEvidence(ctx, actor.ID, EvidenceReturn, rr.ID, in.EvidenceIDs); err != nil {
+			return err
+		}
 		disputed, restock := g.Disputed(), in.Sellable > 0
 		u := repository.ReturnUpdate{ReceivedBy: &actor.ID, InspectionNote: note, Restock: &restock, RestockQuantity: &in.Sellable,
 			InspectionDisputed: &disputed}
@@ -472,12 +504,14 @@ func (uc *OrderUseCase) RecordReturnReceipt(ctx context.Context, actor SupportAc
 
 // ReturnShippingDecision is an admin acting on a return's way back.
 type ReturnShippingDecision struct {
-	// Action: refund (a disputed inspection: refund in full anyway) or
-	// mark_lost (the parcel never reached the shop; refund then goes
-	// through a support case).
+	// Action: refund (a disputed inspection: refund in full anyway),
+	// mark_lost (the parcel never reached the shop) or refund_lost (PW-042:
+	// refund a lost parcel directly, without a receipt or a support case).
 	Action          string
 	Reason          string
 	ExpectedVersion int64
+	// EvidenceIDs: the carrier's confirmation of a lost parcel (PW-038).
+	EvidenceIDs []string
 }
 
 // DecideReturnShipping settles what the inspection or the parcel left open.
@@ -523,11 +557,21 @@ func (uc *OrderUseCase) DecideReturnShipping(ctx context.Context, adminID, retur
 				Action: "parcel_lost", ToStatus: string(rr.Status), Note: reason}); err != nil {
 				return err
 			}
+			if err := uc.attachEvidence(ctx, adminID, EvidenceReturn, rr.ID, in.EvidenceIDs); err != nil {
+				return err
+			}
 			if err := uc.Effects.Enqueue(ctx, domain.Effect{OrderID: rr.OrderID, Kind: domain.EffectCloseReturnShipment, Target: rr.ID}); err != nil {
 				return err
 			}
+		case "refund_lost":
+			if rr.Status != domain.ReturnApproved || rr.ShippingStatus == nil || *rr.ShippingStatus != domain.ShippingLost {
+				return apperror.Conflict("Only a parcel marked lost on the way back is refunded without a receipt")
+			}
+			if err := uc.requestReturnRefund(ctx, rr, adminID); err != nil {
+				return err
+			}
 		default:
-			return apperror.Validation("action must be refund or mark_lost")
+			return apperror.Validation("action must be refund, mark_lost or refund_lost")
 		}
 		result = rr
 		return uc.audit(ctx, domain.AdminAction{ActorID: adminID, Action: "return_shipping_" + in.Action, EntityType: domain.AuditReturn,
@@ -539,6 +583,118 @@ func (uc *OrderUseCase) DecideReturnShipping(ctx context.Context, adminID, retur
 	uc.Log.Info().Str("return_id", returnID).Str("action", in.Action).Msg("order_return_shipping_decided")
 	uc.runEffectsSoon(ctx, first.OrderID)
 	return result, nil
+}
+
+// ReturnReceiptCorrection is an admin's corrected count of what came back.
+type ReturnReceiptCorrection struct {
+	Sellable, Damaged, Missing int64
+	Note                       string
+	ExpectedVersion            int64
+	EvidenceIDs                []string
+}
+
+// CorrectReturnReceipt (PW-042) records a new receipt version while the
+// return waits for the admin (damaged or missing goods, no refund yet).
+// Stock goes back once: after the restock ran, the sellable count cannot
+// change. A corrected receipt with nothing damaged or missing requests the
+// refund as a clean receipt would.
+func (uc *OrderUseCase) CorrectReturnReceipt(ctx context.Context, adminID, returnID string, in ReturnReceiptCorrection) (*domain.ReturnRequest, error) {
+	if uc.ReturnShipping == nil {
+		return nil, domain.ReturnShippingDisabled()
+	}
+	reason, err := adminReason(in.Note)
+	if err != nil {
+		return nil, err
+	}
+	if err := uc.requireAdmin(ctx, adminID); err != nil {
+		return nil, err
+	}
+	first, err := uc.Returns.FindByID(ctx, returnID)
+	if err != nil {
+		return nil, returnError(err)
+	}
+	var result *domain.ReturnRequest
+	err = uc.withOrder(ctx, first.OrderID, func(ctx context.Context) error {
+		rr, err := uc.Returns.FindByID(ctx, returnID)
+		if err != nil {
+			return err
+		}
+		if rr.Version != in.ExpectedVersion {
+			return domain.ReturnChanged()
+		}
+		if rr.Status != domain.ReturnReceived {
+			return apperror.Conflict("Only a received return waiting for a decision can have its receipt corrected")
+		}
+		if err := domain.ValidateReturnReceipt(in.Sellable, in.Damaged, in.Missing, rr.Quantity); err != nil {
+			return err
+		}
+		latest, err := uc.ReturnShipping.LatestReceipt(ctx, rr.ID)
+		if err != nil {
+			return err
+		}
+		if latest == nil {
+			return apperror.Conflict("This return has no receipt to correct")
+		}
+		started, err := uc.restockStarted(ctx, rr)
+		if err != nil {
+			return err
+		}
+		if started && in.Sellable != latest.Sellable {
+			return apperror.Conflict("The sellable units are already back in stock; the sellable count cannot change")
+		}
+		g := &domain.ReturnReceipt{ReturnID: rr.ID, Version: latest.Version + 1, RecordedBy: adminID, ActorRole: "admin", Sellable: in.Sellable,
+			Damaged: in.Damaged, Missing: in.Missing, Note: reason}
+		if err := uc.ReturnShipping.AddReceipt(ctx, g); err != nil {
+			return err
+		}
+		if err := uc.ReturnShipping.CorrectReceipt(ctx, rr, in.Sellable, g.Disputed(), reason); err != nil {
+			return err
+		}
+		if err := uc.attachEvidence(ctx, adminID, EvidenceReturn, rr.ID, in.EvidenceIDs); err != nil {
+			return err
+		}
+		if in.Sellable > 0 && !started {
+			if err := uc.Effects.Enqueue(ctx, domain.Effect{OrderID: rr.OrderID, Kind: domain.EffectRestockReturn, Target: rr.ID}); err != nil {
+				return err
+			}
+		}
+		note := fmt.Sprintf("Receipt v%d: sellable %d, damaged %d, missing %d", g.Version, in.Sellable, in.Damaged, in.Missing)
+		if err := uc.Returns.AddEvent(ctx, &domain.ReturnEvent{ReturnID: rr.ID, ActorUserID: &adminID, ActorRole: "admin",
+			Action: "receipt_corrected", ToStatus: string(rr.Status), Note: &note}); err != nil {
+			return err
+		}
+		if err := uc.audit(ctx, domain.AdminAction{ActorID: adminID, Action: "return_receipt_corrected", EntityType: domain.AuditReturn,
+			EntityID: rr.ID, OrderID: &rr.OrderID, Reason: reason, Changes: map[string]any{
+				"receipt_version": domain.Change(latest.Version, g.Version), "sellable": domain.Change(latest.Sellable, in.Sellable)}}); err != nil {
+			return err
+		}
+		result = rr
+		if g.Disputed() {
+			return nil
+		}
+		return uc.requestReturnRefund(ctx, rr, adminID)
+	})
+	if err != nil {
+		return nil, returnError(err)
+	}
+	uc.Log.Info().Str("return_id", returnID).Int64("sellable", in.Sellable).Msg("order_return_receipt_corrected")
+	uc.runEffectsSoon(ctx, first.OrderID)
+	return result, nil
+}
+
+// restockStarted reports whether the return's restock effect ran or may be
+// running (an attempt was made): its quantity can no longer change.
+func (uc *OrderUseCase) restockStarted(ctx context.Context, rr *domain.ReturnRequest) (bool, error) {
+	effects, err := uc.Effects.ListByOrder(ctx, rr.OrderID)
+	if err != nil {
+		return false, err
+	}
+	for _, e := range effects {
+		if e.Kind == domain.EffectRestockReturn && e.Target == rr.ID && (e.Status != domain.EffectPending || e.Attempts > 0) {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // ReturnReceipt is the return's receipt for its buyer, shop or an admin.

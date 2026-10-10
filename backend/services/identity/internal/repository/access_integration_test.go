@@ -1,6 +1,7 @@
 package repository_test
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"os"
@@ -10,11 +11,14 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/rs/zerolog"
 	"golang.org/x/crypto/bcrypt"
 
 	"shopee/backend/pkg/adminaccess"
 	"shopee/backend/pkg/apperror"
 	"shopee/backend/services/identity/internal/domain"
+	"shopee/backend/services/identity/internal/repository"
+	"shopee/backend/services/identity/internal/usecase"
 )
 
 const testAdminPassword = "synthetic-test-password-1"
@@ -173,5 +177,74 @@ func TestIntegrationReauthProofIsOneTimeAndBound(t *testing.T) {
 	}
 	if _, err := uc.Reauthenticate(ctx, buyer.ID, testAdminPassword, "payment.approval.decide", "hash-1"); errCode(err) != apperror.CodeForbidden {
 		t.Fatalf("non-admin got a proof: %v", err)
+	}
+}
+
+// PW-028: with the second factor required, reauthentication needs a code
+// from the admin's enrolled authenticator (each code once) or an unused
+// recovery code; an admin without an authenticator must set one up first.
+func TestIntegrationReauthNeedsTheAuthenticatorCode(t *testing.T) {
+	f := setup(t)
+	ctx := t.Context()
+	a, b := f.admin(t), f.admin(t)
+	cipher, err := usecase.NewTokenCipher(bytes.Repeat([]byte{2}, 32))
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	totp := &usecase.TOTPUseCase{Store: repository.TOTPRepository{Pool: f.pool}, Users: f.users, Tx: f.tx, Cipher: cipher, Issuer: "Test",
+		Now: func() time.Time { return now }, Log: zerolog.Nop()}
+	enrollment, err := totp.Start(ctx, a.ID)
+	if err != nil || !strings.HasPrefix(enrollment.URI, "otpauth://totp/") {
+		t.Fatalf("start: %+v %v", enrollment, err)
+	}
+	secret, err := domain.TOTPSecretBytes(enrollment.Secret)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := totp.Confirm(ctx, a.ID, "000000"); errCode(err) != "mfa_code_invalid" && err == nil {
+		t.Fatal("a wrong code does not confirm")
+	}
+	codes, err := totp.Confirm(ctx, a.ID, domain.TOTPCode(secret, domain.TOTPStepAt(now)))
+	if err != nil || len(codes) != domain.RecoveryCodeCount {
+		t.Fatalf("confirm: %v %v", codes, err)
+	}
+	var stored int
+	if err := f.pool.QueryRow(ctx, `SELECT count(*) FROM admin_totp WHERE position(convert_to($1, 'UTF8') in secret_ciphertext) > 0`, enrollment.Secret).Scan(&stored); err != nil || stored != 0 {
+		t.Fatal("the secret is stored encrypted only")
+	}
+
+	uc := f.access()
+	uc.Now = func() time.Time { return now }
+	uc.SecondFactor, uc.MFARequired = totp, true
+	reauth := func(user, code string) error {
+		_, err := uc.Reauthenticate(ctx, user, testAdminPassword, "payment.approval.decide", "hash-mfa", code)
+		return err
+	}
+	if err := reauth(a.ID, ""); errCode(err) != "mfa_code_required" {
+		t.Fatalf("no code: %v", err)
+	}
+	if err := reauth(a.ID, domain.TOTPCode(secret, domain.TOTPStepAt(now))); errCode(err) != "mfa_code_invalid" {
+		t.Fatalf("the enrollment code is not reused: %v", err)
+	}
+	now = now.Add(domain.TOTPStep)
+	next := domain.TOTPCode(secret, domain.TOTPStepAt(now))
+	if err := reauth(a.ID, next); err != nil {
+		t.Fatal(err)
+	}
+	if err := reauth(a.ID, next); errCode(err) != "mfa_code_invalid" {
+		t.Fatalf("a code works once: %v", err)
+	}
+	if err := reauth(a.ID, codes[0]); err != nil {
+		t.Fatalf("a recovery code works: %v", err)
+	}
+	if err := reauth(a.ID, codes[0]); errCode(err) != "mfa_code_invalid" {
+		t.Fatalf("a recovery code works once: %v", err)
+	}
+	if err := reauth(b.ID, "123456"); errCode(err) != "mfa_enrollment_required" {
+		t.Fatalf("an admin without an authenticator sets one up first: %v", err)
+	}
+	if _, err := totp.Start(ctx, a.ID); errCode(err) != "mfa_already_enrolled" {
+		t.Fatalf("an enrolled authenticator is not replaced silently: %v", err)
 	}
 }

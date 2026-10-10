@@ -1,3 +1,4 @@
+import { ReimbursementBook } from "@/components/admin/reimbursement-book";
 import { RefundOperations } from "@/components/admin/refund-operations";
 
 export default async function Page({
@@ -7,5 +8,10 @@ export default async function Page({
 }) {
   const params = await searchParams;
   const id = params.refund_id;
-  return <RefundOperations focusID={typeof id === "string" ? id : undefined} />;
+  return (
+    <div className="flex flex-col gap-8">
+      <RefundOperations focusID={typeof id === "string" ? id : undefined} />
+      <ReimbursementBook />
+    </div>
+  );
 }

@@ -12,7 +12,7 @@ func TestWorkItemsUnavailableAndMissingSourcesAreNotZero(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	if len(out.Sources) != 3 {
+	if len(out.Sources) != 4 { // order, payment, shipment, notification
 		t.Fatal("missing source silently dropped")
 	}
 	for _, source := range out.Sources {

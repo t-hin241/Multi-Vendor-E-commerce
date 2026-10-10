@@ -87,3 +87,10 @@ Chỉ bước xác nhận mới chuyển refund sang `succeeded`. Bước này g
   - `TestManualRefundNeedsAVerifiedDestinationAndASecondAdmin`
   - `TestExpiredClaimIsUnknownUntilTheStatementIsChecked`
   - `TestManualRefundHistoryIsKept`
+
+## Bồi hoàn ngoài capture (PW-032, 2026-10-10)
+
+- `FEATURE_REIMBURSEMENTS_ENABLED=true`, trần mỗi khoản `PAYMENT_REIMBURSEMENT_MAX_AMOUNT` (mặc định 500000). Dùng cho tiền sàn trả buyer ngoài số đã thu (phí gửi trả hàng buyer tự trả, bồi hoàn thiện chí). Quỹ sàn, sổ riêng `reimbursements`: không tạo refund, không trừ hạn mức hoàn của capture, không trừ settlement của shop.
+- Quy trình ở `/admin/refunds` → Reimbursements: admin `finance.prepare` lập (lý do, số tiền, mã đơn) → admin `finance.approve` **khác người lập** duyệt (xác thực lại khi bật AF-19) → chuyển khoản ngoài ứng dụng tới tài khoản hoàn tiền **đã xác minh** của buyer trên cùng đơn → ghi mã giao dịch ngân hàng (không trùng với giao dịch hoàn tiền nào).
+- Buyer chưa có tài khoản đã xác minh trên đơn: khoản đã duyệt chờ (409 `destination_not_verified`); hàng việc `reimbursements_unpaid_24h` báo khoản đã duyệt quá 24 giờ chưa trả.
+- Migration Payment `000018`; down từ chối khi đã có khoản bồi hoàn.

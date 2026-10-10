@@ -46,11 +46,14 @@ type cancellationResponse struct {
 	DecisionReason *string    `json:"decision_reason,omitempty"`
 	ReviewReason   *string    `json:"review_reason,omitempty"`
 	ResolvedAt     *time.Time `json:"resolved_at,omitempty"`
-	ActionDueAt    *time.Time `json:"action_due_at,omitempty"`
-	WaitingOn      string     `json:"waiting_on,omitempty"`
-	Version        int64      `json:"version"`
-	CreatedAt      time.Time  `json:"created_at"`
-	UpdatedAt      time.Time  `json:"updated_at"`
+	// PW-036: interception asked; the failed-delivery case it moved to.
+	InterceptionRequestedAt *time.Time `json:"interception_requested_at,omitempty"`
+	DeliveryExceptionID     *string    `json:"delivery_exception_id,omitempty"`
+	ActionDueAt             *time.Time `json:"action_due_at,omitempty"`
+	WaitingOn               string     `json:"waiting_on,omitempty"`
+	Version                 int64      `json:"version"`
+	CreatedAt               time.Time  `json:"created_at"`
+	UpdatedAt               time.Time  `json:"updated_at"`
 }
 
 func toCancellation(c *domain.CancellationRequest) cancellationResponse {
@@ -58,6 +61,7 @@ func toCancellation(c *domain.CancellationRequest) cancellationResponse {
 		Origin: c.Origin, ReasonCode: c.ReasonCode, Reason: c.Reason, Status: string(c.Status), PolicyVersion: c.PolicyVersion,
 		HoldStatus: c.HoldStatus, HoldNote: c.HoldNote, StopResult: c.StopResult, Restock: c.Restock, RefundID: c.RefundID,
 		DecidedAt: c.DecidedAt, DecisionReason: c.DecisionReason, ReviewReason: c.ReviewReason, ResolvedAt: c.ResolvedAt,
+		InterceptionRequestedAt: c.InterceptionRequestedAt, DeliveryExceptionID: c.DeliveryExceptionID,
 		ActionDueAt: c.ActionDueAt, WaitingOn: c.WaitingOn, Version: c.Version, CreatedAt: c.CreatedAt, UpdatedAt: c.UpdatedAt}
 }
 
@@ -192,7 +196,7 @@ func (h *CancellationHandler) AdminList(c *gin.Context) {
 }
 
 type cancellationDecisionRequest struct {
-	Decision        string `json:"decision" binding:"required,oneof=approve reject retry_refund"`
+	Decision        string `json:"decision" binding:"required,oneof=approve reject retry_refund intercept"`
 	Reason          string `json:"reason" binding:"required,max=500"`
 	ExpectedVersion int64  `json:"expected_version" binding:"required,min=1"`
 	Restock         *bool  `json:"restock"`
@@ -205,7 +209,7 @@ func (h *CancellationHandler) Decide(c *gin.Context) {
 	}
 	var req cancellationDecisionRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		httpresponse.Error(c, http.StatusBadRequest, "validation_error", "decision (approve|reject|retry_refund), reason and expected_version are required")
+		httpresponse.Error(c, http.StatusBadRequest, "validation_error", "decision (approve|reject|retry_refund|intercept), reason and expected_version are required")
 		return
 	}
 	out, err := h.orders.DecideCancellation(c.Request.Context(), middleware.GetUserID(c), id, usecase.CancellationDecision{Decision: req.Decision,

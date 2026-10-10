@@ -367,6 +367,18 @@ func (f *fakeRestockRequestRepository) ListByStatus(_ context.Context, status st
 	return out, nil
 }
 
+func (f *fakeRestockRequestRepository) RecordFirstApproval(_ context.Context, id, adminUserID string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	req, ok := f.byID[id]
+	if !ok || req.Status != domain.RestockPending || req.FirstApprovedBy != nil {
+		return repository.ErrRestockRequestNotFound
+	}
+	now := time.Now()
+	req.FirstApprovedBy, req.FirstApprovedAt = &adminUserID, &now
+	return nil
+}
+
 func (f *fakeRestockRequestRepository) ListByVendor(_ context.Context, vendorID string, _, _ int) ([]*domain.RestockRequest, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()

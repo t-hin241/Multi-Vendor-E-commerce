@@ -32,6 +32,7 @@ const BUYER_LABELS: Record<CancellationStatus, string> = {
   resolved: "Đã hủy và hoàn tiền",
   rejected: "Yêu cầu hủy không được chấp nhận",
   needs_review: "Sàn đang kiểm tra yêu cầu hủy",
+  transferred: "Kiện đã được chặn và đang hoàn về; hoàn tiền theo sự cố giao hàng bên dưới",
 };
 
 export function buyerCancellationLabel(status: CancellationStatus): string {
@@ -47,10 +48,11 @@ export const ADMIN_CANCELLATION_LABELS: Record<CancellationStatus, string> = {
   resolved: "Resolved",
   rejected: "Rejected",
   needs_review: "Needs review",
+  transferred: "Transferred to a failed-delivery case",
 };
 
 export function isOpenCancellation(c: Pick<CancellationRequest, "status">): boolean {
-  return c.status !== "rejected" && c.status !== "resolved";
+  return c.status !== "rejected" && c.status !== "resolved" && c.status !== "transferred";
 }
 
 // canAskCancellation: a paid package not handed over and without an open

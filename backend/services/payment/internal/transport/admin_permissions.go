@@ -11,7 +11,12 @@ import "shopee/backend/pkg/adminaccess"
 // for the claimer (anyone else also needs finance.approve, checked by
 // the use case).
 var AdminRoutes = adminaccess.Routes{
-	"GET /api/payments/admin/refunds":                               adminaccess.FinanceRead,
+	"GET /api/payments/admin/refunds": adminaccess.FinanceRead,
+	// PW-032: reimbursements (a second admin approves).
+	"GET /api/payments/admin/reimbursements":                        adminaccess.FinanceRead,
+	"POST /api/payments/admin/reimbursements":                       adminaccess.FinancePrepare,
+	"POST /api/payments/admin/reimbursements/:id/decisions":         adminaccess.FinanceApprove,
+	"POST /api/payments/admin/reimbursements/:id/payments":          adminaccess.FinancePrepare,
 	"GET /api/payments/admin/refunds/:id":                           adminaccess.FinanceRead,
 	"POST /api/payments/admin/refunds/:id/resolve":                  adminaccess.FinancePrepare,
 	"GET /api/payments/admin/refunds/:id/manual":                    adminaccess.FinanceRead,

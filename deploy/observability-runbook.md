@@ -94,6 +94,7 @@ Alert ở `alerts.yml`, nhóm `work_queues`:
 | Payment | `refund_destination_unverified_24h`, `approvals_expiring` (warning) | Xác minh tài khoản; duyệt hoặc từ chối yêu cầu trước khi hết hạn |
 | Payment | `settlement_holds_payout_claimed` (critical) | Hold đến sau claim: Cancel payout item nếu chưa chuyển, hoặc ghi khoản phải thu |
 | Payment | `outcome_sync_review` (critical), `vendor_notices_review`, `buyer_notices_review` (warning) | Kết quả thanh toán/hoàn tiền, thông báo payout hoặc thông báo tài khoản hoàn tiền cho buyer không tới được Order/Notification: admin → review |
+| Payment | `reimbursements_unpaid_24h` (warning) | Khoản bồi hoàn đã duyệt chưa trả quá 24 giờ: `manual-refund-runbook.md` (PW-032) |
 | Shipment | `return_shipments_stale` (warning) | Kiện trả đi quá 10 ngày: hỏi hãng |
 | Notification | `vendor_actions_need_review`, `notifications_parked` (warning) | `vendor-action-notices-runbook.md`, `notification-runbook.md` |
 | Vendor | `staff_invitations_parked`, `return_destinations_unverified_24h` (warning) | `shop-staff-runbook.md`, `return-shipping-runbook.md` |

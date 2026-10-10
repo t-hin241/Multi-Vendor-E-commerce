@@ -400,6 +400,11 @@ type CheckoutPreview struct {
 	// Policies are the marketplace versions (and return rules) a checkout
 	// now would be placed under; nil while versioned policies are off.
 	Policies *domain.OrderPolicySnapshot
+	// PolicyVersions is what the buyer confirms at checkout: the
+	// marketplace kinds and each shop's approved policy (PW-013).
+	PolicyVersions map[string]int64
+	// ShopPolicies are the shops' approved policies by vendor id.
+	ShopPolicies map[string]domain.PolicyRef
 }
 
 type PreviewVendor struct {
@@ -443,8 +448,18 @@ func (uc *OrderUseCase) Preview(ctx context.Context, buyerID, addressID string) 
 	}
 	preview := &CheckoutPreview{CartVersion: snapshot.CartVersion, Currency: plan.Order.Currency, SubtotalAmount: plan.Order.SubtotalAmount}
 	if uc.policiesOn() {
-		if preview.Policies, err = uc.currentPolicies(ctx, uc.Now()); err != nil {
+		now := uc.Now()
+		if preview.Policies, err = uc.currentPolicies(ctx, now); err != nil {
 			return nil, err
+		}
+		shops, err := uc.Policies.ShopsAt(ctx, plan.VendorIDs(), now)
+		if err != nil {
+			return nil, appError(err)
+		}
+		preview.PolicyVersions = preview.Policies.AcceptedVersions(shops)
+		preview.ShopPolicies = map[string]domain.PolicyRef{}
+		for vendorID, v := range shops {
+			preview.ShopPolicies[vendorID] = domain.RefOf(v)
 		}
 	}
 	for _, vo := range plan.VendorOrders {

@@ -34,6 +34,8 @@ type User struct {
 	UpdatedAt    time.Time
 	// PermissionVersion changes with every admin grant change (AF-19).
 	PermissionVersion int64
+	// EmailVerifiedAt (PW-022): when the account proved it owns Email.
+	EmailVerifiedAt *time.Time
 }
 
 const minPasswordLength = 8

@@ -19,7 +19,18 @@ var ErrRefundNotFound = errors.New("repository: refund not found")
 const refundColumns = `id, payment_intent_id, order_id, order_refund_id, vendor_order_id, amount, currency, reason, status, requested_by,
 	evidence_reference, note, failure_reason, resolved_by, resolved_at, created_at, updated_at`
 
-type RefundRepository struct{ pool *pgxpool.Pool }
+type RefundRepository struct {
+	pool *pgxpool.Pool
+	// manualSLA (PW-017): with the manual workflow a new refund has no
+	// admin deadline until the buyer gives an account.
+	manualSLA bool
+}
+
+// WithManualSLA follows FEATURE_MANUAL_REFUND_WORKFLOW_ENABLED.
+func (r *RefundRepository) WithManualSLA(on bool) *RefundRepository {
+	r.manualSLA = on
+	return r
+}
 
 func NewRefundRepository(pool *pgxpool.Pool) *RefundRepository { return &RefundRepository{pool: pool} }
 
@@ -76,7 +87,11 @@ func (r *RefundRepository) Request(ctx context.Context, req domain.RefundRequest
 			return err
 		}
 		created = true
-		_, err = casesla.Sync(ctx, tx, refund.SLAStage())
+		stage := refund.SLAStage()
+		if r.manualSLA {
+			stage = domain.ManualSLAStage(*refund, nil, nil, refund.CreatedAt)
+		}
+		_, err = casesla.Sync(ctx, tx, stage)
 		return err
 	})
 	return refund, created, err

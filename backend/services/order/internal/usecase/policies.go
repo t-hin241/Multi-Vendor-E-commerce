@@ -79,12 +79,13 @@ func (uc *OrderUseCase) snapshotPolicies(ctx context.Context, plan *domain.Plan,
 	if err != nil {
 		return err
 	}
-	if accepted != nil && !domain.SameVersions(accepted, snapshot.VersionsByKind()) {
-		return domain.PolicyChanged()
-	}
 	shops, err := uc.Policies.ShopsAt(ctx, plan.VendorIDs(), t)
 	if err != nil {
 		return appError(err)
+	}
+	// PW-013: a shop policy approved since the preview is a change too.
+	if accepted != nil && !domain.SameVersions(accepted, snapshot.AcceptedVersions(shops)) {
+		return domain.PolicyChanged()
 	}
 	plan.OrderPolicy = snapshot
 	plan.VendorPolicies = make([]*domain.VendorPolicySnapshot, len(plan.VendorOrders))

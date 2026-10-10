@@ -46,9 +46,17 @@ export const RETURN_SHIPPING_OPTIONS = [
   { value: "none", label: "Không hoàn phí vận chuyển (hiện hành)" },
 ];
 
-export function returnsRuleRefs(windowDays: number, shipping: string): Record<string, string> {
-  return {
+// shipDays (PW-007) is the dispatch deadline after approval; 0 leaves it
+// out (the configured deadline applies).
+export function returnsRuleRefs(
+  windowDays: number,
+  shipping: string,
+  shipDays = 0,
+): Record<string, string> {
+  const refs: Record<string, string> = {
     "order.returns_window": `window-${windowDays}d`,
     "order.return_shipping_refund": shipping,
   };
+  if (shipDays > 0) refs["order.return_ship_deadline"] = `ship-${shipDays}d`;
+  return refs;
 }

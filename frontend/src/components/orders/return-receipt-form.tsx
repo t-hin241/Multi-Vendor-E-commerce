@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 
+import { AttachmentPicker, type PickedAttachment } from "@/components/support/attachment-picker";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -51,6 +52,7 @@ export function ReturnReceiptForm({
   const [open, setOpen] = useState(false);
   const [counts, setCounts] = useState({ sellable: r.quantity, damaged: 0, missing: 0 });
   const [note, setNote] = useState("");
+  const [evidence, setEvidence] = useState<PickedAttachment[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -78,8 +80,10 @@ export function ReturnReceiptForm({
           missing_quantity: counts.missing,
           note: note.trim() || undefined,
           expected_version: r.version,
+          evidence_ids: evidence.map((a) => a.id),
         }),
       );
+      setEvidence([]);
       setOpen(false);
       await onDone();
     } catch (err) {
@@ -112,6 +116,15 @@ export function ReturnReceiptForm({
         placeholder={t.note}
         value={note}
         onChange={(e) => setNote(e.target.value)}
+      />
+      <AttachmentPicker
+        scope={scope}
+        value={evidence}
+        onChange={setEvidence}
+        max={5}
+        maxBytes={5 * 1024 * 1024}
+        disabled={busy}
+        label={scope === "admin" ? "Add photos" : "Thêm ảnh kiện hàng"}
       />
       {error && <p className="text-destructive">{error}</p>}
       <div className="flex gap-2">

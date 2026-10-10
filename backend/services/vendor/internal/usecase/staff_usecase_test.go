@@ -483,3 +483,21 @@ func TestInvitationDeliveryStoresOnlyTheTokenHash(t *testing.T) {
 		t.Fatal("address kept after delivery")
 	}
 }
+
+// PW-022: with FEATURE_STAFF_REQUIRES_VERIFIED_EMAIL on, only an account
+// that confirmed its email accepts; the link keeps working afterwards.
+func TestAcceptInvitationNeedsAVerifiedEmail(t *testing.T) {
+	f := newStaffFixture(t)
+	ctx := t.Context()
+	f.uc.RequireVerifiedEmail = true
+	token := f.inviteAndDeliver(t, f.owner, "clerk@example.test", shopaccess.ProductsRead)
+	if _, err := f.uc.AcceptInvitation(ctx, f.clerk, token); code(err) != "email_not_verified" {
+		t.Fatalf("an unverified address cannot join: %v", err)
+	}
+	acct := f.accounts[f.clerk]
+	acct.EmailVerified = true
+	f.accounts[f.clerk] = acct
+	if _, err := f.uc.AcceptInvitation(ctx, f.clerk, token); err != nil {
+		t.Fatalf("a verified address joins with the same link: %v", err)
+	}
+}

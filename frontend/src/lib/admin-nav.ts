@@ -38,6 +38,7 @@ export const ADMIN_NAV_GROUPS: AdminNavGroup[] = [
     items: [
       { href: "/admin", label: "Dashboard", icon: LayoutDashboard },
       { href: "/admin/audit", label: "Audit log", icon: History },
+      { href: "/admin/security", label: "My security", icon: KeyRound },
     ],
   },
   {

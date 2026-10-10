@@ -39,7 +39,7 @@ func NewRouter(env string, log zerolog.Logger, jwtManager *authjwt.Manager, inte
 	health.RegisterRoutes(r, checkers...)
 
 	// Only services holding the internal key may queue a notification.
-	r.POST("/internal/notifications", internal.Allow("order", "vendor"), internalHandler.Notify)
+	r.POST("/internal/notifications", internal.Allow("order", "vendor", "payment"), internalHandler.Notify)
 
 	adminGroup := r.Group("/api/notifications/admin", middleware.RequireAuth(jwtManager), middleware.RequireRole("admin"), adminGuard, func(c *gin.Context) {
 		c.Header("Cache-Control", "no-store")
