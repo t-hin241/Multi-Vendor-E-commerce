@@ -26,6 +26,7 @@ Domain events between services travel on NATS JetStream, stream `SHOPEE_EVENTS`,
 | `inventory.reservation_expired` | Inventory (`inventory_outbox`) | Order `order-reservation-expiry` | `id`, `order_id`, `type` | Order cancels an unpaid order whose hold expired |
 | `inventory.stock_changed` | Inventory (`inventory_stock_outbox`) | Catalog `catalog-stock-cache` | `variant_ids` (1–100) | Drop cached stock; idempotent (new id per publish) |
 | `order.notification_requested` | Order (effect `notify`) | Notification `notification-requests` | `user_id`, `type`, `reference_id` | As above |
+| `payment.notification_requested` | Payment (`payment_buyer_notices`, PW-009) | Notification `notification-requests` | `user_id`, `type`, `reference_id` (order id) | As above |
 | `order.fulfillment_ready` | Order (effect `create_shipment`) | Shipment `shipment-fulfillment-ready` | vendor order, shop, buyer, delivery address, weight, fee quote | Open the shipment once per vendor order |
 | `order.fulfillment_cancelled` | Order (effect `cancel_shipment`) | Shipment `shipment-fulfillment-cancelled` | `vendor_order_id` | Stop / intercept the shipment |
 | `order.vendor_order_settleable` | Order (effect `settle_vendor_order`) | Payment `payment-settlements` | checkout snapshot, commission, `completed_at`, `eligible_at` | Ledger entry once per vendor order |

@@ -39,6 +39,9 @@ func (w OrderWorker) Run(ctx context.Context) {
 		drain(ctx, interval, batch, func() (int, error) { return uc.ProcessEffects(ctx, "", batch) }, func(err error) {
 			uc.Log.Error().Err(err).Msg("order_effect_worker_failed")
 		})
+		if _, err := uc.RelayBuyerNotices(ctx, batch); err != nil && ctx.Err() == nil {
+			uc.Log.Error().Err(err).Msg("order_buyer_notice_relay_failed")
+		}
 		if _, err := uc.RecoverCheckouts(ctx, batch); err != nil && ctx.Err() == nil {
 			uc.Log.Error().Err(err).Msg("order_checkout_recovery_worker_failed")
 		}
@@ -119,6 +122,7 @@ func (w OrderWorker) report(ctx context.Context) {
 	uc.reportDeliveryExceptions(ctx)
 	uc.FlagOverdueReturns(ctx)
 	uc.RemindReturnDispatch(ctx)
+	uc.reportBuyerNotices(ctx)
 	uc.reportReturnShipping(ctx)
 	if exceptions, err := uc.Payments.ListRejected(ctx, 1, 0); err == nil && len(exceptions) > 0 {
 		uc.Log.Warn().Str("oldest_payment_id", exceptions[0].PaymentID).Msg("order_payment_exceptions_pending")

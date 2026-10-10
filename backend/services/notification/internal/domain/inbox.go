@@ -62,6 +62,10 @@ var inboxTargets = map[Type]inboxTarget{
 	TypeShopPolicyRejected:         {"shop", "/vendor/shops"},
 	TypeReturnDestinationVerified:  {"shop", "/vendor/shipping"},
 	TypeReturnDestinationRejected:  {"shop", "/vendor/shipping"},
+	TypeSupportIntakeReceived:      {"support_intake", "/support"},
+	TypeSupportIntakeClosed:        {"support_intake", "/support"},
+	TypeRefundDestinationNeeded:    {"order", "/orders/%s"},
+	TypeRefundDestinationRejected:  {"order", "/orders/%s"},
 
 	TypeVendorNewOrder:              {"vendor_order", "/vendor/orders"},
 	TypeVendorCancellationRequested: {"cancellation", "/vendor/orders"},
@@ -73,6 +77,10 @@ var inboxTargets = map[Type]inboxTarget{
 	TypeVendorSupportWaitingShop:    {"support_case", "/vendor/support/%s"},
 	TypeVendorDeliveryGoodsReturned: {"delivery_exception", "/vendor/orders"},
 	TypeVendorRedeliveryAccepted:    {"delivery_exception", "/vendor/orders"},
+	TypeVendorSupportReplyDue:       {"support_case", "/vendor/support/%s"},
+	TypeVendorSupportReplyOverdue:   {"support_case", "/vendor/support/%s"},
+	TypeVendorGoodsReceiptDue:       {"delivery_exception", "/vendor/orders"},
+	TypeVendorGoodsReceiptOverdue:   {"delivery_exception", "/vendor/orders"},
 
 	"sla_support":            {"support_case", "/admin/support/%s"},
 	"sla_return":             {"return", "/admin/returns?return_id=%s"},

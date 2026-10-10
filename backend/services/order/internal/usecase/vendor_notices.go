@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strconv"
 
 	"shopee/backend/pkg/apperror"
 	"shopee/backend/pkg/eventbus"
@@ -28,6 +29,55 @@ func (uc *OrderUseCase) noticeVendor(ctx context.Context, orderID, vendorID, ven
 		return nil
 	}
 	return uc.Effects.Enqueue(ctx, domain.NewVendorNoticeEffect(orderID, vendorID, vendorOrderID, kind, referenceID))
+}
+
+// noticeVendorAgain is noticeVendor for work that can come back: each
+// round (a deadline version, a case version) is its own notice.
+func (uc *OrderUseCase) noticeVendorAgain(ctx context.Context, orderID, vendorID, vendorOrderID, kind, referenceID, round string) error {
+	if !uc.VendorActionNotices {
+		return nil
+	}
+	e := domain.NewVendorNoticeEffect(orderID, vendorID, vendorOrderID, kind, referenceID)
+	e.Target += ":" + round
+	return uc.Effects.Enqueue(ctx, e)
+}
+
+// NoticeShopDeadline (PW-009, AF-07) tells the shop that a deadline it must
+// meet reached its reminder ("reminder") or passed ("overdue"). It runs in
+// the SLA scan transaction (ctx carries it); stage names the shop's work:
+// answering a support case or recording the goods of a failed delivery.
+func (uc *OrderUseCase) NoticeShopDeadline(ctx context.Context, stage, resourceID string, deadlineVersion int64, kind string) error {
+	if !uc.VendorActionNotices {
+		return nil
+	}
+	round := "d" + strconv.FormatInt(deadlineVersion, 10)
+	overdue := kind == "overdue"
+	switch stage {
+	case "vendor_response":
+		c, err := uc.Support.FindByID(ctx, resourceID)
+		if err != nil {
+			return err
+		}
+		action := events.VendorActionSupportReplyDue
+		if overdue {
+			action = events.VendorActionSupportReplyOverdue
+		}
+		return uc.noticeVendorAgain(ctx, c.OrderID, c.VendorID, c.VendorOrderID, action, c.ID, round)
+	case "delivery_goods_receipt":
+		if uc.DeliveryExceptions == nil {
+			return nil
+		}
+		d, err := uc.DeliveryExceptions.FindByID(ctx, resourceID)
+		if err != nil {
+			return err
+		}
+		action := events.VendorActionGoodsReceiptDue
+		if overdue {
+			action = events.VendorActionGoodsReceiptOverdue
+		}
+		return uc.noticeVendorAgain(ctx, d.OrderID, d.VendorID, d.VendorOrderID, action, d.ID, round)
+	}
+	return nil
 }
 
 // noticeVendorOfReturn finds the shop of a return's item and queues kind.

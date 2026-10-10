@@ -64,6 +64,9 @@ func TestEventContracts(t *testing.T) {
 	env, err = OrderNotification("effect-1", order, NotificationRequest{UserID: "u-1", Type: "order_paid", ReferenceID: order})
 	pin(t, env, err, OrderNotificationRequested, order, `{"user_id":"u-1","type":"order_paid","reference_id":"`+order+`"}`)
 
+	env, err = PaymentNotification("notice-1", order, NotificationRequest{UserID: "u-1", Type: "refund_destination_needed", ReferenceID: order})
+	pin(t, env, err, PaymentNotificationRequested, order, `{"user_id":"u-1","type":"refund_destination_needed","reference_id":"`+order+`"}`)
+
 	env, err = StockChangedEvent([]string{product})
 	pin(t, env, err, StockChanged, "stock", `{"variant_ids":["`+product+`"]}`)
 

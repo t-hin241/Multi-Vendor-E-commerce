@@ -34,6 +34,14 @@ const (
 	// shop prepares (ReferenceID is the delivery exception id).
 	VendorActionDeliveryGoodsReturned = "delivery_goods_returned"
 	VendorActionRedeliveryAccepted    = "redelivery_accepted"
+	// PW-009 (AF-07): a deadline the shop must meet (answering a support
+	// case waiting for it, recording the goods of a failed delivery) reached
+	// its reminder or passed; ReferenceID is the case or exception id. One
+	// notice per deadline version, so an extension or a new round tells again.
+	VendorActionSupportReplyDue     = "support_reply_due"
+	VendorActionSupportReplyOverdue = "support_reply_overdue"
+	VendorActionGoodsReceiptDue     = "goods_receipt_due"
+	VendorActionGoodsReceiptOverdue = "goods_receipt_overdue"
 )
 
 // Payout outcomes (Payment → Notification).

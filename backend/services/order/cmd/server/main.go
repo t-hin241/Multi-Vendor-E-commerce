@@ -9,6 +9,8 @@ import (
 	"shopee/backend/pkg/casesla"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+
 	"shopee/backend/pkg/adminaudit"
 	"shopee/backend/pkg/middleware"
 
@@ -156,6 +158,7 @@ func main() {
 		CaseHolds:         repository.SupportHoldRepository{Pool: dbPool},
 		SourceHolds:       repository.SourceHoldRepository{Pool: dbPool},
 		Intakes:           repository.SupportIntakeRepository{Pool: dbPool},
+		BuyerNotices:      repository.BuyerNotices{Pool: dbPool},
 		Cancellations:     repository.CancellationRepository{Pool: dbPool},
 		Stops:             shipmentClient,
 		Recoveries:        inventoryClient,
@@ -236,7 +239,11 @@ func main() {
 	slaRoles := identityclient.Client{URL: internalServices.IdentityURL, Key: internalServices.Key}
 	slaStore := repository.NewCaseSLAStore(dbPool)
 	casesla.Register(adminGroup, casesla.Service{Repo: slaStore, Roles: slaRoles, Permissions: adminaccess.Client{URL: internalServices.IdentityURL, Key: internalServices.Key}}, log)
-	go (casesla.Worker{Store: slaStore, Owner: "order", Config: slaConfig, Roles: slaRoles, Permissions: adminaccess.Client{URL: internalServices.IdentityURL, Key: internalServices.Key}, Publisher: bus.Bus, Log: log}).Run(workerCtx)
+	go (casesla.Worker{Store: slaStore, Owner: "order", Config: slaConfig, Roles: slaRoles, Permissions: adminaccess.Client{URL: internalServices.IdentityURL, Key: internalServices.Key}, Publisher: bus.Bus, Log: log,
+		// PW-009: a deadline the shop must meet is told to the shop too.
+		WaitingOnShop: func(ctx context.Context, tx pgx.Tx, i *casesla.Item, kind string) error {
+			return orderUseCase.NoticeShopDeadline(repository.WithTx(ctx, tx), i.Stage, i.ResourceID, i.DeadlineVersion, kind)
+		}}).Run(workerCtx)
 	bus.RegisterAdmin(adminGroup, identityclient.Client{URL: internalServices.IdentityURL, Key: internalServices.Key})
 	adminaudit.Register(adminGroup, "/audit-events",
 		adminaudit.Source{Name: "order", SQL: repository.AuditSearchSQL + " UNION ALL " + eventbus.InboxAuditSearchSQL + " UNION ALL " + casesla.AuditSearchSQL, DB: dbPool, Roles: identityclient.Client{URL: internalServices.IdentityURL, Key: internalServices.Key}}, log)

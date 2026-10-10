@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -585,8 +586,8 @@ func (uc *OrderUseCase) ChangeSupportCaseStatus(ctx context.Context, adminID, ca
 		if to != domain.CaseWaitingVendor {
 			return nil
 		}
-		// PW-009: the shop is told the first time the case waits for it.
-		return uc.noticeVendor(ctx, c.OrderID, c.VendorID, c.VendorOrderID, events.VendorActionSupportWaitingShop, c.ID)
+		// PW-009: the shop is told each time the case comes back to it.
+		return uc.noticeVendorAgain(ctx, c.OrderID, c.VendorID, c.VendorOrderID, events.VendorActionSupportWaitingShop, c.ID, "v"+strconv.FormatInt(c.Version, 10))
 	})
 }
 

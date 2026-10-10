@@ -58,6 +58,12 @@ type EvidenceStore interface {
 	Delete(ctx context.Context, key string) error
 }
 
+// BuyerNoticeQueue queues refund facts for the buyer (PW-009) in the
+// caller's transaction (repository.BuyerNotices).
+type BuyerNoticeQueue interface {
+	DestinationRejected(ctx context.Context, refundID string, version int) error
+}
+
 var errEvidenceUnavailable = &apperror.Error{Code: "evidence_storage_unavailable", Status: 503, Message: "Evidence storage is unavailable; try again"}
 
 // ManualRefundUseCase runs AF-06: the buyer gives a destination, finance
@@ -73,6 +79,8 @@ type ManualRefundUseCase struct {
 	Admins   AdminAuthority
 	Cipher   DestinationCipher // nil: destinations cannot be stored or read
 	Evidence EvidenceStore     // nil: no evidence uploads
+	// Notices, when set, tells the buyer a destination was rejected.
+	Notices BuyerNoticeQueue
 	// Enabled is FEATURE_MANUAL_REFUND_WORKFLOW_ENABLED: off stops new
 	// destinations and attempts; open attempts are still finished.
 	Enabled bool
@@ -380,6 +388,12 @@ func (uc *ManualRefundUseCase) DecideDestination(ctx context.Context, actor, ref
 		}
 		if err := uc.Audit.Record(ctx, actor, action, "payment_refund", refundID, fmt.Sprintf("v%d %s: %s", d.Version, d.Masked(), reason)); err != nil {
 			return err
+		}
+		// PW-009: the buyer gives another account; the reason stays in the app.
+		if !in.Verify && uc.Notices != nil {
+			if err := uc.Notices.DestinationRejected(ctx, refundID, d.Version); err != nil {
+				return err
+			}
 		}
 		view, err = uc.view(ctx, r)
 		return err

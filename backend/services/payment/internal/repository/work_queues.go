@@ -15,5 +15,6 @@ var WorkQueues = []telemetry.WorkQueue{
 		SELECT created_at AS t FROM payment_order_sync WHERE delivered_at IS NULL AND requires_review
 		UNION ALL SELECT created_at FROM payment_refund_sync WHERE delivered_at IS NULL AND requires_review) s`},
 	{Name: "vendor_notices_review", Severity: "warning", SQL: `SELECT count(*), COALESCE(EXTRACT(EPOCH FROM now() - min(created_at)), 0)::float8 FROM payment_vendor_notices WHERE delivered_at IS NULL AND requires_review`},
+	{Name: "buyer_notices_review", Severity: "warning", SQL: `SELECT count(*), COALESCE(EXTRACT(EPOCH FROM now() - min(created_at)), 0)::float8 FROM payment_buyer_notices WHERE delivered_at IS NULL AND requires_review`},
 	{Name: "case_sla_overdue", Severity: "warning", SQL: `SELECT count(*), COALESCE(EXTRACT(EPOCH FROM now() - min(due_at)), 0)::float8 FROM case_sla_work_items WHERE active AND due_at < now()`},
 }

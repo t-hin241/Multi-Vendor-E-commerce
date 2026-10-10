@@ -13,7 +13,9 @@ import (
 func TestInboxItemsForEveryKind(t *testing.T) {
 	ref := "11111111-2222-4333-8444-555555555555"
 	for _, typ := range []domain.Type{domain.TypeOrderPaid, domain.TypeOrderRefunded, domain.TypeReturnShippingInstructions, domain.TypeVendorApproved,
-		domain.TypeVendorNewOrder, domain.TypeVendorPayoutFailed, "sla_support", "sla_delivery_exception"} {
+		domain.TypeVendorNewOrder, domain.TypeVendorPayoutFailed, "sla_support", "sla_delivery_exception",
+		domain.TypeVendorSupportReplyDue, domain.TypeVendorSupportReplyOverdue, domain.TypeVendorGoodsReceiptDue, domain.TypeVendorGoodsReceiptOverdue,
+		domain.TypeSupportIntakeReceived, domain.TypeSupportIntakeClosed, domain.TypeRefundDestinationNeeded, domain.TypeRefundDestinationRejected} {
 		n, err := domain.NewNotification(domain.Request{EventID: "e-1", Source: "order", UserID: user, Type: typ, ReferenceID: ref}, time.Now())
 		if err != nil {
 			t.Fatal(err)
@@ -31,6 +33,16 @@ func TestInboxItemsForEveryKind(t *testing.T) {
 	item, _, _ := domain.NewInboxItem(n)
 	if item.Link != "/orders/order-1" || !strings.Contains(item.Title, "order-1") {
 		t.Fatalf("order link %+v", item)
+	}
+	// PW-009: a refund destination opens the order page (where the buyer
+	// gives the account); a request without an order opens /support.
+	for typ, link := range map[domain.Type]string{domain.TypeRefundDestinationRejected: "/orders/order-1", domain.TypeSupportIntakeClosed: "/support",
+		domain.TypeVendorSupportReplyOverdue: "/vendor/support/order-1"} {
+		n, _ := domain.NewNotification(domain.Request{UserID: user, Type: typ, ReferenceID: "order-1"}, time.Now())
+		item, _, _ := domain.NewInboxItem(n)
+		if item.Link != link || strings.Contains(item.Body, "••••") {
+			t.Fatalf("%s link %+v", typ, item)
+		}
 	}
 }
 

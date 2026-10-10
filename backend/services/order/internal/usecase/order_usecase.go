@@ -45,6 +45,9 @@ type Deps struct {
 	SourceHolds SourceHoldPort
 	// Intakes are buyers' requests without an order id (PW-012).
 	Intakes SupportIntakePort
+	// BuyerNotices is the outbox of buyer notices without an order
+	// (PW-009: support requests received or closed).
+	BuyerNotices BuyerNoticePort
 	// Cancellations, Stops and Recoveries run AF-03 (paid cancellation);
 	// PaidCancellation is FEATURE_PAID_CANCELLATION_ENABLED (new requests).
 	Cancellations    CancellationPort

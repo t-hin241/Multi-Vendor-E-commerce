@@ -23,8 +23,23 @@ export type InboxEntry = {
   created_at: string;
 };
 
+// A reply from a route a spec adds with MockApi.on: data (status 200 by
+// default), an error envelope, or a lost response (the server acted but
+// the browser saw a network error).
+export type Reply =
+  | { status?: number; data: unknown }
+  | { status: number; code: string; message: string }
+  | { abort: true };
+export type RouteContext = {
+  me: MockUser | null;
+  body: Json;
+  url: URL;
+  match: RegExpMatchArray;
+  headers: Record<string, string>;
+};
+
 // Distinct in the first 8 characters too (the UI shows "#" + 8 characters).
-const uuid = (n: number) =>
+export const uuid = (n: number) =>
   `${String(n).padStart(8, "0")}-0000-4000-8000-${String(n).padStart(12, "0")}`;
 
 export class MockApi {
@@ -49,6 +64,10 @@ export class MockApi {
   inboxEnabled = true;
   inboxFails = false;
   readMarkers: string[] = [];
+  // Routes a spec adds for its feature (first match wins); requests[]
+  // records what reached them, for asserting what the page sent.
+  private routes: { method: string; path: RegExp; reply: (c: RouteContext) => Reply }[] = [];
+  requests: { method: string; path: string; body: Json; headers: Record<string, string> }[] = [];
   private nextId = 100;
 
   constructor() {
@@ -76,6 +95,17 @@ export class MockApi {
     return this.users.get(email)!;
   }
 
+  // on answers method + path (anchored regex) for signed-in and anonymous
+  // callers alike; the handler checks me itself, like a service would.
+  on(method: string, path: RegExp, reply: (c: RouteContext) => Reply) {
+    this.routes.push({ method, path, reply });
+  }
+
+  // sent lists the bodies the page sent to method + path.
+  sent(method: string, path: RegExp) {
+    return this.requests.filter((r) => r.method === method && path.test(r.path)).map((r) => r.body);
+  }
+
   resetCart() {
     this.cartItems = [
       {
@@ -93,6 +123,22 @@ export class MockApi {
         available: true,
       },
     ];
+  }
+
+  // addPackage gives an order one vendor order (a package) with status.
+  addPackage(order: Json & { vendor_orders?: unknown }, status = "delivered") {
+    const vo = {
+      id: uuid(this.nextId++),
+      order_id: order.id,
+      vendor_id: uuid(80),
+      status,
+      subtotal_amount: 120_000,
+      shipping_fee_amount: 30_000,
+      currency: "VND",
+      created_at: new Date().toISOString(),
+    };
+    order.vendor_orders = [...((order.vendor_orders as unknown[]) ?? []), vo];
+    return vo;
   }
 
   addOrder(buyer: MockUser, status = "pending_payment") {
@@ -324,6 +370,17 @@ export class MockApi {
 
     const me = this.caller(route);
     const signedIn = me !== null;
+    for (const r of this.routes) {
+      const match = r.method === method ? path.match(r.path) : null;
+      if (!match) continue;
+      const headers = req.headers();
+      this.requests.push({ method, path, body, headers });
+      const out = r.reply({ me, body, url, match, headers });
+      if ("abort" in out) return route.abort("failed");
+      return "code" in out
+        ? this.fail(route, out.status, out.code, out.message)
+        : this.ok(route, out.data, out.status ?? 200);
+    }
     if (path.startsWith("/api/notifications/inbox")) {
       return me
         ? this.handleInbox(route, me, path, method, url, body)

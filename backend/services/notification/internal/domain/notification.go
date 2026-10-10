@@ -60,6 +60,13 @@ const (
 	// Return destination decisions (Vendor, PW-009); the reference is the shop id.
 	TypeReturnDestinationVerified Type = "return_destination_verified"
 	TypeReturnDestinationRejected Type = "return_destination_rejected"
+	// Support requests without an order id (Order, PW-009); the reference
+	// is the request id.
+	TypeSupportIntakeReceived Type = "support_intake_received"
+	TypeSupportIntakeClosed   Type = "support_intake_closed"
+	// Manual refunds (Payment, AF-06/PW-009); the reference is the order id.
+	TypeRefundDestinationNeeded   Type = "refund_destination_needed"
+	TypeRefundDestinationRejected Type = "refund_destination_rejected"
 )
 
 // DefaultMaxAttempts bounds transient retries (about four hours of backoff).

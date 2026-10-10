@@ -10,8 +10,8 @@ import (
 	"shopee/backend/services/order/internal/usecase"
 )
 
-// PW-009: the shop hears about a support case on its package and, once,
-// when the marketplace waits for its answer.
+// PW-009: the shop hears about a support case on its package and each
+// time the marketplace waits for its answer.
 func TestShopIsToldAboutSupportCases(t *testing.T) {
 	pool := orderDB(t)
 	ctx := t.Context()
@@ -42,9 +42,9 @@ func TestShopIsToldAboutSupportCases(t *testing.T) {
 	if _, err := uc.ChangeSupportCaseStatus(ctx, admin, sc.ID, string(domain.CaseWaitingVendor), back.Version, "Thêm thông tin"); err != nil {
 		t.Fatal(err)
 	}
-	if n := countRowsIn(t, pool, `SELECT count(*) FROM order_effects WHERE kind = 'notify_vendor' AND target = $1`,
-		events.VendorActionSupportWaitingShop+":"+sc.ID); n != 1 {
-		t.Fatalf("waiting for the shop is told once per case, got %d", n)
+	if n := countRowsIn(t, pool, `SELECT count(*) FROM order_effects WHERE kind = 'notify_vendor' AND target LIKE $1`,
+		events.VendorActionSupportWaitingShop+":"+sc.ID+":v%"); n != 2 {
+		t.Fatalf("each time the case comes back to the shop it is told, got %d", n)
 	}
 }
 

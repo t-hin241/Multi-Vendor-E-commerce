@@ -150,7 +150,7 @@ func main() {
 	// PLT-03: notification requests arrive from the event bus (the internal
 	// HTTP route stays for producers in rollback mode).
 	subscriptions := []eventbus.Subscription{{Durable: "notification-requests",
-		Types: []string{events.OrderNotificationRequested, events.VendorNotificationRequested, events.OrderWorkItemReminder, events.OrderWorkItemOverdue, events.PaymentWorkItemReminder, events.PaymentWorkItemOverdue, events.ShipmentWorkItemReminder, events.ShipmentWorkItemOverdue}, Handle: transport.NotificationRequestedHandler(notificationUseCase)}}
+		Types: []string{events.OrderNotificationRequested, events.VendorNotificationRequested, events.PaymentNotificationRequested, events.OrderWorkItemReminder, events.OrderWorkItemOverdue, events.PaymentWorkItemReminder, events.PaymentWorkItemOverdue, events.ShipmentWorkItemReminder, events.ShipmentWorkItemOverdue}, Handle: transport.NotificationRequestedHandler(notificationUseCase)}}
 	if cfg.VendorActionNotices {
 		subscriptions = append(subscriptions, eventbus.Subscription{Durable: "notification-vendor-actions",
 			Types: []string{events.OrderVendorActionRequired, events.PaymentVendorActionRequired}, Handle: transport.VendorActionHandler(vendorActions)})

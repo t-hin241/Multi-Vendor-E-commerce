@@ -29,6 +29,10 @@ func TestVendorActionAllowlist(t *testing.T) {
 		{"order", "support_waiting_shop", domain.PurposeSupport, domain.TypeVendorSupportWaitingShop},
 		{"order", "delivery_goods_returned", domain.PurposeOrders, domain.TypeVendorDeliveryGoodsReturned},
 		{"order", "redelivery_accepted", domain.PurposeOrders, domain.TypeVendorRedeliveryAccepted},
+		{"order", "support_reply_due", domain.PurposeSupport, domain.TypeVendorSupportReplyDue},
+		{"order", "support_reply_overdue", domain.PurposeSupport, domain.TypeVendorSupportReplyOverdue},
+		{"order", "goods_receipt_due", domain.PurposeOrders, domain.TypeVendorGoodsReceiptDue},
+		{"order", "goods_receipt_overdue", domain.PurposeOrders, domain.TypeVendorGoodsReceiptOverdue},
 	}
 	for _, c := range cases {
 		a, err := domain.NewVendorAction(domain.VendorActionRequest{Source: c.source, EventID: "effect-1", VendorID: shop, ActionKind: c.kind, ReferenceID: "ref-1"}, now)

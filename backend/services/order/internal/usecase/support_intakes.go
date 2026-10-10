@@ -84,7 +84,10 @@ func (uc *OrderUseCase) CreateSupportIntake(ctx context.Context, buyerID string,
 		if in.IdempotencyKey != "" {
 			intake.IdempotencyKey = &in.IdempotencyKey
 		}
-		return uc.Intakes.Create(ctx, intake)
+		if err := uc.Intakes.Create(ctx, intake); err != nil {
+			return err
+		}
+		return uc.queueBuyerNotice(ctx, intake.BuyerID, noticeIntakeReceived, intake.ID)
 	})
 	if err != nil {
 		return nil, false, intakeError(err)
@@ -246,6 +249,9 @@ func (uc *OrderUseCase) CloseSupportIntake(ctx context.Context, adminID, intakeI
 		now := uc.Now().UTC()
 		intake.Status, intake.HandledBy, intake.HandledAt, intake.CloseReason = domain.IntakeClosed, &adminID, &now, note
 		if err := uc.Intakes.Save(ctx, intake); err != nil {
+			return err
+		}
+		if err := uc.queueBuyerNotice(ctx, intake.BuyerID, noticeIntakeClosed, intake.ID); err != nil {
 			return err
 		}
 		return uc.audit(ctx, domain.AdminAction{ActorID: adminID, Action: "support_intake_closed", EntityType: domain.AuditSupportIntake,

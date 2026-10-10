@@ -16,21 +16,22 @@ import (
 
 // Event types (producer.fact).
 const (
-	VendorStatusChanged         = "vendor.status_changed"
-	VendorNotificationRequested = "vendor.notification_requested"
-	VendorPolicyPublished       = "vendor.policy_published"
-	ProductStatusChanged        = "catalog.product_status_changed"
-	ReservationExpired          = "inventory.reservation_expired"
-	StockChanged                = "inventory.stock_changed"
-	OrderNotificationRequested  = "order.notification_requested"
-	FulfillmentReady            = "order.fulfillment_ready"
-	FulfillmentCancelled        = "order.fulfillment_cancelled"
-	VendorOrderSettleable       = "order.vendor_order_settleable"
-	PaymentOutcomeRejected      = "order.payment_outcome_rejected"
-	ShipmentChanged             = "shipment.status_changed"
-	ShipmentExceptionDetected   = "shipment.exception_detected"
-	PaymentOutcome              = "payment.outcome"
-	RefundOutcome               = "payment.refund_outcome"
+	VendorStatusChanged          = "vendor.status_changed"
+	VendorNotificationRequested  = "vendor.notification_requested"
+	VendorPolicyPublished        = "vendor.policy_published"
+	ProductStatusChanged         = "catalog.product_status_changed"
+	ReservationExpired           = "inventory.reservation_expired"
+	StockChanged                 = "inventory.stock_changed"
+	OrderNotificationRequested   = "order.notification_requested"
+	FulfillmentReady             = "order.fulfillment_ready"
+	FulfillmentCancelled         = "order.fulfillment_cancelled"
+	VendorOrderSettleable        = "order.vendor_order_settleable"
+	PaymentOutcomeRejected       = "order.payment_outcome_rejected"
+	ShipmentChanged              = "shipment.status_changed"
+	ShipmentExceptionDetected    = "shipment.exception_detected"
+	PaymentOutcome               = "payment.outcome"
+	PaymentNotificationRequested = "payment.notification_requested"
+	RefundOutcome                = "payment.refund_outcome"
 )
 
 // V1 is the schema version of every payload below.
@@ -87,6 +88,13 @@ func PolicyPublishedEvent(eventID string, p PolicyPublication) (eventbus.Envelop
 // OrderNotification: an order fact to tell the buyer about.
 func OrderNotification(eventID, orderID string, n NotificationRequest) (eventbus.Envelope, error) {
 	return eventbus.New(eventID, OrderNotificationRequested, V1, orderID, 0, n)
+}
+
+// PaymentNotification: a refund fact to tell the buyer about (PW-009:
+// the refund needs a destination, or the given one was rejected). The
+// reference is the order id; never an account or an amount.
+func PaymentNotification(eventID, orderID string, n NotificationRequest) (eventbus.Envelope, error) {
+	return eventbus.New(eventID, PaymentNotificationRequested, V1, orderID, 0, n)
 }
 
 // StockChange: stock of these variants changed (Inventory → Catalog

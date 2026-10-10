@@ -42,6 +42,11 @@ const (
 	TypeVendorSupportWaitingShop    Type = "vendor_support_waiting_shop"
 	TypeVendorDeliveryGoodsReturned Type = "vendor_delivery_goods_returned"
 	TypeVendorRedeliveryAccepted    Type = "vendor_redelivery_accepted"
+	// PW-009 (AF-07): deadlines the shop must meet.
+	TypeVendorSupportReplyDue     Type = "vendor_support_reply_due"
+	TypeVendorSupportReplyOverdue Type = "vendor_support_reply_overdue"
+	TypeVendorGoodsReceiptDue     Type = "vendor_goods_receipt_due"
+	TypeVendorGoodsReceiptOverdue Type = "vendor_goods_receipt_overdue"
 )
 
 type vendorActionKind struct {
@@ -63,6 +68,10 @@ var vendorActionKinds = map[string]vendorActionKind{
 	"order:support_waiting_shop":    {PurposeSupport, TypeVendorSupportWaitingShop},
 	"order:delivery_goods_returned": {PurposeOrders, TypeVendorDeliveryGoodsReturned},
 	"order:redelivery_accepted":     {PurposeOrders, TypeVendorRedeliveryAccepted},
+	"order:support_reply_due":       {PurposeSupport, TypeVendorSupportReplyDue},
+	"order:support_reply_overdue":   {PurposeSupport, TypeVendorSupportReplyOverdue},
+	"order:goods_receipt_due":       {PurposeOrders, TypeVendorGoodsReceiptDue},
+	"order:goods_receipt_overdue":   {PurposeOrders, TypeVendorGoodsReceiptOverdue},
 }
 
 type VendorActionStatus string

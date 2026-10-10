@@ -19,6 +19,7 @@ import (
 	"shopee/backend/pkg/identityclient"
 	"shopee/backend/pkg/logger"
 	"shopee/backend/pkg/middleware"
+	"shopee/backend/pkg/noticeoutbox"
 	"shopee/backend/pkg/platform/objectstorage"
 	"shopee/backend/pkg/platform/postgres"
 	"shopee/backend/pkg/platform/redisclient"
@@ -200,6 +201,11 @@ func main() {
 	manualUseCase := &usecase.ManualRefundUseCase{Store: repository.ManualRefundRepository{Pool: dbPool}, Refunds: refundUseCase,
 		Audit: repository.NewAuditRepository(dbPool), Tx: tx, Admins: admins, Enabled: cfg.ManualRefunds.Enabled,
 		StepUp: cfg.AdminApprovals, TwoPerson: cfg.AdminApprovals, Lease: cfg.ManualRefunds.Lease, Log: log}
+	// PW-009: refund facts the buyer has to act on, relayed to the event bus.
+	buyerNotices := repository.BuyerNotices{Pool: dbPool}
+	if cfg.ManualRefunds.Enabled {
+		manualUseCase.Notices = buyerNotices
+	}
 	if len(cfg.ManualRefunds.Keys) > 0 {
 		destinationCipher, err := adapter.NewDestinationCipher(cfg.ManualRefunds.KeyVersion, cfg.ManualRefunds.Keys)
 		if err != nil {
@@ -270,6 +276,26 @@ func main() {
 			// The notices are kept and relayed once the event bus is back.
 			log.Warn().Msg("payment_vendor_notices_wait_for_event_bus")
 		}
+	}
+	if bus.Publish {
+		// The relay drains even with the workflow off; only the sweep asking
+		// for missing destinations needs the buyer able to give one.
+		var sweep func(context.Context) error
+		if cfg.ManualRefunds.Enabled && manualUseCase.Cipher != nil {
+			sweep = func(ctx context.Context) error {
+				_, err := buyerNotices.QueueMissingDestinations(ctx, 100)
+				return err
+			}
+		}
+		go buyerNotices.Outbox().Run(syncCtx, sweep, func(ctx context.Context, n noticeoutbox.Notice) error {
+			env, err := events.PaymentNotification(n.ID, n.ReferenceID, events.NotificationRequest{UserID: n.UserID, Type: n.Type, ReferenceID: n.ReferenceID})
+			if err != nil {
+				return err
+			}
+			return bus.Bus.Publish(ctx, env.WithCorrelation(""))
+		}, log)
+	} else if cfg.ManualRefunds.Enabled {
+		log.Warn().Msg("payment_buyer_notices_wait_for_event_bus")
 	}
 	bus.Run(syncCtx,
 		eventbus.Subscription{Durable: "payment-settlements", Types: []string{events.VendorOrderSettleable}, Handle: transport.SettleableHandler(settlementUseCase)},

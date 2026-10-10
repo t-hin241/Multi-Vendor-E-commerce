@@ -30,8 +30,12 @@ type Worker struct {
 	// support.manage; one without it is skipped like an inactive admin.
 	Permissions adminaccess.Checker
 	Publisher   Publisher
-	Log         zerolog.Logger
-	Now         func() time.Time
+	// WaitingOnShop (PW-009), when set, is called in the scan transaction
+	// once per deadline version and kind ("reminder", "overdue") of a stage
+	// waiting on the shop; the owner queues the shop's notice in its outbox.
+	WaitingOnShop func(ctx context.Context, tx pgx.Tx, i *Item, kind string) error
+	Log           zerolog.Logger
+	Now           func() time.Time
 }
 
 func (w Worker) now() time.Time {
@@ -138,6 +142,9 @@ func (w Worker) Tick(ctx context.Context) error {
 			}
 			if w.Config.Enabled {
 				for _, kind := range i.Notices(now) {
+					if e := w.tellShop(ctx, tx, i, kind); e != nil {
+						return e
+					}
 					recipients := slices.Clone(w.Config.OnCallIDs)
 					if i.AssigneeID != nil {
 						recipients = []string{*i.AssigneeID}
@@ -211,6 +218,20 @@ func (w Worker) Tick(ctx context.Context) error {
 		return w.deliver(ctx, now)
 	}
 	return nil
+}
+
+// tellShop hands a reminder or overdue deadline of a stage waiting on the
+// shop to the owner, once per deadline version (receipt "shop_<kind>").
+// Escalations stay with the marketplace.
+func (w Worker) tellShop(ctx context.Context, tx pgx.Tx, i *Item, kind string) error {
+	if w.WaitingOnShop == nil || i.WaitingOn != "vendor" || (kind != "reminder" && kind != "overdue") {
+		return nil
+	}
+	tag, e := tx.Exec(ctx, `INSERT INTO case_sla_reminder_receipts(work_item_id,deadline_version,reminder_kind) VALUES($1,$2,$3) ON CONFLICT DO NOTHING`, i.ID, i.DeadlineVersion, "shop_"+kind)
+	if e != nil || tag.RowsAffected() == 0 {
+		return e
+	}
+	return w.WaitingOnShop(ctx, tx, i, kind)
 }
 
 func (w Worker) report(ctx context.Context, now time.Time) error {
