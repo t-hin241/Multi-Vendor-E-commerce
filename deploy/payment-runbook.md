@@ -80,8 +80,14 @@ SELECT vendor_id, currency, sum(amount) AS owed FROM settlement_entries GROUP BY
 
 1. Trang admin Vendor payouts: xem số dư, sao kê từng vendor.
 2. Bấm Create payout batch. Payment lấy mọi khoản khấu trừ và mọi khoản bán đã qua hạn trả hàng, loại vendor order Order báo còn trả hàng/hoàn tiền mở. Order không phản hồi thì không tạo batch. Vendor chưa có tài khoản đã xác minh bị bỏ qua có lý do.
-3. Chuyển khoản theo số tiền từng dòng. Số tài khoản đầy đủ xem ở trang tài khoản nhận tiền của vendor (admin, có audit).
-4. Ghi Paid kèm mã tham chiếu ngân hàng, hoặc Failed kèm lý do. Failed trả các khoản về để đưa vào batch sau.
+3. **Duyệt lô (PW-027, `FEATURE_PAYOUT_BATCH_APPROVAL_ENABLED`, mặc định bật).** Lô mới ở `awaiting_approval`; chưa duyệt thì không ghi được Paid/Failed (409 `payout_batch_not_approved`, DB cũng chặn bằng trigger). Một admin **khác người tạo** bấm "Duyệt lô" (`POST /api/payments/admin/payouts/batches/:id/approvals {expected_state, proof?}`, quyền `finance.approve`).
+   - Cần **hai cấp duyệt, hai admin khác nhau và khác người tạo** khi: tổng lô vượt `PAYMENT_PAYOUT_BATCH_SECOND_APPROVAL_AMOUNT` (mặc định 100.000.000), một khoản vượt `PAYMENT_PAYOUT_ITEM_SECOND_APPROVAL_AMOUNT` (mặc định 50.000.000), có tài khoản nhận (đúng account và version) chưa từng nhận payout thành công, hoặc lô khác loại tiền `PAYMENT_PAYOUT_APPROVAL_CURRENCY`. Lý do nằm ở `risk_reasons` của lô. Giá trị 0 tắt hạn mức tương ứng.
+   - Khi bật AF-19, mỗi lần duyệt cần xác nhận mật khẩu (proof purpose `payment.payout_batch.approve`, ref `payout_batch:<id>:<stage>`).
+   - Từ chối (`…/rejection`, `finance.approve`, admin khác người tạo) hoặc người tạo rút lô (`…/withdrawal`, `finance.prepare`): các khoản trong lô bị huỷ, sổ trả về chưa trả, lô sau sẽ lấy lại. Cần lý do; có audit `payout_batch_first_approval/approved/rejected/withdrawn`.
+   - Lô chờ duyệt quá 24 giờ hiện ở work queue `payout_batches_awaiting_approval_24h` (lô đang giữ các khoản, vendor chưa được trả).
+   - Cần ít nhất hai admin (ba nếu có lô vượt ngưỡng) để trả được tiền. Tắt cờ chỉ khi chấp nhận một người tạo lô; lô đang chờ vẫn phải được duyệt. Lô tạo trước migration `000019` giữ `not_required`.
+4. Chuyển khoản theo số tiền từng dòng. Số tài khoản đầy đủ xem ở trang tài khoản nhận tiền của vendor (admin, có audit).
+5. Ghi Paid kèm mã tham chiếu ngân hàng, hoặc Failed kèm lý do. Failed trả các khoản về để đưa vào batch sau. Khi bật AF-19, bước này còn qua yêu cầu phê duyệt hai người như trước.
 
 Hoàn tiền sau khi đã trả vendor trở thành khoản nợ và được trừ vào batch kế tiếp. Sổ chỉ cho thêm dòng; sửa sai bằng Adjust có lý do.
 

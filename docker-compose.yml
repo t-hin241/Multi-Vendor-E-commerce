@@ -559,6 +559,12 @@ services:
       # PW-032: reimbursements outside a capture (two admins, separate book).
       FEATURE_REIMBURSEMENTS_ENABLED: ${FEATURE_REIMBURSEMENTS_ENABLED:-false}
       PAYMENT_REIMBURSEMENT_MAX_AMOUNT: ${PAYMENT_REIMBURSEMENT_MAX_AMOUNT:-500000}
+      # PW-027: payout batches need an independent approver; a second one
+      # past these limits (minor units) or for a first-time destination.
+      FEATURE_PAYOUT_BATCH_APPROVAL_ENABLED: ${FEATURE_PAYOUT_BATCH_APPROVAL_ENABLED:-true}
+      PAYMENT_PAYOUT_APPROVAL_CURRENCY: ${PAYMENT_PAYOUT_APPROVAL_CURRENCY:-VND}
+      PAYMENT_PAYOUT_BATCH_SECOND_APPROVAL_AMOUNT: ${PAYMENT_PAYOUT_BATCH_SECOND_APPROVAL_AMOUNT:-100000000}
+      PAYMENT_PAYOUT_ITEM_SECOND_APPROVAL_AMOUNT: ${PAYMENT_PAYOUT_ITEM_SECOND_APPROVAL_AMOUNT:-50000000}
       # AF-06 manual refund transfers: off by default; the key is required
       # once on (a placeholder with the flag off only disables destinations).
       FEATURE_MANUAL_REFUND_WORKFLOW_ENABLED: ${FEATURE_MANUAL_REFUND_WORKFLOW_ENABLED:-false}

@@ -23,7 +23,7 @@
 | `moderation.manage` | Duyệt shop, sản phẩm, đánh giá, yêu cầu nhập kho, khóa/mở tài khoản |
 | `finance.read` | Xem refund, đối soát, số dư, lô payout, hoa hồng, yêu cầu phê duyệt, danh sách tài khoản nhận tiền |
 | `finance.prepare` | Tạo yêu cầu refund từ đơn, ghi kết quả refund/payout, điều chỉnh sổ, tạo lô payout, retry đồng bộ, tạo/gửi yêu cầu phê duyệt |
-| `finance.approve` | Duyệt yêu cầu phê duyệt; xác minh đích nhận tiền và đọc chi tiết đầy đủ |
+| `finance.approve` | Duyệt yêu cầu phê duyệt; duyệt/từ chối lô payout (PW-027); xác minh đích nhận tiền và đọc chi tiết đầy đủ |
 | `platform.configure` | Danh mục, thuộc tính, chính sách, vận chuyển, lý do kiểm duyệt, đặt hoa hồng, replay sự kiện/effect |
 | `analytics.read` | Dashboard admin |
 | `audit.read` | Tra cứu audit (chỉ xem, không replay) |

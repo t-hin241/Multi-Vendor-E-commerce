@@ -108,6 +108,13 @@ type PayoutRepositoryPort interface {
 	LockItem(ctx context.Context, id string) (*domain.PayoutItem, error)
 	SaveResolution(ctx context.Context, item *domain.PayoutItem) error
 	ListBatches(ctx context.Context, limit, offset int) ([]*domain.PayoutBatch, error)
+	// PW-027 batch approval.
+	LockBatch(ctx context.Context, id string) (*domain.PayoutBatch, error)
+	SetApprovalRequirement(ctx context.Context, batchID string, total int64, required int, reasons []string) error
+	SaveApproval(ctx context.Context, b *domain.PayoutBatch, from string) error
+	CancelPendingItems(ctx context.Context, batchID, actor, reason string) (int64, error)
+	NewDestinations(ctx context.Context, batchID string) (int, error)
+	ItemBatchApproval(ctx context.Context, itemID string) (domain.PayoutBatchApproval, error)
 }
 
 type AuditRepositoryPort interface {

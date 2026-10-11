@@ -61,19 +61,95 @@ func (r *PayoutRepository) CreateBatch(ctx context.Context, key, currency, actor
 	return existing, false, err
 }
 
-func (r *PayoutRepository) findBatch(ctx context.Context, where string, arg string) (*domain.PayoutBatch, error) {
+const payoutBatchColumns = `id, idempotency_key, COALESCE(currency, ''), status, created_by, created_at, COALESCE(total_amount, 0),
+	approval_state, required_approvals, risk_reasons, first_approved_by, first_approved_at, second_approved_by, second_approved_at,
+	decided_by, decision_reason, decided_at`
+
+func scanPayoutBatch(row pgx.Row) (*domain.PayoutBatch, error) {
 	var b domain.PayoutBatch
-	err := connection(ctx, r.pool).QueryRow(ctx, `SELECT id, idempotency_key, COALESCE(currency, ''), status, created_by, created_at
-		FROM payout_batches WHERE `+where, arg).Scan(&b.ID, &b.IdempotencyKey, &b.Currency, &b.Status, &b.CreatedBy, &b.CreatedAt)
+	a := &b.Approval
+	err := row.Scan(&b.ID, &b.IdempotencyKey, &b.Currency, &b.Status, &b.CreatedBy, &b.CreatedAt, &b.TotalAmount,
+		&a.State, &a.RequiredApprovals, &a.RiskReasons, &a.FirstApprovedBy, &a.FirstApprovedAt, &a.SecondApprovedBy, &a.SecondApprovedAt,
+		&a.DecidedBy, &a.DecisionReason, &a.DecidedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrPayoutBatchNotFound
 	}
+	return &b, err
+}
+
+func (r *PayoutRepository) findBatch(ctx context.Context, where string, arg string) (*domain.PayoutBatch, error) {
+	b, err := scanPayoutBatch(connection(ctx, r.pool).QueryRow(ctx, `SELECT `+payoutBatchColumns+` FROM payout_batches WHERE `+where, arg))
 	if err != nil {
 		return nil, err
 	}
 	items, err := r.items(ctx, `SELECT `+payoutItemColumns+` FROM payout_items WHERE payout_batch_id = $1 ORDER BY created_at, id`, b.ID)
 	b.Items = items
-	return &b, err
+	return b, err
+}
+
+// LockBatch reads a batch with its items, locking the batch row.
+func (r *PayoutRepository) LockBatch(ctx context.Context, id string) (*domain.PayoutBatch, error) {
+	return r.findBatch(ctx, "id = $1 FOR UPDATE", id)
+}
+
+// SetApprovalRequirement records a new batch's total and the approvals it
+// needs (PW-027); the batch then waits for its first approval.
+func (r *PayoutRepository) SetApprovalRequirement(ctx context.Context, batchID string, total int64, required int, reasons []string) error {
+	_, err := connection(ctx, r.pool).Exec(ctx, `UPDATE payout_batches SET total_amount = $2, required_approvals = $3, risk_reasons = $4,
+		approval_state = 'awaiting_approval', updated_at = now() WHERE id = $1 AND approval_state = 'not_required'`, batchID, total, required, reasons)
+	return err
+}
+
+// SaveApproval stores the batch's approval record if it is still in state
+// from (compare-and-set).
+func (r *PayoutRepository) SaveApproval(ctx context.Context, b *domain.PayoutBatch, from string) error {
+	a := b.Approval
+	tag, err := connection(ctx, r.pool).Exec(ctx, `UPDATE payout_batches SET approval_state = $3, first_approved_by = $4, first_approved_at = $5,
+		second_approved_by = $6, second_approved_at = $7, decided_by = $8, decision_reason = $9, decided_at = $10, updated_at = now()
+		WHERE id = $1 AND approval_state = $2`, b.ID, from, a.State, a.FirstApprovedBy, a.FirstApprovedAt, a.SecondApprovedBy, a.SecondApprovedAt,
+		a.DecidedBy, a.DecisionReason, a.DecidedAt)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() != 1 {
+		return ErrStaleState
+	}
+	return nil
+}
+
+// CancelPendingItems cancels a closed batch's untransferred items (their
+// entries are unpaid again) and completes the batch.
+func (r *PayoutRepository) CancelPendingItems(ctx context.Context, batchID, actor, reason string) (int64, error) {
+	tag, err := connection(ctx, r.pool).Exec(ctx, `UPDATE payout_items SET status = 'cancelled', note = $3, resolved_by = $2, resolved_at = now(), updated_at = now()
+		WHERE payout_batch_id = $1 AND status = 'pending'`, batchID, actor, reason)
+	if err != nil {
+		return 0, err
+	}
+	_, err = connection(ctx, r.pool).Exec(ctx, `UPDATE payout_batches SET status = 'completed', updated_at = now() WHERE id = $1 AND status = 'pending'`, batchID)
+	return tag.RowsAffected(), err
+}
+
+// NewDestinations counts the batch's items paying a destination (account
+// and version) that never received a succeeded payout.
+func (r *PayoutRepository) NewDestinations(ctx context.Context, batchID string) (int, error) {
+	var n int
+	err := connection(ctx, r.pool).QueryRow(ctx, `SELECT count(*) FROM payout_items i WHERE i.payout_batch_id = $1
+		AND NOT EXISTS (SELECT 1 FROM payout_items p WHERE p.status = 'succeeded' AND p.vendor_id = i.vendor_id
+			AND p.destination_account_id = i.destination_account_id AND p.destination_version = i.destination_version)`, batchID).Scan(&n)
+	return n, err
+}
+
+// ItemBatchApproval reads the approval of an item's batch, sharing the
+// batch lock (taken before the item's) so an approval change cannot
+// interleave with a transfer result.
+func (r *PayoutRepository) ItemBatchApproval(ctx context.Context, itemID string) (domain.PayoutBatchApproval, error) {
+	var a domain.PayoutBatchApproval
+	err := connection(ctx, r.pool).QueryRow(ctx, `SELECT b.approval_state, b.required_approvals FROM payout_batches b
+		JOIN payout_items i ON i.payout_batch_id = b.id WHERE i.id = $1 FOR SHARE OF b`, itemID).Scan(&a.State, &a.RequiredApprovals)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return a, ErrPayoutItemNotFound
+	}
+	return a, err
 }
 
 func (r *PayoutRepository) FindBatch(ctx context.Context, id string) (*domain.PayoutBatch, error) {
@@ -145,7 +221,7 @@ func (r *PayoutRepository) SaveResolution(ctx context.Context, item *domain.Payo
 
 // ListBatches lists batches newest first.
 func (r *PayoutRepository) ListBatches(ctx context.Context, limit, offset int) ([]*domain.PayoutBatch, error) {
-	rows, err := connection(ctx, r.pool).Query(ctx, `SELECT id, idempotency_key, COALESCE(currency, ''), status, created_by, created_at
+	rows, err := connection(ctx, r.pool).Query(ctx, `SELECT `+payoutBatchColumns+`
 		FROM payout_batches ORDER BY created_at DESC, id LIMIT $1 OFFSET $2`, limit, offset)
 	if err != nil {
 		return nil, err
@@ -153,11 +229,11 @@ func (r *PayoutRepository) ListBatches(ctx context.Context, limit, offset int) (
 	defer rows.Close()
 	out := []*domain.PayoutBatch{}
 	for rows.Next() {
-		var b domain.PayoutBatch
-		if err := rows.Scan(&b.ID, &b.IdempotencyKey, &b.Currency, &b.Status, &b.CreatedBy, &b.CreatedAt); err != nil {
+		b, err := scanPayoutBatch(rows)
+		if err != nil {
 			return nil, err
 		}
-		out = append(out, &b)
+		out = append(out, b)
 	}
 	return out, rows.Err()
 }

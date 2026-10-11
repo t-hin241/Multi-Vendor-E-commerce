@@ -254,10 +254,29 @@ type batchResponse struct {
 	CreatedBy      string               `json:"created_by"`
 	CreatedAt      time.Time            `json:"created_at"`
 	Items          []payoutItemResponse `json:"items,omitempty"`
+	// PW-027: the batch's approval.
+	TotalAmount       int64      `json:"total_amount"`
+	ApprovalState     string     `json:"approval_state"`
+	RequiredApprovals int        `json:"required_approvals"`
+	RiskReasons       []string   `json:"risk_reasons"`
+	FirstApprovedBy   *string    `json:"first_approved_by,omitempty"`
+	FirstApprovedAt   *time.Time `json:"first_approved_at,omitempty"`
+	SecondApprovedBy  *string    `json:"second_approved_by,omitempty"`
+	SecondApprovedAt  *time.Time `json:"second_approved_at,omitempty"`
+	DecidedBy         *string    `json:"decided_by,omitempty"`
+	DecisionReason    *string    `json:"decision_reason,omitempty"`
+	DecidedAt         *time.Time `json:"decided_at,omitempty"`
 }
 
 func toBatch(b *domain.PayoutBatch) batchResponse {
-	out := batchResponse{ID: b.ID, IdempotencyKey: b.IdempotencyKey, Currency: b.Currency, Status: b.Status, CreatedBy: b.CreatedBy, CreatedAt: b.CreatedAt}
+	a := b.Approval
+	out := batchResponse{ID: b.ID, IdempotencyKey: b.IdempotencyKey, Currency: b.Currency, Status: b.Status, CreatedBy: b.CreatedBy, CreatedAt: b.CreatedAt,
+		TotalAmount: b.TotalAmount, ApprovalState: a.State, RequiredApprovals: a.RequiredApprovals, RiskReasons: a.RiskReasons,
+		FirstApprovedBy: a.FirstApprovedBy, FirstApprovedAt: a.FirstApprovedAt, SecondApprovedBy: a.SecondApprovedBy, SecondApprovedAt: a.SecondApprovedAt,
+		DecidedBy: a.DecidedBy, DecisionReason: a.DecisionReason, DecidedAt: a.DecidedAt}
+	if out.RiskReasons == nil {
+		out.RiskReasons = []string{}
+	}
 	for _, i := range b.Items {
 		out.Items = append(out.Items, toPayoutItem(i))
 	}
@@ -364,6 +383,56 @@ func (h *AdminHandler) GetBatch(c *gin.Context) {
 	}
 	httpresponse.OK(c, http.StatusOK, toBatch(b))
 }
+
+type approveBatchRequest struct {
+	// ExpectedState is the stage the approver reviewed.
+	ExpectedState string `json:"expected_state" binding:"required,oneof=awaiting_approval awaiting_second_approval"`
+	Proof         string `json:"proof" binding:"max=200"`
+}
+
+// ApproveBatch (PW-027): an admin other than the creator approves a batch.
+func (h *AdminHandler) ApproveBatch(c *gin.Context) {
+	if !validUUID(c, c.Param("id")) {
+		return
+	}
+	var req approveBatchRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		httpresponse.Error(c, http.StatusBadRequest, "validation_error", "expected_state must be awaiting_approval or awaiting_second_approval")
+		return
+	}
+	b, err := h.settlement.ApprovePayoutBatch(c.Request.Context(), middleware.GetUserID(c), c.Param("id"), req.ExpectedState, req.Proof)
+	if err != nil {
+		httpresponse.HandleError(c, h.log, err)
+		return
+	}
+	httpresponse.OK(c, http.StatusOK, toBatch(b))
+}
+
+type closeBatchRequest struct {
+	Reason string `json:"reason" binding:"required,max=500"`
+}
+
+// closeBatch rejects (another admin) or withdraws (the creator) a batch
+// waiting for approval.
+func (h *AdminHandler) closeBatch(c *gin.Context, withdraw bool) {
+	if !validUUID(c, c.Param("id")) {
+		return
+	}
+	var req closeBatchRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		httpresponse.Error(c, http.StatusBadRequest, "validation_error", "A reason of at most 500 characters is required")
+		return
+	}
+	b, err := h.settlement.ClosePayoutBatch(c.Request.Context(), middleware.GetUserID(c), c.Param("id"), req.Reason, withdraw)
+	if err != nil {
+		httpresponse.HandleError(c, h.log, err)
+		return
+	}
+	httpresponse.OK(c, http.StatusOK, toBatch(b))
+}
+
+func (h *AdminHandler) RejectBatch(c *gin.Context)   { h.closeBatch(c, false) }
+func (h *AdminHandler) WithdrawBatch(c *gin.Context) { h.closeBatch(c, true) }
 
 type resolvePayoutRequest struct {
 	Outcome           string `json:"outcome" binding:"required,oneof=succeeded failed"`

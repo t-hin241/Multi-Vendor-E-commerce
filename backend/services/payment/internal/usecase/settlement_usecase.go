@@ -36,6 +36,14 @@ type SettlementDeps struct {
 	// VendorNotices (AF-08, FEATURE_VENDOR_ACTION_NOTICES_ENABLED) records
 	// each payout result for the shop in the same transaction; nil is off.
 	VendorNotices VendorNoticeOutbox
+	// BatchApproval (PW-027, FEATURE_PAYOUT_BATCH_APPROVAL_ENABLED): a new
+	// batch needs an approval from another admin, and a second, distinct
+	// one past ApprovalPolicy; no transfer result is recorded before.
+	// StepUp (AF-19 on) asks each approver for a password proof.
+	BatchApproval  bool
+	ApprovalPolicy domain.PayoutApprovalPolicy
+	Admins         AdminAuthority
+	StepUp         bool
 }
 
 // VendorNoticeOutbox records a payout result to tell the shop about.
@@ -244,7 +252,13 @@ func (uc *SettlementUseCase) CreatePayoutBatch(ctx context.Context, adminID, key
 		if items == 0 {
 			return apperror.Conflict("Nothing is payable for the selected vendors")
 		}
-		return uc.Audit.Record(ctx, adminID, "payout_batch_created", "payout_batch", batch.ID, fmt.Sprintf("%d item(s), %s", items, currency))
+		approval := ""
+		if uc.BatchApproval {
+			if approval, err = uc.requireBatchApproval(ctx, batch.ID, currency); err != nil {
+				return err
+			}
+		}
+		return uc.Audit.Record(ctx, adminID, "payout_batch_created", "payout_batch", batch.ID, fmt.Sprintf("%d item(s), %s%s", items, currency, approval))
 	})
 	if err != nil {
 		return nil, skipped, asAppError(err)
@@ -338,7 +352,14 @@ func (uc *SettlementUseCase) resolvePayoutItem(ctx context.Context, adminID, ite
 	res.EvidenceReference, res.Note = strings.TrimSpace(res.EvidenceReference), strings.TrimSpace(res.Note)
 	var item *domain.PayoutItem
 	err := uc.Tx.Run(ctx, func(ctx context.Context) error {
-		var err error
+		// PW-027: no transfer result before the batch is approved.
+		approval, err := uc.Payouts.ItemBatchApproval(ctx, itemID)
+		if err != nil {
+			return err
+		}
+		if !approval.AllowsTransfers() {
+			return domain.ErrPayoutBatchNotApproved
+		}
 		item, err = uc.Payouts.LockItem(ctx, itemID)
 		if err != nil {
 			return err

@@ -156,7 +156,14 @@ func (uc *ApprovalUseCase) snapshot(ctx context.Context, kind domain.ApprovalKin
 	case domain.ApprovalPayoutItemResolution:
 		var item *domain.PayoutItem
 		err := uc.Tx.Run(ctx, func(ctx context.Context) error {
-			var err error
+			// PW-027: a result is prepared only for an approved batch.
+			approval, err := uc.Payouts.ItemBatchApproval(ctx, targetID)
+			if err != nil {
+				return err
+			}
+			if !approval.AllowsTransfers() {
+				return domain.ErrPayoutBatchNotApproved
+			}
 			item, err = uc.Payouts.LockItem(ctx, targetID)
 			return err
 		})

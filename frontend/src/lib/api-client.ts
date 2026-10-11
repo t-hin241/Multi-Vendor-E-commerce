@@ -1937,7 +1937,64 @@ export type PayoutBatch = {
   created_by: string;
   created_at: string;
   items?: PayoutItem[];
+  // PW-027: one admin creates, another approves (a second, distinct one
+  // past the limits or for a first-time destination) before any transfer
+  // result is recorded. Batches from before keep "not_required".
+  total_amount: number;
+  approval_state: PayoutApprovalState;
+  required_approvals: number;
+  risk_reasons: string[];
+  first_approved_by?: string;
+  first_approved_at?: string;
+  second_approved_by?: string;
+  second_approved_at?: string;
+  decided_by?: string;
+  decision_reason?: string;
+  decided_at?: string;
 };
+
+export type PayoutApprovalState =
+  | "not_required"
+  | "awaiting_approval"
+  | "awaiting_second_approval"
+  | "approved"
+  | "rejected"
+  | "withdrawn";
+
+export const PAYOUT_BATCH_APPROVE_PURPOSE = "payment.payout_batch.approve";
+
+export function payoutBatchApprovalRef(batchId: string, state: PayoutApprovalState): string {
+  return `payout_batch:${batchId}:${state}`;
+}
+
+// approvePayoutBatch approves the stage the admin reviewed; with AF-19 on
+// it needs a password proof (reauthentication_required without one).
+export function approvePayoutBatch(
+  token: string,
+  batchId: string,
+  input: { expected_state: PayoutApprovalState; proof?: string },
+): Promise<PayoutBatch> {
+  return request<PayoutBatch>(`/api/payments/admin/payouts/batches/${batchId}/approvals`, {
+    method: "POST",
+    token,
+    json: input,
+  });
+}
+
+// closePayoutBatch rejects (another admin) or withdraws (its creator) a
+// batch waiting for approval; its items are cancelled.
+export function closePayoutBatch(
+  token: string,
+  batchId: string,
+  action: "rejection" | "withdrawal",
+  reason: string,
+): Promise<PayoutBatch> {
+  return request<PayoutBatch>(`/api/payments/admin/payouts/batches/${batchId}/${action}`, {
+    method: "POST",
+    token,
+    json: { reason },
+  });
+}
 
 export function listSettlementBalances(token: string, currency = "VND"): Promise<VendorBalance[]> {
   return request<VendorBalance[]>("/api/payments/admin/settlements/balances", {

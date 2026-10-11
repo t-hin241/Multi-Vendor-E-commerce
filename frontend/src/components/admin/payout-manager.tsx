@@ -3,7 +3,9 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 
+import { ActionError } from "@/components/admin/action-error";
 import { ReasonDialog } from "@/components/admin/confirm-dialogs";
+import { ReauthDialog } from "@/components/admin/reauth-dialog";
 import { SectionHeader } from "@/components/section-header";
 import {
   AlertDialog,
@@ -27,11 +29,12 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { orApprovalDraft } from "@/lib/admin-access";
+import { needsReauthentication, orApprovalDraft } from "@/lib/admin-access";
 import * as api from "@/lib/api-client";
 import { useAuth } from "@/lib/auth-context";
 import { formatMoney } from "@/lib/format";
 import { newIdempotencyKey } from "@/lib/order-workflow";
+import { approvalStatus, awaitingApproval, transfersAllowed } from "@/lib/payout-approval";
 
 const ENTRY_LABELS: Record<api.SettlementEntry["entry_type"], string> = {
   sale: "Sale",
@@ -214,6 +217,16 @@ export function PayoutManager() {
               <div className="flex items-center justify-between">
                 <span>
                   Batch {b.id.slice(0, 8)} · {b.status} · {new Date(b.created_at).toLocaleString()}
+                  {b.total_amount > 0 && ` · ${formatMoney(b.total_amount, b.currency)}`}
+                  <span
+                    className={
+                      awaitingApproval(b)
+                        ? "block text-xs text-amber-700 dark:text-amber-400"
+                        : "block text-xs text-muted-foreground"
+                    }
+                  >
+                    {approvalStatus(b)}
+                  </span>
                 </span>
                 <Button
                   size="sm"
@@ -223,6 +236,9 @@ export function PayoutManager() {
                   {openBatch === b.id ? "Hide" : "Items"}
                 </Button>
               </div>
+              {openBatch === b.id && batch.data && awaitingApproval(batch.data) && (
+                <BatchApproval batch={batch.data} onDone={refresh} />
+              )}
               {openBatch === b.id &&
                 batch.data?.items?.map((item) => (
                   <div
@@ -239,31 +255,38 @@ export function PayoutManager() {
                     </span>
                     {item.status === "pending" && (
                       <span className="flex gap-2">
-                        <PaidDialog itemId={item.id} onDone={refresh} />
-                        <ReasonDialog
-                          trigger={
-                            <Button size="sm" variant="outline" className="text-destructive">
-                              Failed
-                            </Button>
-                          }
-                          title="Record the transfer as failed?"
-                          description="The amount becomes payable again in the next batch."
-                          confirmLabel="Record failure"
-                          onConfirm={async (note) => {
-                            await orApprovalDraft(
-                              callWithAuth,
-                              (token) =>
-                                api.resolvePayoutItem(token, item.id, { outcome: "failed", note }),
-                              {
-                                operation_kind: "payout_item_resolution",
-                                target_id: item.id,
-                                payload: { outcome: "failed", note },
-                                reason: note,
-                              },
-                            );
-                            await refresh();
-                          }}
-                        />
+                        {batch.data && transfersAllowed(batch.data) && (
+                          <>
+                            <PaidDialog itemId={item.id} onDone={refresh} />
+                            <ReasonDialog
+                              trigger={
+                                <Button size="sm" variant="outline" className="text-destructive">
+                                  Failed
+                                </Button>
+                              }
+                              title="Record the transfer as failed?"
+                              description="The amount becomes payable again in the next batch."
+                              confirmLabel="Record failure"
+                              onConfirm={async (note) => {
+                                await orApprovalDraft(
+                                  callWithAuth,
+                                  (token) =>
+                                    api.resolvePayoutItem(token, item.id, {
+                                      outcome: "failed",
+                                      note,
+                                    }),
+                                  {
+                                    operation_kind: "payout_item_resolution",
+                                    target_id: item.id,
+                                    payload: { outcome: "failed", note },
+                                    reason: note,
+                                  },
+                                );
+                                await refresh();
+                              }}
+                            />
+                          </>
+                        )}
                         <ReasonDialog
                           trigger={
                             <Button size="sm" variant="ghost">
@@ -292,6 +315,99 @@ export function PayoutManager() {
           </p>
         </CardContent>
       </Card>
+    </div>
+  );
+}
+
+// BatchApproval (PW-027): an admin other than the creator approves the
+// stage shown (a second, distinct admin when two are required) or rejects
+// the batch; the creator may withdraw it. Rejected or withdrawn batches
+// cancel their items, which the next batch pays.
+function BatchApproval({ batch, onDone }: { batch: api.PayoutBatch; onDone: () => Promise<void> }) {
+  const { callWithAuth } = useAuth();
+  const [stepUp, setStepUp] = useState(false);
+  const [error, setError] = useState<unknown>(null);
+  const stage = batch.approval_state;
+
+  async function approve(proof?: string) {
+    await callWithAuth((token) =>
+      api.approvePayoutBatch(token, batch.id, { expected_state: stage, proof }),
+    );
+    await onDone();
+  }
+
+  return (
+    <div className="ml-4 flex flex-col gap-2 border-t py-2">
+      <p className="text-xs text-muted-foreground">
+        Chưa ghi được kết quả chuyển khoản trước khi lô được duyệt. Người tạo lô không tự duyệt được
+        {batch.required_approvals > 1 && "; hai cấp duyệt phải là hai admin khác nhau"}.
+      </p>
+      <div className="flex flex-wrap gap-2">
+        <Button
+          size="sm"
+          onClick={async () => {
+            setError(null);
+            try {
+              await approve();
+            } catch (err) {
+              if (needsReauthentication(err)) {
+                setStepUp(true);
+                return;
+              }
+              setError(err);
+            }
+          }}
+        >
+          {stage === "awaiting_second_approval" ? "Duyệt cấp 2" : "Duyệt lô"}
+        </Button>
+        <ReasonDialog
+          trigger={
+            <Button size="sm" variant="outline" className="text-destructive">
+              Từ chối lô
+            </Button>
+          }
+          title="Từ chối lô payout này?"
+          description="Các khoản trong lô bị huỷ và sẽ vào lô sau."
+          confirmLabel="Từ chối"
+          onConfirm={async (reason) => {
+            await callWithAuth((token) =>
+              api.closePayoutBatch(token, batch.id, "rejection", reason),
+            );
+            await onDone();
+          }}
+        />
+        <ReasonDialog
+          trigger={
+            <Button size="sm" variant="ghost">
+              Rút lô (người tạo)
+            </Button>
+          }
+          title="Rút lô payout bạn đã tạo?"
+          description="Các khoản trong lô bị huỷ và sẽ vào lô sau."
+          confirmLabel="Rút lô"
+          onConfirm={async (reason) => {
+            await callWithAuth((token) =>
+              api.closePayoutBatch(token, batch.id, "withdrawal", reason),
+            );
+            await onDone();
+          }}
+        />
+      </div>
+      <ActionError error={error} />
+      {stepUp && (
+        <ReauthDialog
+          open
+          onOpenChange={(next) => !next && setStepUp(false)}
+          title="Duyệt lô payout"
+          description="Xác nhận mật khẩu cho lần duyệt này. Thao tác được ghi audit."
+          purpose={api.PAYOUT_BATCH_APPROVE_PURPOSE}
+          operationHash={api.payoutBatchApprovalRef(batch.id, stage)}
+          onProof={async (proof) => {
+            await approve(proof);
+            setStepUp(false);
+          }}
+        />
+      )}
     </div>
   );
 }

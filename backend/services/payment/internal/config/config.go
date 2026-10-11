@@ -14,6 +14,7 @@ import (
 
 	"shopee/backend/pkg/config"
 	"shopee/backend/pkg/platform/objectstorage"
+	"shopee/backend/services/payment/internal/domain"
 )
 
 type Config struct {
@@ -49,6 +50,11 @@ type Config struct {
 	// ReimbursementMax (PAYMENT_REIMBURSEMENT_MAX_AMOUNT) caps one.
 	Reimbursements   bool
 	ReimbursementMax int64
+	// PayoutBatchApproval is FEATURE_PAYOUT_BATCH_APPROVAL_ENABLED (PW-027,
+	// default on): one admin creates a batch, another approves it; past
+	// PayoutApprovalPolicy a second, distinct approver is needed.
+	PayoutBatchApproval  bool
+	PayoutApprovalPolicy domain.PayoutApprovalPolicy
 }
 
 // ManualRefundConfig: FEATURE_MANUAL_REFUND_WORKFLOW_ENABLED, the keys that
@@ -140,9 +146,29 @@ func Load() (Config, error) {
 		return Config{}, fmt.Errorf("config: PAYMENT_REIMBURSEMENT_MAX_AMOUNT must be a positive amount in minor units")
 	}
 
+	batchApproval, err := strconv.ParseBool(getEnv("FEATURE_PAYOUT_BATCH_APPROVAL_ENABLED", "true"))
+	if err != nil {
+		return Config{}, fmt.Errorf("config: FEATURE_PAYOUT_BATCH_APPROVAL_ENABLED must be true or false")
+	}
+	policy := domain.PayoutApprovalPolicy{Currency: strings.ToUpper(getEnv("PAYMENT_PAYOUT_APPROVAL_CURRENCY", "VND"))}
+	for name, target := range map[string]*int64{
+		"PAYMENT_PAYOUT_BATCH_SECOND_APPROVAL_AMOUNT": &policy.BatchLimit,
+		"PAYMENT_PAYOUT_ITEM_SECOND_APPROVAL_AMOUNT":  &policy.ItemLimit,
+	} {
+		v, err := strconv.ParseInt(getEnv(name, map[string]string{
+			"PAYMENT_PAYOUT_BATCH_SECOND_APPROVAL_AMOUNT": "100000000",
+			"PAYMENT_PAYOUT_ITEM_SECOND_APPROVAL_AMOUNT":  "50000000",
+		}[name]), 10, 64)
+		if err != nil || v < 0 {
+			return Config{}, fmt.Errorf("config: %s must be an amount in minor units (0 = no limit)", name)
+		}
+		*target = v
+	}
+
 	return Config{
 		AdminApprovals: approvals,
 		Reimbursements: reimbursements, ReimbursementMax: reimbursementMax,
+		PayoutBatchApproval: batchApproval, PayoutApprovalPolicy: policy,
 		ManualRefunds:    manual,
 		VendorServiceURL: getEnv("VENDOR_SERVICE_URL", "http://vendor:8082"), WebhookRatePerMinute: rate,
 		Base: base, OrderServiceURL: orderServiceURL, NotificationServiceURL: getEnv("NOTIFICATION_SERVICE_URL", "http://notification:8090"),

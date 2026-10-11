@@ -183,6 +183,12 @@ func main() {
 	if cfg.SkipOrderHoldQuery {
 		log.Warn().Msg("settlement_order_hold_query_off")
 	}
+	// PW-027: a payout batch needs an independent approver (two past the
+	// limits); approvers confirm their password when AF-19 is on.
+	settlementUseCase.BatchApproval, settlementUseCase.ApprovalPolicy = cfg.PayoutBatchApproval, cfg.PayoutApprovalPolicy
+	if !cfg.PayoutBatchApproval {
+		log.Warn().Msg("payout_batch_approval_off")
+	}
 	// AF-08: payout results for the shop, relayed to the event bus.
 	vendorNotices := repository.VendorNotices{Pool: dbPool}
 	if cfg.VendorActionNotices {
@@ -193,6 +199,7 @@ func main() {
 	// AF-19: scoped admin permissions (Identity) and maker-checker requests.
 	admins := adminaccess.Client{URL: internalServices.IdentityURL, Key: internalServices.Key}
 	adminGuard := adminaccess.Guard(admins, transport.AdminRoutes, log)
+	settlementUseCase.Admins, settlementUseCase.StepUp = admins, cfg.AdminApprovals
 	approvalUseCase := &usecase.ApprovalUseCase{Store: repository.ApprovalRepository{Pool: dbPool}, Refunds: refundUseCase, Settlement: settlementUseCase,
 		Payouts: repository.NewPayoutRepository(dbPool), RefundsRepo: refundRepo, Audit: repository.NewAuditRepository(dbPool), Tx: tx, Admins: admins,
 		Enabled: cfg.AdminApprovals, Log: log}

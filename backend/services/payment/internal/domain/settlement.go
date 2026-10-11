@@ -213,6 +213,9 @@ type PayoutBatch struct {
 	CreatedBy      string
 	CreatedAt      time.Time
 	Items          []*PayoutItem
+	// TotalAmount and Approval (PW-027): the batch's sum and who approved it.
+	TotalAmount int64
+	Approval    PayoutBatchApproval
 }
 
 // PayoutResolution is an operator recording one transfer's result.
