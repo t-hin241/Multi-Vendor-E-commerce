@@ -2,6 +2,7 @@
 
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
+import { VariantPriceEditor } from "./variant-price-editor";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -298,6 +299,7 @@ export function VariantStockRow({
         {message && <span className="text-xs text-success">{message}</span>}
         {error && <span className="text-xs text-destructive">{error}</span>}
       </div>
+      <VariantPriceEditor key={`${variant.id}:${variant.pricing_version}`} variant={variant} />
       <RestockRequestStatusList requests={pendingRequests} />
       {item && <StockCountForm item={item} onRecorded={onChanged} />}
     </li>

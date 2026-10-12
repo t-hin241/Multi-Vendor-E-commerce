@@ -143,7 +143,12 @@ case "${1:-}" in
       echo "loadtest: no database yet; run 'copy-db <volume>' first (an empty catalog measures nothing)" >&2
       exit 1
     fi
-    compose build "${SERVICES[@]}" gateway
+    # Compose's BuildKit/Bake path may ignore COMPOSE_PARALLEL_LIMIT.
+    # Match deploy/build-images.sh: avoid compiling every service at once
+    # on the small host used for the capacity drill.
+    for svc in "${SERVICES[@]}" gateway; do
+      compose build "$svc"
+    done
     compose up -d --wait postgres redis redis-queue nats minio
     migrate
     # A developer machine's disk can be 100x slower to fsync than a VPS's

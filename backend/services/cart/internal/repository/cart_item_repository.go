@@ -21,12 +21,12 @@ func NewCartItemRepository(pool *pgxpool.Pool) *CartItemRepository {
 	return &CartItemRepository{pool: pool}
 }
 
-const itemColumns = `id, cart_id, product_id, variant_id, quantity, version, seen_price_amount, seen_currency, created_at, updated_at`
+const itemColumns = `id, cart_id, product_id, variant_id, quantity, version, seen_price_amount, seen_currency, created_at, updated_at, seen_pricing_version`
 
 func scanItem(row pgx.Row) (*domain.CartItem, error) {
 	var item domain.CartItem
 	if err := row.Scan(&item.ID, &item.CartID, &item.ProductID, &item.VariantID, &item.Quantity, &item.Version,
-		&item.SeenPriceAmount, &item.SeenCurrency, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		&item.SeenPriceAmount, &item.SeenCurrency, &item.CreatedAt, &item.UpdatedAt, &item.SeenPricingVersion); err != nil {
 		return nil, err
 	}
 	return &item, nil
@@ -108,10 +108,10 @@ func (r *CartItemRepository) Insert(ctx context.Context, item *domain.CartItem) 
 	ctx, cancel := statementContext(ctx)
 	defer cancel()
 	return connection(ctx, r.pool).QueryRow(ctx, `
-		INSERT INTO cart_items (cart_id, product_id, variant_id, quantity, seen_price_amount, seen_currency)
-		VALUES ($1, $2, $3, $4, $5, $6)
+		INSERT INTO cart_items (cart_id, product_id, variant_id, quantity, seen_price_amount, seen_currency,seen_pricing_version)
+		VALUES ($1, $2, $3, $4, $5, $6,$7)
 		RETURNING id, version, created_at, updated_at`,
-		item.CartID, item.ProductID, item.VariantID, item.Quantity, item.SeenPriceAmount, item.SeenCurrency,
+		item.CartID, item.ProductID, item.VariantID, item.Quantity, item.SeenPriceAmount, item.SeenCurrency, item.SeenPricingVersion,
 	).Scan(&item.ID, &item.Version, &item.CreatedAt, &item.UpdatedAt)
 }
 
@@ -122,10 +122,10 @@ func (r *CartItemRepository) Update(ctx context.Context, item *domain.CartItem) 
 	defer cancel()
 	return connection(ctx, r.pool).QueryRow(ctx, `
 		UPDATE cart_items
-		SET quantity = $2, seen_price_amount = $3, seen_currency = $4, version = version + 1, updated_at = now()
+		SET quantity = $2, seen_price_amount = $3, seen_currency = $4,seen_pricing_version=$5, version = version + 1, updated_at = now()
 		WHERE id = $1
 		RETURNING version, updated_at`,
-		item.ID, item.Quantity, item.SeenPriceAmount, item.SeenCurrency,
+		item.ID, item.Quantity, item.SeenPriceAmount, item.SeenCurrency, item.SeenPricingVersion,
 	).Scan(&item.Version, &item.UpdatedAt)
 }
 

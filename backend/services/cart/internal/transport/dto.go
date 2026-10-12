@@ -20,9 +20,11 @@ type setQuantityRequest struct {
 }
 
 type priceConfirmationLine struct {
-	LineID      string `json:"line_id" binding:"required,uuid"`
-	PriceAmount int64  `json:"price_amount" binding:"min=0"`
-	Currency    string `json:"currency" binding:"required,len=3"`
+	VariantID      *string `json:"variant_id" binding:"omitempty,uuid"`
+	PricingVersion int64   `json:"pricing_version" binding:"min=0"`
+	LineID         string  `json:"line_id" binding:"required,uuid"`
+	PriceAmount    int64   `json:"price_amount" binding:"min=0"`
+	Currency       string  `json:"currency" binding:"required,len=3"`
 }
 
 type confirmPricesRequest struct {
@@ -36,24 +38,26 @@ type moneyResponse struct {
 }
 
 type lineResponse struct {
-	LineID            string  `json:"line_id"`
-	LineVersion       int64   `json:"line_version"`
-	ProductID         string  `json:"product_id"`
-	ProductName       string  `json:"product_name,omitempty"`
-	VariantID         *string `json:"variant_id,omitempty"`
-	VariantSKU        *string `json:"variant_sku,omitempty"`
-	VariantLabel      *string `json:"variant_label,omitempty"`
-	Quantity          int64   `json:"quantity"`
-	PriceAmount       *int64  `json:"price_amount"`
-	Currency          string  `json:"currency,omitempty"`
-	SeenPriceAmount   *int64  `json:"seen_price_amount,omitempty"`
-	SeenCurrency      *string `json:"seen_currency,omitempty"`
-	PriceChanged      bool    `json:"price_changed"`
-	Subtotal          *int64  `json:"subtotal"`
-	State             string  `json:"state"`
-	StockStatus       string  `json:"stock_status"`
-	AvailableQuantity *int64  `json:"available_quantity,omitempty"`
-	Available         bool    `json:"available"`
+	PricingVersion     int64   `json:"pricing_version"`
+	SeenPricingVersion *int64  `json:"seen_pricing_version,omitempty"`
+	LineID             string  `json:"line_id"`
+	LineVersion        int64   `json:"line_version"`
+	ProductID          string  `json:"product_id"`
+	ProductName        string  `json:"product_name,omitempty"`
+	VariantID          *string `json:"variant_id,omitempty"`
+	VariantSKU         *string `json:"variant_sku,omitempty"`
+	VariantLabel       *string `json:"variant_label,omitempty"`
+	Quantity           int64   `json:"quantity"`
+	PriceAmount        *int64  `json:"price_amount"`
+	Currency           string  `json:"currency,omitempty"`
+	SeenPriceAmount    *int64  `json:"seen_price_amount,omitempty"`
+	SeenCurrency       *string `json:"seen_currency,omitempty"`
+	PriceChanged       bool    `json:"price_changed"`
+	Subtotal           *int64  `json:"subtotal"`
+	State              string  `json:"state"`
+	StockStatus        string  `json:"stock_status"`
+	AvailableQuantity  *int64  `json:"available_quantity,omitempty"`
+	Available          bool    `json:"available"`
 }
 
 type degradedResponse struct {
@@ -105,6 +109,7 @@ func toCartResponse(v *usecase.CartView) cartResponse {
 	}
 	for _, l := range v.Lines {
 		resp.Items = append(resp.Items, lineResponse{
+			PricingVersion: l.PricingVersion, SeenPricingVersion: l.SeenPricingVersion,
 			LineID: l.LineID, LineVersion: l.LineVersion, ProductID: l.ProductID, ProductName: l.ProductName,
 			VariantID: l.VariantID, VariantSKU: l.VariantSKU, VariantLabel: l.VariantLabel, Quantity: l.Quantity,
 			PriceAmount: l.PriceAmount, Currency: l.Currency, SeenPriceAmount: l.SeenPriceAmount, SeenCurrency: l.SeenCurrency,
@@ -123,13 +128,14 @@ type snapshotRequest struct {
 }
 
 type snapshotLineResponse struct {
-	LineID          string  `json:"line_id"`
-	ProductID       string  `json:"product_id"`
-	VariantID       *string `json:"variant_id,omitempty"`
-	Quantity        int64   `json:"quantity"`
-	LineVersion     int64   `json:"line_version"`
-	SeenPriceAmount *int64  `json:"seen_price_amount,omitempty"`
-	SeenCurrency    *string `json:"seen_currency,omitempty"`
+	SeenPricingVersion *int64  `json:"seen_pricing_version,omitempty"`
+	LineID             string  `json:"line_id"`
+	ProductID          string  `json:"product_id"`
+	VariantID          *string `json:"variant_id,omitempty"`
+	Quantity           int64   `json:"quantity"`
+	LineVersion        int64   `json:"line_version"`
+	SeenPriceAmount    *int64  `json:"seen_price_amount,omitempty"`
+	SeenCurrency       *string `json:"seen_currency,omitempty"`
 }
 
 type snapshotResponse struct {
@@ -147,7 +153,7 @@ func toSnapshotResponse(op *domain.CheckoutOperation, replayed bool) snapshotRes
 		CreatedAt: op.CreatedAt, Consumed: op.Consumed(), Replayed: replayed, Lines: make([]snapshotLineResponse, 0, len(op.Lines))}
 	for _, l := range op.Lines {
 		resp.Lines = append(resp.Lines, snapshotLineResponse{LineID: l.LineID, ProductID: l.ProductID, VariantID: l.VariantID,
-			Quantity: l.Quantity, LineVersion: l.LineVersion, SeenPriceAmount: l.SeenPriceAmount, SeenCurrency: l.SeenCurrency})
+			Quantity: l.Quantity, LineVersion: l.LineVersion, SeenPriceAmount: l.SeenPriceAmount, SeenCurrency: l.SeenCurrency, SeenPricingVersion: l.SeenPricingVersion})
 	}
 	return resp
 }

@@ -134,11 +134,12 @@ type AttributeTemplateResolver interface {
 }
 
 type ProductVariantRepositoryPort interface {
-	Create(ctx context.Context, v *domain.ProductVariant, selections []domain.VariantOptionSelection) error
+	Create(ctx context.Context, v *domain.ProductVariant, selections []domain.VariantOptionSelection, audit ...string) error
 	FindByID(ctx context.Context, id string) (*domain.ProductVariant, error)
 	HasVariantsForProduct(ctx context.Context, productID string) (bool, error)
 	ListForProduct(ctx context.Context, productID string) ([]*domain.ProductVariant, error)
 	ListOptionsForVariants(ctx context.Context, variantIDs []string) (map[string][]domain.VariantOptionSelection, error)
+	UpdatePrice(ctx context.Context, productID, variantID string, expectedVersion, amount int64, actorID, requestID string) (*domain.ProductVariant, error)
 }
 
 // InventoryGateway resolves current stock for a set of variants, for the

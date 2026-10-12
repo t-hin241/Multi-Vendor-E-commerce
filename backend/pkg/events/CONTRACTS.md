@@ -23,6 +23,7 @@ Domain events between services travel on NATS JetStream, stream `SHOPEE_EVENTS`,
 | `vendor.notification_requested` | Vendor (`vendor_notification_outbox`) | Notification `notification-requests` | `user_id`, `type`, `reference_id` | One notification per event (dedup key) |
 | `vendor.policy_published` | Vendor (`policy_outbox`) | Order `order-policy-versions` | `policy_id`, `scope` (marketplace/shop), `vendor_id`, `kind`, `version`, `content_hash`, `rule_refs`, `effective_at` | Versions are immutable: store once per `policy_id`; the active one is picked by `effective_at` at checkout |
 | `catalog.product_status_changed` | Catalog (`product_status_outbox`) | Order `order-product-status` | `product_id`, `version`, `is_visible` | Keep highest version |
+| `catalog.variant_price_changed` | Catalog (`variant_price_outbox`) | Projection/cache consumers when introduced | `product_id`, `variant_id`, `product_version`, `pricing_version`; no price | Re-read Catalog and keep highest versions; Cart/Order do not price from this event |
 | `inventory.reservation_expired` | Inventory (`inventory_outbox`) | Order `order-reservation-expiry` | `id`, `order_id`, `type` | Order cancels an unpaid order whose hold expired |
 | `inventory.stock_changed` | Inventory (`inventory_stock_outbox`) | Catalog `catalog-stock-cache` | `variant_ids` (1–100) | Drop cached stock; idempotent (new id per publish) |
 | `order.notification_requested` | Order (effect `notify`) | Notification `notification-requests` | `user_id`, `type`, `reference_id` | As above |

@@ -26,6 +26,8 @@ type Product struct {
 	Slug            string
 	Description     string
 	PriceAmount     int64
+	MinPriceAmount  *int64
+	MaxPriceAmount  *int64
 	Currency        string
 	Status          Status
 	RejectionReason *string

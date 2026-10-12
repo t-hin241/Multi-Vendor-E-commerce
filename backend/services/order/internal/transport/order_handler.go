@@ -37,7 +37,8 @@ func (h *OrderHandler) Checkout(c *gin.Context) {
 	}
 	order, replayed, err := h.orders.Checkout(c.Request.Context(), middleware.GetUserID(c), usecase.CheckoutInput{
 		AddressID: req.AddressID, CartVersion: req.CartVersion, ExpectedTotal: req.ExpectedTotalAmount,
-		IdempotencyKey: c.GetHeader("Idempotency-Key"), AcceptedPolicyVersions: req.AcceptedPolicyVersions,
+		ExpectedQuoteVersion: req.ExpectedQuoteVersion,
+		IdempotencyKey:       c.GetHeader("Idempotency-Key"), AcceptedPolicyVersions: req.AcceptedPolicyVersions,
 	})
 	if err != nil {
 		httpresponse.HandleError(c, h.log, err)

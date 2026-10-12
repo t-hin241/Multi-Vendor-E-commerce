@@ -22,12 +22,13 @@ import (
 // instance to consume after the order exists; SeenPrice* is the price the
 // buyer last accepted in the cart (display reference, never a final price).
 type CartLine struct {
-	LineID          string
-	ProductID       string
-	VariantID       *string
-	Quantity        int64
-	SeenPriceAmount *int64
-	SeenCurrency    *string
+	SeenPricingVersion *int64
+	LineID             string
+	ProductID          string
+	VariantID          *string
+	Quantity           int64
+	SeenPriceAmount    *int64
+	SeenCurrency       *string
 }
 
 // CartSnapshot is Cart's frozen view of the buyer's cart for one checkout
@@ -62,12 +63,13 @@ type snapshotEnvelope struct {
 		OperationID string `json:"operation_id"`
 		CartVersion int64  `json:"cart_version"`
 		Lines       []struct {
-			LineID          string  `json:"line_id"`
-			ProductID       string  `json:"product_id"`
-			VariantID       *string `json:"variant_id"`
-			Quantity        int64   `json:"quantity"`
-			SeenPriceAmount *int64  `json:"seen_price_amount"`
-			SeenCurrency    *string `json:"seen_currency"`
+			LineID             string  `json:"line_id"`
+			ProductID          string  `json:"product_id"`
+			VariantID          *string `json:"variant_id"`
+			Quantity           int64   `json:"quantity"`
+			SeenPriceAmount    *int64  `json:"seen_price_amount"`
+			SeenPricingVersion *int64  `json:"seen_pricing_version"`
+			SeenCurrency       *string `json:"seen_currency"`
 		} `json:"lines"`
 	} `json:"data"`
 }
@@ -88,7 +90,7 @@ func (c *HTTPCartClient) Snapshot(ctx context.Context, buyerID, operationID stri
 	snap := &CartSnapshot{OperationID: body.Data.OperationID, CartVersion: body.Data.CartVersion, Lines: make([]CartLine, 0, len(body.Data.Lines))}
 	for _, l := range body.Data.Lines {
 		snap.Lines = append(snap.Lines, CartLine{LineID: l.LineID, ProductID: l.ProductID, VariantID: l.VariantID,
-			Quantity: l.Quantity, SeenPriceAmount: l.SeenPriceAmount, SeenCurrency: l.SeenCurrency})
+			Quantity: l.Quantity, SeenPriceAmount: l.SeenPriceAmount, SeenCurrency: l.SeenCurrency, SeenPricingVersion: l.SeenPricingVersion})
 	}
 	return snap, nil
 }
@@ -116,7 +118,7 @@ func (c *HTTPCartClient) Lines(ctx context.Context, buyerID string) (*CartSnapsh
 	snap := &CartSnapshot{CartVersion: body.Data.CartVersion, Lines: make([]CartLine, 0, len(body.Data.Lines))}
 	for _, l := range body.Data.Lines {
 		snap.Lines = append(snap.Lines, CartLine{LineID: l.LineID, ProductID: l.ProductID, VariantID: l.VariantID,
-			Quantity: l.Quantity, SeenPriceAmount: l.SeenPriceAmount, SeenCurrency: l.SeenCurrency})
+			Quantity: l.Quantity, SeenPriceAmount: l.SeenPriceAmount, SeenCurrency: l.SeenCurrency, SeenPricingVersion: l.SeenPricingVersion})
 	}
 	return snap, nil
 }

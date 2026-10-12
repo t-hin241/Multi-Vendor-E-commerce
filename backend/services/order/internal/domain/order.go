@@ -274,18 +274,21 @@ func SnapshotCommission(rule *CommissionRule, subtotalAmount int64) (*Commission
 // checkout — they are never recalculated from Catalog's current price after
 // the order exists.
 type OrderItem struct {
-	ID             string
-	OrderID        string
-	VendorOrderID  string
-	ProductID      string
-	ProductName    string
-	VariantID      *string
-	VariantSKU     *string
-	VariantLabel   *string
-	PriceAmount    int64
-	Quantity       int64
-	SubtotalAmount int64
-	CreatedAt      time.Time
+	PricingSource         string
+	CatalogProductVersion int64
+	CatalogVariantVersion int64
+	ID                    string
+	OrderID               string
+	VendorOrderID         string
+	ProductID             string
+	ProductName           string
+	VariantID             *string
+	VariantSKU            *string
+	VariantLabel          *string
+	PriceAmount           int64
+	Quantity              int64
+	SubtotalAmount        int64
+	CreatedAt             time.Time
 }
 
 // ReviewEligibility is the deliberately narrow internal contract consumed by
@@ -303,18 +306,20 @@ type ReviewEligibility struct {
 // CheckoutLine is one line of a checkout request after Order has resolved
 // it against Catalog: an authoritative price snapshot plus which vendor it
 // belongs to, ready to be grouped into vendor sub-orders. VariantSKU/Label
-// are nil unless VariantID is set — a variant has no price of its own, so
-// pricing here is always the parent product's.
+// are nil unless VariantID is set; pricing comes from the authoritative SKU quote.
 type CheckoutLine struct {
-	ProductID    string
-	VendorID     string
-	ProductName  string
-	VariantID    *string
-	VariantSKU   *string
-	VariantLabel *string
-	PriceAmount  int64
-	Currency     string
-	Quantity     int64
+	PricingSource         string
+	CatalogProductVersion int64
+	CatalogVariantVersion int64
+	ProductID             string
+	VendorID              string
+	ProductName           string
+	VariantID             *string
+	VariantSKU            *string
+	VariantLabel          *string
+	PriceAmount           int64
+	Currency              string
+	Quantity              int64
 }
 
 func (l CheckoutLine) Subtotal() int64 {

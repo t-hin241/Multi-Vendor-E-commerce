@@ -706,7 +706,7 @@ func newFakeProductVariantRepository() *fakeProductVariantRepository {
 	}
 }
 
-func (f *fakeProductVariantRepository) Create(_ context.Context, v *domain.ProductVariant, selections []domain.VariantOptionSelection) error {
+func (f *fakeProductVariantRepository) Create(_ context.Context, v *domain.ProductVariant, selections []domain.VariantOptionSelection, audit ...string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.skus[v.SKU] {

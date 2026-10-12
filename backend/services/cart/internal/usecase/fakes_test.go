@@ -3,6 +3,7 @@ package usecase_test
 import (
 	"context"
 	"errors"
+	"shopee/backend/pkg/purchasequote"
 	"slices"
 	"strconv"
 	"sync"
@@ -173,6 +174,7 @@ func (r fakeCartItemRepository) Update(_ context.Context, item *domain.CartItem)
 		return errors.New("line not found")
 	}
 	stored.Quantity, stored.SeenPriceAmount, stored.SeenCurrency = item.Quantity, item.SeenPriceAmount, item.SeenCurrency
+	stored.SeenPricingVersion = item.SeenPricingVersion
 	stored.Version++
 	item.Version = stored.Version
 	return nil
@@ -241,11 +243,13 @@ func (r fakeOperationRepository) MarkConsumed(_ context.Context, operationID, ha
 }
 
 type fakeCatalogGateway struct {
-	mu       sync.Mutex
-	products map[string]*adapter.ProductInfo
-	variants map[string]*adapter.VariantInfo
-	failing  map[string]bool
-	calls    int
+	quoteCalls int
+	quoteFunc  func(context.Context, []purchasequote.Input) (*purchasequote.Quote, error)
+	mu         sync.Mutex
+	products   map[string]*adapter.ProductInfo
+	variants   map[string]*adapter.VariantInfo
+	failing    map[string]bool
+	calls      int
 }
 
 func newFakeCatalogGateway() *fakeCatalogGateway {

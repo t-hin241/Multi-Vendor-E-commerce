@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -48,9 +49,14 @@ export function VariantGenerator({
   onCreated: () => void;
 }) {
   const { callWithAuth } = useAuth();
+  const capabilities = useQuery({
+    queryKey: ["catalog-capabilities"],
+    queryFn: api.catalogCapabilities,
+  });
+  const pricingEnabled = capabilities.data?.variant_pricing_enabled === true;
   const [selectedOptions, setSelectedOptions] = useState<Record<string, string[]>>({});
   const [rows, setRows] = useState<
-    { optionIds: string[]; label: string; sku: string; quantity: string }[]
+    { optionIds: string[]; label: string; sku: string; quantity: string; price: string }[]
   >([]);
   const [error, setError] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
@@ -93,11 +99,12 @@ export function VariantGenerator({
         label: combo.map((c) => c.value).join(" / "),
         sku: slugify(combo.map((c) => c.value).join("-")),
         quantity: "",
+        price: "",
       })),
     );
   }
 
-  function updateRow(index: number, field: "sku" | "quantity", value: string) {
+  function updateRow(index: number, field: "sku" | "quantity" | "price", value: string) {
     setRows((prev) => prev.map((row, i) => (i === index ? { ...row, [field]: value } : row)));
   }
 
@@ -106,8 +113,23 @@ export function VariantGenerator({
     setIsSaving(true);
     try {
       for (const row of rows) {
+        if (
+          pricingEnabled &&
+          (!Number.isSafeInteger(Number(row.price)) || Number(row.price) <= 0)
+        ) {
+          setError("Nhập giá nguyên dương cho mỗi SKU.");
+          return;
+        }
+      }
+      for (const row of rows) {
         await callWithAuth(async (token) => {
-          const variant = await api.createProductVariant(token, productId, row.sku, row.optionIds);
+          const variant = await api.createProductVariant(
+            token,
+            productId,
+            row.sku,
+            row.optionIds,
+            pricingEnabled ? Number(row.price) : undefined,
+          );
           await api.createInventoryItemForVariant(token, variant.id, Number(row.quantity || 0));
         });
       }
@@ -165,6 +187,7 @@ export function VariantGenerator({
                 <TableRow>
                   <TableHead>Phiên bản</TableHead>
                   <TableHead>SKU</TableHead>
+                  {pricingEnabled && <TableHead>Giá bán (VND)</TableHead>}
                   <TableHead>Tồn kho ban đầu</TableHead>
                 </TableRow>
               </TableHeader>
@@ -179,6 +202,19 @@ export function VariantGenerator({
                         className="w-36"
                       />
                     </TableCell>
+                    {pricingEnabled && (
+                      <TableCell>
+                        <Input
+                          aria-label={`Giá ${row.label}`}
+                          type="number"
+                          min={1}
+                          step={1}
+                          value={row.price}
+                          onChange={(e) => updateRow(i, "price", e.target.value)}
+                          className="w-32"
+                        />
+                      </TableCell>
+                    )}
                     <TableCell>
                       <Input
                         type="number"
@@ -205,6 +241,18 @@ export function VariantGenerator({
                         onChange={(e) => updateRow(i, "sku", e.target.value)}
                       />
                     </Label>
+                    {pricingEnabled && (
+                      <Label className="flex flex-col items-start gap-1 text-xs">
+                        Giá bán (VND)
+                        <Input
+                          type="number"
+                          min={1}
+                          step={1}
+                          value={row.price}
+                          onChange={(e) => updateRow(i, "price", e.target.value)}
+                        />
+                      </Label>
+                    )}
                     <Label className="flex flex-col items-start gap-1 text-xs">
                       Tồn kho ban đầu
                       <Input

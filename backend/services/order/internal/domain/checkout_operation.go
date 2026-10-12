@@ -46,9 +46,10 @@ const (
 
 // CheckoutRequest is what identifies "the same checkout" for idempotency.
 type CheckoutRequest struct {
-	AddressID     string
-	CartVersion   *int64
-	ExpectedTotal *int64
+	ExpectedQuoteVersion string
+	AddressID            string
+	CartVersion          *int64
+	ExpectedTotal        *int64
 	// AcceptedPolicies, when given, are part of the request: accepting
 	// other versions under the same key is a different request.
 	AcceptedPolicies map[string]int64
@@ -58,6 +59,9 @@ type CheckoutRequest struct {
 // version or confirmed total is a different request.
 func (r CheckoutRequest) Hash() string {
 	parts := []string{"address=" + r.AddressID}
+	if r.ExpectedQuoteVersion != "" {
+		parts = append(parts, "quote="+r.ExpectedQuoteVersion)
+	}
 	if r.CartVersion != nil {
 		parts = append(parts, "cart="+strconv.FormatInt(*r.CartVersion, 10))
 	}

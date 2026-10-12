@@ -9,7 +9,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import * as api from "@/lib/api-client";
 import type { Product } from "@/lib/api-client";
 import { useAuth } from "@/lib/auth-context";
-import { formatMoney } from "@/lib/format";
+import { productPriceText } from "@/lib/product-price";
 import { useAddCartItem } from "@/lib/hooks/use-cart";
 
 export function ProductCard({ product }: { product: Product }) {
@@ -62,9 +62,7 @@ export function ProductCard({ product }: { product: Product }) {
           {product.name}
         </Link>
         <p className="truncate text-xs text-muted-foreground">{product.vendor_name || "—"}</p>
-        <p className="text-sm font-semibold text-primary">
-          {formatMoney(product.price_amount, product.currency)}
-        </p>
+        <p className="text-sm font-semibold text-primary">{productPriceText(product)}</p>
         <p className="text-xs text-muted-foreground">Đã bán {product.quantity_sold ?? 0}</p>
         {canAddToCart && (
           <Button size="sm" className="mt-2" disabled={isAdding} onClick={handleBuyNow}>

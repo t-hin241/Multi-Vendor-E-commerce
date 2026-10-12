@@ -41,10 +41,12 @@ type VariantOptionInfo struct {
 // product id, since cart state could be stale) and its SKU/option labels
 // to snapshot onto the order item.
 type VariantInfo struct {
-	ID        string              `json:"id"`
-	ProductID string              `json:"product_id"`
-	SKU       string              `json:"sku"`
-	Options   []VariantOptionInfo `json:"options"`
+	PriceAmount  int64
+	PriceVersion int64
+	ID           string              `json:"id"`
+	ProductID    string              `json:"product_id"`
+	SKU          string              `json:"sku"`
+	Options      []VariantOptionInfo `json:"options"`
 }
 
 type HTTPCatalogClient struct {

@@ -9,25 +9,28 @@ type CheckoutSnapshot struct {
 }
 
 type CheckoutProduct struct {
-	ID                 string `json:"id"`
-	VendorID           string `json:"vendor_id"`
-	Name               string `json:"name"`
-	PriceAmount        int64  `json:"price_amount"`
-	Currency           string `json:"currency"`
-	Status             Status `json:"status"`
-	IsActive           bool   `json:"is_active"`
-	Version            int64  `json:"version"`
-	EnforcedVersion    int64  `json:"enforced_version"`
-	HasVariants        bool   `json:"has_variants"`
-	PackageWeightGrams *int64 `json:"package_weight_grams"`
+	ID                      string `json:"id"`
+	VendorID                string `json:"vendor_id"`
+	Name                    string `json:"name"`
+	PriceAmount             int64  `json:"price_amount"`
+	Currency                string `json:"currency"`
+	Status                  Status `json:"status"`
+	IsActive                bool   `json:"is_active"`
+	Version                 int64  `json:"version"`
+	EnforcedVersion         int64  `json:"enforced_version"`
+	HasVariants             bool   `json:"has_variants"`
+	HasDifferentiatedPrices bool   `json:"has_differentiated_prices"`
+	PackageWeightGrams      *int64 `json:"package_weight_grams"`
 }
 
 type CheckoutVariant struct {
-	ID        string                  `json:"id"`
-	ProductID string                  `json:"product_id"`
-	VendorID  string                  `json:"vendor_id"`
-	SKU       string                  `json:"sku"`
-	Options   []CheckoutVariantOption `json:"options"`
+	ID           string                  `json:"id"`
+	ProductID    string                  `json:"product_id"`
+	VendorID     string                  `json:"vendor_id"`
+	SKU          string                  `json:"sku"`
+	PriceAmount  int64                   `json:"price_amount"`
+	PriceVersion int64                   `json:"price_version"`
+	Options      []CheckoutVariantOption `json:"options"`
 }
 
 type CheckoutVariantOption struct {

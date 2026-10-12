@@ -89,7 +89,13 @@ export function useConfirmCartPrices() {
   return useMutation({
     mutationFn: (vars: {
       version: number;
-      lines: { line_id: string; price_amount: number; currency: string }[];
+      lines: {
+        line_id: string;
+        price_amount: number;
+        currency: string;
+        variant_id?: string;
+        pricing_version?: number;
+      }[];
     }) => callWithAuth((token) => api.confirmCartPrices(token, vars.version, vars.lines)),
     onSuccess: (cart) => {
       queryClient.setQueryData(queryKeys.cart(), cart);

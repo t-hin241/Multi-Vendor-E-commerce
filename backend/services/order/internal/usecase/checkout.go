@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 
 	"shopee/backend/pkg/apperror"
+	"shopee/backend/pkg/purchasequote"
 	"shopee/backend/services/order/internal/adapter"
 	"shopee/backend/services/order/internal/domain"
 )
@@ -17,10 +18,11 @@ import (
 // the attempt (clients send a new key per confirmed order); CartVersion and
 // ExpectedTotal are what the buyer reviewed.
 type CheckoutInput struct {
-	AddressID      string
-	CartVersion    *int64
-	ExpectedTotal  *int64
-	IdempotencyKey string
+	ExpectedQuoteVersion string
+	AddressID            string
+	CartVersion          *int64
+	ExpectedTotal        *int64
+	IdempotencyKey       string
 	// AcceptedPolicyVersions are the marketplace policy versions (by kind)
 	// the buyer was shown; when given they must still be the ones in force.
 	AcceptedPolicyVersions map[string]int64
@@ -49,7 +51,7 @@ func (uc *OrderUseCase) Checkout(ctx context.Context, buyerID string, in Checkou
 	} else if err := domain.ValidateIdempotencyKey(key); err != nil {
 		return nil, false, err
 	}
-	hash := domain.CheckoutRequest{AddressID: in.AddressID, CartVersion: in.CartVersion, ExpectedTotal: in.ExpectedTotal,
+	hash := domain.CheckoutRequest{ExpectedQuoteVersion: in.ExpectedQuoteVersion, AddressID: in.AddressID, CartVersion: in.CartVersion, ExpectedTotal: in.ExpectedTotal,
 		AcceptedPolicies: in.AcceptedPolicyVersions}.Hash()
 
 	op, started, err := uc.CheckoutOps.Begin(ctx, buyerID, key, hash, domain.CheckoutKeyTTL)
@@ -111,6 +113,9 @@ func (uc *OrderUseCase) runCheckout(ctx context.Context, buyerID string, op *dom
 	if err != nil {
 		return nil, err
 	}
+	if (priced.requiresQuoteConfirmation || in.ExpectedQuoteVersion != "") && in.ExpectedQuoteVersion != priced.quoteVersion {
+		return nil, purchasequote.PriceChanged()
+	}
 	plan, err := domain.BuildCheckoutPlan(buyerID, priced.lines)
 	if err != nil {
 		return nil, err
@@ -155,6 +160,14 @@ func (uc *OrderUseCase) runCheckout(ctx context.Context, buyerID string, op *dom
 		return nil, err
 	}
 
+	// Recheck after shipping/policy calls, before persisting or reserving stock.
+	latest, err := uc.priceLines(ctx, snapshot.Lines)
+	if err != nil {
+		return nil, err
+	}
+	if latest.quoteVersion != priced.quoteVersion {
+		return nil, purchasequote.PriceChanged()
+	}
 	order, err := uc.Orders.CreateFromPlan(ctx, plan)
 	if err != nil {
 		return nil, appError(err)
@@ -238,9 +251,12 @@ func (uc *OrderUseCase) resolveCheckoutAddress(ctx context.Context, buyerID, add
 }
 
 type pricedLines struct {
-	lines           []domain.CheckoutLine
-	weightByVendor  map[string]int64
-	productVersions map[string]int64
+	quoteVersion              string
+	requiresQuoteConfirmation bool
+	quotes                    []purchasequote.Line
+	lines                     []domain.CheckoutLine
+	weightByVendor            map[string]int64
+	productVersions           map[string]int64
 	// missingWeight: a vendor has a product without package weight; its
 	// shipping cannot be priced.
 	missingWeight map[string]bool
@@ -249,66 +265,53 @@ type pricedLines struct {
 // priceLines re-prices and validates every cart line against Catalog now,
 // and refuses a price the buyer has not accepted in the cart.
 func (uc *OrderUseCase) priceLines(ctx context.Context, cartLines []adapter.CartLine) (*pricedLines, error) {
-	productIDs, variantIDs := make([]string, 0, len(cartLines)), make([]string, 0, len(cartLines))
+	inputs := make([]purchasequote.Input, 0, len(cartLines))
 	for _, line := range cartLines {
-		productIDs = append(productIDs, line.ProductID)
-		if line.VariantID != nil {
-			variantIDs = append(variantIDs, *line.VariantID)
-		}
+		inputs = append(inputs, purchasequote.Input{ProductID: line.ProductID, VariantID: line.VariantID, Quantity: line.Quantity})
 	}
-	snapshot, err := uc.Catalog.GetCheckoutSnapshot(ctx, productIDs, variantIDs)
+	quote, err := uc.Catalog.PurchaseQuotes(ctx, inputs)
 	if err != nil {
 		return nil, err
 	}
-	if snapshot == nil {
-		return nil, apperror.Internal(errors.New("missing catalog snapshot"))
+	if quote == nil || len(quote.Lines) != len(cartLines) {
+		return nil, apperror.Internal(errors.New("missing catalog quote"))
 	}
-	out := &pricedLines{weightByVendor: map[string]int64{}, productVersions: map[string]int64{}, missingWeight: map[string]bool{}}
-	for _, line := range cartLines {
-		product := snapshot.Products[line.ProductID]
-		if product == nil {
-			return nil, apperror.Validation("A product in your cart no longer exists; please update your cart")
+	out := &pricedLines{weightByVendor: map[string]int64{}, productVersions: map[string]int64{}, missingWeight: map[string]bool{}, quoteVersion: quote.QuoteVersion, quotes: quote.Lines}
+	for i, line := range cartLines {
+		q := quote.Lines[i]
+		if !q.IsSellable {
+			if line.VariantID == nil {
+				return nil, apperror.Validation("A product is unavailable or requires selecting an option; review your cart")
+			}
+			return nil, purchasequote.Unavailable()
 		}
-		if !product.IsVisible {
-			return nil, apperror.Validation("\"" + product.Name + "\" is no longer available; please update your cart")
+		if line.SeenPriceAmount != nil && line.SeenCurrency != nil && (*line.SeenPriceAmount != q.UnitPrice || *line.SeenCurrency != q.Currency) {
+			return nil, purchasequote.PriceChanged()
 		}
-		if product.HasVariants && line.VariantID == nil {
-			return nil, apperror.Validation("\"" + product.Name + "\" requires selecting an option; please update your cart")
+		if line.VariantID != nil && q.VariantVersion > 0 && (line.SeenPricingVersion == nil || *line.SeenPricingVersion != q.VariantVersion || line.SeenPriceAmount == nil || line.SeenCurrency == nil) {
+			return nil, purchasequote.PriceChanged()
 		}
-		if line.SeenPriceAmount != nil && line.SeenCurrency != nil &&
-			(*line.SeenPriceAmount != product.PriceAmount || *line.SeenCurrency != product.Currency) {
-			return nil, domain.CartChanged("The price of \"" + product.Name + "\" changed; please review your cart before checking out")
+		if previous, exists := out.productVersions[q.ProductID]; exists && previous != q.ProductVersion {
+			return nil, purchasequote.PriceChanged()
 		}
-		if previous, exists := out.productVersions[product.ID]; exists && previous != product.Version {
-			return nil, apperror.Conflict("A product changed during checkout; please retry")
-		}
-		out.productVersions[product.ID] = product.Version
-
-		checkoutLine := domain.CheckoutLine{ProductID: product.ID, VendorID: product.VendorID, ProductName: product.Name,
-			PriceAmount: product.PriceAmount, Currency: product.Currency, Quantity: line.Quantity}
+		out.productVersions[q.ProductID] = q.ProductVersion
+		checkoutLine := domain.CheckoutLine{ProductID: q.ProductID, VendorID: q.VendorID, ProductName: q.ProductName, PriceAmount: q.UnitPrice, Currency: q.Currency, Quantity: line.Quantity, PricingSource: q.PricingSource, CatalogProductVersion: q.ProductVersion, CatalogVariantVersion: q.VariantVersion}
 		if line.VariantID != nil {
-			variant := snapshot.Variants[*line.VariantID]
-			if variant == nil {
-				return nil, apperror.Validation("A selected option in your cart no longer exists; please update your cart")
-			}
-			if variant.ProductID != product.ID {
-				return nil, apperror.Validation("A selected option in your cart no longer matches its product; please update your cart")
-			}
-			label := variantLabel(variant.Options)
-			checkoutLine.VariantID, checkoutLine.VariantSKU, checkoutLine.VariantLabel = line.VariantID, &variant.SKU, &label
+			sku, label := q.SKU, q.VariantLabel
+			checkoutLine.VariantID = line.VariantID
+			checkoutLine.VariantSKU = &sku
+			checkoutLine.VariantLabel = &label
+			out.requiresQuoteConfirmation = out.requiresQuoteConfirmation || quote.VariantPricingEnabled
 		}
 		out.lines = append(out.lines, checkoutLine)
-
-		// A product without packaging data cannot be priced for shipping:
-		// its shop is reported unavailable, never charged a guessed fee.
-		if product.PackageWeightGrams == nil || *product.PackageWeightGrams <= 0 {
-			out.missingWeight[product.VendorID] = true
+		if q.PackageWeight == nil || *q.PackageWeight <= 0 {
+			out.missingWeight[q.VendorID] = true
 		} else {
-			weight, ok := domain.MulAmount(*product.PackageWeightGrams, line.Quantity)
+			weight, ok := domain.MulAmount(*q.PackageWeight, line.Quantity)
 			if !ok {
 				return nil, apperror.Validation("Package weight is too large")
 			}
-			if out.weightByVendor[product.VendorID], ok = domain.AddAmount(out.weightByVendor[product.VendorID], weight); !ok {
+			if out.weightByVendor[q.VendorID], ok = domain.AddAmount(out.weightByVendor[q.VendorID], weight); !ok {
 				return nil, apperror.Validation("Package weight is too large")
 			}
 		}
@@ -390,6 +393,8 @@ func firstFailure(vendorIDs []string, failures map[string]*apperror.Error) *appe
 // CheckoutPreview is the order the buyer is about to confirm: current
 // prices and a shipping quote per shop. Nothing is reserved or created.
 type CheckoutPreview struct {
+	QuoteVersion   string
+	Lines          []purchasequote.Line
 	CartVersion    int64
 	Currency       string
 	SubtotalAmount int64
@@ -446,7 +451,7 @@ func (uc *OrderUseCase) Preview(ctx context.Context, buyerID, addressID string) 
 	for _, l := range priced.lines {
 		counts[l.VendorID] += l.Quantity
 	}
-	preview := &CheckoutPreview{CartVersion: snapshot.CartVersion, Currency: plan.Order.Currency, SubtotalAmount: plan.Order.SubtotalAmount}
+	preview := &CheckoutPreview{QuoteVersion: priced.quoteVersion, Lines: priced.quotes, CartVersion: snapshot.CartVersion, Currency: plan.Order.Currency, SubtotalAmount: plan.Order.SubtotalAmount}
 	if uc.policiesOn() {
 		now := uc.Now()
 		if preview.Policies, err = uc.currentPolicies(ctx, now); err != nil {

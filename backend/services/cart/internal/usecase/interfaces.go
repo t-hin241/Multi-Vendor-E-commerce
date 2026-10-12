@@ -2,6 +2,7 @@ package usecase
 
 import (
 	"context"
+	"shopee/backend/pkg/purchasequote"
 	"time"
 
 	"shopee/backend/services/cart/internal/adapter"
@@ -47,6 +48,7 @@ type RetentionRepositoryPort interface {
 // sellable and read its current price/name/labels for display, without
 // owning any product data.
 type CatalogGateway interface {
+	PurchaseQuotes(context.Context, []purchasequote.Input) (*purchasequote.Quote, error)
 	GetProduct(ctx context.Context, productID string) (*adapter.ProductInfo, error)
 	GetVariant(ctx context.Context, variantID string) (*adapter.VariantInfo, error)
 }

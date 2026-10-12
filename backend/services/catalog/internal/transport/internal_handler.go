@@ -44,7 +44,7 @@ func (h *InternalHandler) CheckoutSnapshot(c *gin.Context) {
 		products = append(products, internalProductResponse{
 			ID: p.ID, VendorID: p.VendorID, Name: p.Name, Version: p.Version,
 			PriceAmount: p.PriceAmount, Currency: p.Currency, Status: string(p.Status),
-			IsVisible:   p.Status == domain.StatusApproved && p.IsActive && p.EnforcedVersion == p.Version,
+			IsVisible:   p.Status == domain.StatusApproved && p.IsActive && p.EnforcedVersion == p.Version && !p.HasDifferentiatedPrices,
 			HasVariants: p.HasVariants, PackageWeightGrams: p.PackageWeightGrams,
 		})
 	}
@@ -84,14 +84,15 @@ func (h *InternalHandler) GetByID(c *gin.Context) {
 	}
 
 	httpresponse.OK(c, http.StatusOK, internalProductResponse{
-		ID:                 p.ID,
-		Version:            p.Version,
-		VendorID:           p.VendorID,
-		Name:               p.Name,
-		PriceAmount:        p.PriceAmount,
-		Currency:           p.Currency,
-		Status:             string(p.Status),
-		IsVisible:          p.IsPubliclyVisible() && p.EnforcedVersion == p.Version,
+		ID:          p.ID,
+		Version:     p.Version,
+		VendorID:    p.VendorID,
+		Name:        p.Name,
+		PriceAmount: p.PriceAmount,
+		Currency:    p.Currency,
+		Status:      string(p.Status),
+		IsVisible: p.IsPubliclyVisible() && p.EnforcedVersion == p.Version &&
+			(p.MinPriceAmount == nil || *p.MinPriceAmount == p.PriceAmount) && (p.MaxPriceAmount == nil || *p.MaxPriceAmount == p.PriceAmount),
 		HasVariants:        hasVariants,
 		PackageWeightGrams: packageWeightGrams,
 	})

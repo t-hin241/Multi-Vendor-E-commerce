@@ -2,13 +2,12 @@ package usecase
 
 import (
 	"context"
-	"errors"
 	"sync"
 	"time"
 
 	"shopee/backend/pkg/apperror"
 	"shopee/backend/pkg/middleware"
-	"shopee/backend/services/cart/internal/adapter"
+	"shopee/backend/pkg/purchasequote"
 	"shopee/backend/services/cart/internal/domain"
 )
 
@@ -34,14 +33,16 @@ type Page struct {
 
 // LineView is one cart line enriched with live Catalog/Inventory data.
 type LineView struct {
-	LineID       string
-	LineVersion  int64
-	ProductID    string
-	ProductName  string
-	VariantID    *string
-	VariantSKU   *string
-	VariantLabel *string
-	Quantity     int64
+	PricingVersion     int64
+	SeenPricingVersion *int64
+	LineID             string
+	LineVersion        int64
+	ProductID          string
+	ProductName        string
+	VariantID          *string
+	VariantSKU         *string
+	VariantLabel       *string
+	Quantity           int64
 	// PriceAmount/Currency are Catalog's live price; nil/"" when Catalog
 	// could not be reached (the line is then unverified, never priced from
 	// a stale reference).
@@ -137,10 +138,7 @@ func (uc *CartUseCase) View(ctx context.Context, userID string, page Page) (*Car
 // lineFacts is everything learned about a cart's lines in one bounded,
 // deduplicated round of Catalog/Inventory lookups.
 type lineFacts struct {
-	products          map[string]*adapter.ProductInfo // nil value: not found
-	productFailed     map[string]bool
-	variants          map[string]*adapter.VariantInfo // nil value: not found
-	variantFailed     map[string]bool
+	quotes            map[string]purchasequote.Line
 	variantStock      map[string]int64
 	variantStockKnown bool
 	productStock      map[string]domain.StockFacts
@@ -155,34 +153,30 @@ func (f *lineFacts) lineView(item *domain.CartItem) LineView {
 	}
 
 	var product *domain.ProductFacts
-	if !f.productFailed[item.ProductID] {
-		info := f.products[item.ProductID]
-		product = &domain.ProductFacts{Found: info != nil}
-		if info != nil {
-			*product = domain.ProductFacts{Found: true, Status: info.Status, IsVisible: info.IsVisible, HasVariants: info.HasVariants,
-				PriceAmount: info.PriceAmount, Currency: info.Currency}
-			line.ProductName = info.Name
-			price := info.PriceAmount
-			line.PriceAmount, line.Currency = &price, info.Currency
+	var variant *domain.VariantFacts
+	var stock domain.StockFacts
+	line.SeenPricingVersion = item.SeenPricingVersion
+	q, found := f.quotes[purchasequote.Key(item.ProductID, item.VariantID)]
+	if found {
+		product = &domain.ProductFacts{Found: q.ProductFound, Status: q.Status, IsVisible: q.IsSellable, HasVariants: q.HasVariants, PriceAmount: q.UnitPrice, Currency: q.Currency, PricingVersion: q.VariantVersion}
+		line.ProductName = q.ProductName
+		line.PricingVersion = q.VariantVersion
+		if q.ProductFound && q.UnitPrice > 0 {
+			price := q.UnitPrice
+			line.PriceAmount = &price
+			line.Currency = q.Currency
 			if subtotal, ok := domain.LineSubtotal(price, item.Quantity); ok {
 				line.Subtotal = &subtotal
 			}
 		}
-	}
-
-	var variant *domain.VariantFacts
-	variantFailed := false
-	var stock domain.StockFacts
-	if item.VariantID != nil {
-		variantFailed = f.variantFailed[*item.VariantID]
-		if info, ok := f.variants[*item.VariantID]; ok {
-			variant = &domain.VariantFacts{Found: info != nil}
-			if info != nil {
-				variant.ProductID = info.ProductID
-				sku, label := info.SKU, variantLabel(info.Options)
-				line.VariantSKU, line.VariantLabel = &sku, &label
-			}
+		if item.VariantID != nil {
+			variant = &domain.VariantFacts{Found: q.VariantFound, ProductID: q.ProductID}
+			sku, label := q.SKU, q.VariantLabel
+			line.VariantSKU = &sku
+			line.VariantLabel = &label
 		}
+	}
+	if item.VariantID != nil {
 		if f.variantStockKnown {
 			stock = domain.StockFacts{Known: true, Available: f.variantStock[*item.VariantID]}
 		}
@@ -190,7 +184,7 @@ func (f *lineFacts) lineView(item *domain.CartItem) LineView {
 		stock = f.productStock[item.ProductID]
 	}
 
-	eval := domain.EvaluateLine(item, product, variant, variantFailed, stock)
+	eval := domain.EvaluateLine(item, product, variant, false, stock)
 	line.State, line.Stock, line.PriceChanged = eval.State, eval.Stock, eval.PriceChanged
 	if stock.Known && (eval.Stock == domain.StockInsufficient || eval.Stock == domain.StockOut) {
 		available := max(stock.Available, 0)
@@ -210,26 +204,35 @@ func (uc *CartUseCase) lookup(ctx context.Context, items []*domain.CartItem) *li
 	ctx, cancel := context.WithTimeout(ctx, lookupTimeout)
 	defer cancel()
 
-	productIDs, variantIDs, plainProductIDs := distinctIDs(items)
-	facts := &lineFacts{productStock: map[string]domain.StockFacts{}}
-
+	_, variantIDs, plainProductIDs := distinctIDs(items)
+	facts := &lineFacts{productStock: map[string]domain.StockFacts{}, quotes: map[string]purchasequote.Line{}}
 	var wg sync.WaitGroup
-	wg.Add(3)
+	wg.Add(2)
 	go func() {
 		defer wg.Done()
-		facts.products, facts.productFailed = uc.lookupProducts(ctx, productIDs)
+		if len(items) == 0 {
+			return
+		}
+		// Old oversized carts stay readable, in bounded batches.
+		for start := 0; start < len(items); start += domain.MaxLinesPerCart {
+			batch := items[start:min(start+domain.MaxLinesPerCart, len(items))]
+			inputs := make([]purchasequote.Input, 0, len(batch))
+			for _, item := range batch {
+				inputs = append(inputs, purchasequote.Input{ProductID: item.ProductID, VariantID: item.VariantID, Quantity: min(item.Quantity, domain.MaxQuantityPerLine)})
+			}
+			quote, err := uc.catalog.PurchaseQuotes(ctx, inputs)
+			if err != nil {
+				facts.catalogFailures += len(batch)
+				continue
+			}
+			for _, q := range quote.Lines {
+				facts.quotes[purchasequote.Key(q.ProductID, q.VariantID)] = q
+			}
+		}
 	}()
-	go func() {
-		defer wg.Done()
-		facts.variants, facts.variantFailed = uc.lookupVariants(ctx, variantIDs)
-	}()
-	go func() {
-		defer wg.Done()
-		uc.lookupStock(ctx, variantIDs, plainProductIDs, facts)
-	}()
+	go func() { defer wg.Done(); uc.lookupStock(ctx, variantIDs, plainProductIDs, facts) }()
 	wg.Wait()
 
-	facts.catalogFailures = len(facts.productFailed) + len(facts.variantFailed)
 	elapsed := time.Since(started)
 	if facts.catalogFailures > 0 || facts.inventoryFailures > 0 || elapsed > slowLookup {
 		uc.log.Warn().Str("request_id", middleware.RequestIDFromContext(ctx)).Int("lines", len(items)).
@@ -257,48 +260,6 @@ func distinctIDs(items []*domain.CartItem) (products, variants, plainProducts []
 		}
 	}
 	return products, variants, plainProducts
-}
-
-// lookupProducts returns found products (a nil entry means Catalog said not
-// found) and the ids whose lookup failed for any other reason.
-func (uc *CartUseCase) lookupProducts(ctx context.Context, ids []string) (map[string]*adapter.ProductInfo, map[string]bool) {
-	found := make(map[string]*adapter.ProductInfo, len(ids))
-	failed := map[string]bool{}
-	var mu sync.Mutex
-	forEachLimited(ids, func(id string) {
-		p, err := uc.catalog.GetProduct(ctx, id)
-		mu.Lock()
-		defer mu.Unlock()
-		switch {
-		case err == nil:
-			found[id] = p
-		case isNotFound(err):
-			found[id] = nil
-		default:
-			failed[id] = true
-		}
-	})
-	return found, failed
-}
-
-func (uc *CartUseCase) lookupVariants(ctx context.Context, ids []string) (map[string]*adapter.VariantInfo, map[string]bool) {
-	found := make(map[string]*adapter.VariantInfo, len(ids))
-	failed := map[string]bool{}
-	var mu sync.Mutex
-	forEachLimited(ids, func(id string) {
-		v, err := uc.catalog.GetVariant(ctx, id)
-		mu.Lock()
-		defer mu.Unlock()
-		switch {
-		case err == nil:
-			found[id] = v
-		case isNotFound(err):
-			found[id] = nil
-		default:
-			failed[id] = true
-		}
-	})
-	return found, failed
 }
 
 func (uc *CartUseCase) lookupStock(ctx context.Context, variantIDs, plainProductIDs []string, facts *lineFacts) {
@@ -339,9 +300,4 @@ func forEachLimited(ids []string, fn func(id string)) {
 		}(id)
 	}
 	wg.Wait()
-}
-
-func isNotFound(err error) bool {
-	var appErr *apperror.Error
-	return errors.As(err, &appErr) && appErr.Code == apperror.CodeNotFound
 }

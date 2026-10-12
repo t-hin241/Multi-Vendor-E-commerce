@@ -24,7 +24,7 @@ import (
 	"github.com/rs/zerolog"
 )
 
-func catalogDB(t *testing.T) *pgxpool.Pool {
+func catalogDB(t *testing.T, maxVersion ...string) *pgxpool.Pool {
 	t.Helper()
 	raw := os.Getenv("CATALOG_TEST_DATABASE_URL")
 	if raw == "" {
@@ -66,6 +66,7 @@ func catalogDB(t *testing.T) *pgxpool.Pool {
 		t.Fatal(err)
 	}
 	for _, file := range migrations {
+		if len(maxVersion)>0 && filepath.Base(file)[:6]>maxVersion[0] { continue }
 		sql, err := os.ReadFile(file)
 		if err != nil {
 			t.Fatal(err)
@@ -445,17 +446,17 @@ func TestCatalogVariantDatabaseConstraints(t *testing.T) {
 	repo := repository.NewProductVariantRepository(f.pool)
 	selections := []domain.VariantOptionSelection{{AttributeID: a.ID, OptionID: option.ID}}
 	key := domain.BuildVariantKey(selections)
-	if err := repo.Create(ctx, &domain.ProductVariant{ProductID: p1.ID, SKU: "TEST-SKU", VariantKey: key}, selections); err != nil {
+	if err := repo.Create(ctx, &domain.ProductVariant{ProductID: p1.ID, SKU: "TEST-SKU", VariantKey: key, PriceAmount: p1.PriceAmount}, selections); err != nil {
 		t.Fatal(err)
 	}
-	if err := repo.Create(ctx, &domain.ProductVariant{ProductID: p2.ID, SKU: "TEST-SKU", VariantKey: key}, selections); !errors.Is(err, repository.ErrSKUTaken) {
+	if err := repo.Create(ctx, &domain.ProductVariant{ProductID: p2.ID, SKU: "TEST-SKU", VariantKey: key, PriceAmount: p2.PriceAmount}, selections); !errors.Is(err, repository.ErrSKUTaken) {
 		t.Fatalf("expected global SKU conflict: %v", err)
 	}
-	if err := repo.Create(ctx, &domain.ProductVariant{ProductID: p1.ID, SKU: "TEST-OTHER", VariantKey: key}, selections); !errors.Is(err, repository.ErrVariantAlreadyExists) {
+	if err := repo.Create(ctx, &domain.ProductVariant{ProductID: p1.ID, SKU: "TEST-OTHER", VariantKey: key, PriceAmount: p1.PriceAmount}, selections); !errors.Is(err, repository.ErrVariantAlreadyExists) {
 		t.Fatalf("expected option combination conflict: %v", err)
 	}
 	mismatched := []domain.VariantOptionSelection{{AttributeID: b.ID, OptionID: option.ID}}
-	if err := repo.Create(ctx, &domain.ProductVariant{ProductID: p2.ID, SKU: "TEST-BAD", VariantKey: domain.BuildVariantKey(mismatched)}, mismatched); err == nil {
+	if err := repo.Create(ctx, &domain.ProductVariant{ProductID: p2.ID, SKU: "TEST-BAD", VariantKey: domain.BuildVariantKey(mismatched), PriceAmount: p2.PriceAmount}, mismatched); err == nil {
 		t.Fatal("mismatched option/attribute accepted")
 	}
 	var count int

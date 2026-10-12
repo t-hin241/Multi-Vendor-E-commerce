@@ -18,7 +18,7 @@ import { ProductStockManager } from "@/components/vendor/product-stock";
 import { ProductStatusBadge } from "@/components/vendor/status-badges";
 import * as api from "@/lib/api-client";
 import { useAuth } from "@/lib/auth-context";
-import { formatMoney } from "@/lib/format";
+import { productPriceText } from "@/lib/product-price";
 
 // One product's list entry -- a hybrid card/table row (spec: "card/table
 // hybrid: ảnh, tên, giá, status, active toggle, stock setup, media
@@ -58,9 +58,7 @@ export function ProductRow({
 
           <div className="min-w-0">
             <p className="truncate font-medium">{product.name}</p>
-            <p className="text-sm text-muted-foreground">
-              {formatMoney(product.price_amount, product.currency)}
-            </p>
+            <p className="text-sm text-muted-foreground">{productPriceText(product)}</p>
             <div className="mt-1 flex items-center gap-2">
               <ProductStatusBadge status={product.status} />
               {product.status === "rejected" && product.rejection_reason && (

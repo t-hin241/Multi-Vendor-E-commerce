@@ -259,6 +259,7 @@ export default function CheckoutPage() {
                     addressId,
                     cartVersion: quote.cart_version,
                     expectedTotalAmount: confirmed,
+                    expectedQuoteVersion: quote.quote_version,
                     acceptedPolicyVersions: quote.policy_versions,
                   },
                   {

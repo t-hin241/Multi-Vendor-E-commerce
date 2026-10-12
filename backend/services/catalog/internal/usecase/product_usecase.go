@@ -9,28 +9,30 @@ import (
 	"strings"
 
 	"shopee/backend/pkg/apperror"
+	"shopee/backend/pkg/middleware"
 	"shopee/backend/pkg/shopaccess"
 	"shopee/backend/services/catalog/internal/domain"
 	"shopee/backend/services/catalog/internal/repository"
 )
 
 type ProductUseCase struct {
-	ops               Operations
-	products          ProductRepositoryPort
-	images            ProductImageRepositoryPort
-	media             ProductMediaRepositoryPort
-	categories        CategoryRepositoryPort
-	auditLogs         AuditLogRepositoryPort
-	vendors           VendorGateway
-	store             ObjectStore
-	vendorNames       VendorNameGateway
-	orders            OrderGateway
-	storefrontCache   StorefrontCacheRepositoryPort
-	attributeTemplate AttributeTemplateResolver
-	attributeValues   ProductAttributeValueRepositoryPort
-	variants          ProductVariantRepositoryPort
-	inventory         InventoryGateway
-	packaging         ProductPackagingRepositoryPort
+	VariantPricingEnabled bool
+	ops                   Operations
+	products              ProductRepositoryPort
+	images                ProductImageRepositoryPort
+	media                 ProductMediaRepositoryPort
+	categories            CategoryRepositoryPort
+	auditLogs             AuditLogRepositoryPort
+	vendors               VendorGateway
+	store                 ObjectStore
+	vendorNames           VendorNameGateway
+	orders                OrderGateway
+	storefrontCache       StorefrontCacheRepositoryPort
+	attributeTemplate     AttributeTemplateResolver
+	attributeValues       ProductAttributeValueRepositoryPort
+	variants              ProductVariantRepositoryPort
+	inventory             InventoryGateway
+	packaging             ProductPackagingRepositoryPort
 }
 
 func NewProductUseCase(
@@ -979,7 +981,7 @@ func (uc *ProductUseCase) ownedByUser(ctx context.Context, userID, productID, pe
 // itself. Only attributes marked variant-defining in the product's
 // resolved category template are valid axes; every such axis must get
 // exactly one submitted option.
-func (uc *ProductUseCase) createVariant(ctx context.Context, userID, productID, sku string, optionIDs []string) (*domain.ProductVariant, []domain.VariantOptionDetail, error) {
+func (uc *ProductUseCase) createVariant(ctx context.Context, userID, productID, sku string, optionIDs []string, price *int64) (*domain.ProductVariant, []domain.VariantOptionDetail, error) {
 	sku = strings.TrimSpace(sku)
 	p, err := uc.ownedByUser(ctx, userID, productID, shopaccess.ProductsWrite)
 	if err != nil {
@@ -1009,8 +1011,20 @@ func (uc *ProductUseCase) createVariant(ctx context.Context, userID, productID, 
 		return nil, nil, err
 	}
 
-	v := &domain.ProductVariant{ProductID: p.ID, SKU: sku, VariantKey: domain.BuildVariantKey(selections)}
-	if err := uc.variants.Create(ctx, v, selections); err != nil {
+	amount := p.PriceAmount
+	if price != nil {
+		amount = *price
+	} else if uc.VariantPricingEnabled {
+		return nil, nil, apperror.Validation("A price is required for each SKU")
+	}
+	if err := validateVariantPrice(amount); err != nil {
+		return nil, nil, err
+	}
+	if !uc.VariantPricingEnabled && amount != p.PriceAmount {
+		return nil, nil, apperror.Conflict("Variant pricing is not enabled")
+	}
+	v := &domain.ProductVariant{ProductID: p.ID, SKU: sku, VariantKey: domain.BuildVariantKey(selections), PriceAmount: amount, PriceVersion: 1}
+	if err := uc.variants.Create(ctx, v, selections, userID, middleware.RequestIDFromContext(ctx)); err != nil {
 		if errors.Is(err, repository.ErrSKUTaken) {
 			return nil, nil, apperror.Conflict("This SKU is already in use")
 		}
@@ -1389,12 +1403,16 @@ func (uc *ProductUseCase) DeleteImage(ctx context.Context, userID, productID str
 	return uc.transact(ctx, func(ctx context.Context) error { return uc.deleteImage(ctx, userID, productID) })
 }
 
-func (uc *ProductUseCase) CreateVariant(ctx context.Context, userID, productID, sku string, optionIDs []string) (*domain.ProductVariant, []domain.VariantOptionDetail, error) {
+func (uc *ProductUseCase) CreateVariant(ctx context.Context, userID, productID, sku string, optionIDs []string, prices ...*int64) (*domain.ProductVariant, []domain.VariantOptionDetail, error) {
 	var value *domain.ProductVariant
 	var details []domain.VariantOptionDetail
 	err := uc.transact(ctx, func(ctx context.Context) error {
 		var err error
-		value, details, err = uc.createVariant(ctx, userID, productID, sku, optionIDs)
+		var price *int64
+		if len(prices) > 0 {
+			price = prices[0]
+		}
+		value, details, err = uc.createVariant(ctx, userID, productID, sku, optionIDs, price)
 		return err
 	})
 	return value, details, err

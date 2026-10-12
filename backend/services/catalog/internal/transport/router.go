@@ -48,6 +48,7 @@ func NewRouter(
 
 	// Categories: public read, admin write.
 	r.GET("/api/catalog/categories", categoryHandler.List)
+	r.GET("/api/catalog/capabilities", productHandler.PricingCapabilities)
 	r.POST("/api/catalog/categories", requireAuth, middleware.RequireRole("admin"), adminGuard, categoryHandler.Create)
 
 	// Attribute template: public — describes which fields apply to a
@@ -91,6 +92,7 @@ func NewRouter(
 		vendorGroup.GET("/:id/media", productHandler.ListMedia)
 		vendorGroup.POST("/:id/variants", productHandler.CreateVariant)
 		vendorGroup.GET("/:id/variants", productHandler.ListVariants)
+		vendorGroup.PATCH("/:id/variants/:variantId/price", productHandler.UpdateVariantPrice)
 	}
 
 	// Admin moderation.
@@ -105,6 +107,7 @@ func NewRouter(
 
 	r.GET("/internal/products/:id", internal.Allow("cart", "inventory", "order"), internalHandler.GetByID)
 	r.POST("/internal/products/checkout-snapshot", internal.Allow("order"), internalHandler.CheckoutSnapshot)
+	r.POST("/internal/catalog/purchase-quotes", internal.Allow("cart", "order"), internalHandler.PurchaseQuotes)
 	r.GET("/internal/products/variants/:variantId", internal.Allow("cart", "inventory", "order"), internalHandler.GetVariantOwner)
 
 	return r

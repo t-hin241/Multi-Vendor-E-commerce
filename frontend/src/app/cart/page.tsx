@@ -235,6 +235,7 @@ export default function CartPage() {
                     addressId: effectiveAddressId,
                     cartVersion: quote.cart_version,
                     expectedTotalAmount: quote.total_amount,
+                    expectedQuoteVersion: quote.quote_version,
                   });
                 }}
                 disabled={

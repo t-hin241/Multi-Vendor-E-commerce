@@ -26,7 +26,7 @@ func (m Maintenance) Replay(ctx context.Context, actor, kind, id, reason string)
 	if err := m.Identity.RequireRole(ctx, actor, "admin"); err != nil {
 		return err
 	}
-	if (kind != "status" && kind != "cleanup") || strings.TrimSpace(reason) == "" || len(reason) > 500 {
+	if (kind != "status" && kind != "cleanup" && kind != "variant_price") || strings.TrimSpace(reason) == "" || len(reason) > 500 {
 		return apperror.Validation("Replay requires a valid kind and reason (maximum 500 bytes)")
 	}
 	return m.Repository.Replay(ctx, actor, kind, id, reason)

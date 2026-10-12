@@ -221,7 +221,7 @@ func (h *ProductHandler) CreateVariant(c *gin.Context) {
 		return
 	}
 
-	v, details, err := h.products.CreateVariant(c.Request.Context(), middleware.GetUserID(c), c.Param("id"), req.SKU, req.OptionIDs)
+	v, details, err := h.products.CreateVariant(c.Request.Context(), middleware.GetUserID(c), c.Param("id"), req.SKU, req.OptionIDs, req.PriceAmount)
 	if err != nil {
 		httpresponse.HandleError(c, h.log, err)
 		return

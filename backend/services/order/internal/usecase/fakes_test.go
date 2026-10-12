@@ -3,6 +3,7 @@ package usecase_test
 import (
 	"context"
 	"fmt"
+	"shopee/backend/pkg/purchasequote"
 	"sort"
 	"strconv"
 	"sync"
@@ -1073,10 +1074,12 @@ func (f *fakeCartConsumptionRepository) Stats(context.Context) (domain.CartConsu
 }
 
 type fakeCatalogGateway struct {
-	batchCalls int
-	products   map[string]*adapter.ProductInfo
-	variants   map[string]*adapter.VariantInfo
-	getProduct func(string) (*adapter.ProductInfo, error)
+	pricingEnabled bool
+	quoteFunc      func(context.Context, []purchasequote.Input) (*purchasequote.Quote, error)
+	batchCalls     int
+	products       map[string]*adapter.ProductInfo
+	variants       map[string]*adapter.VariantInfo
+	getProduct     func(string) (*adapter.ProductInfo, error)
 }
 
 func (f *fakeCatalogGateway) GetCheckoutSnapshot(ctx context.Context, productIDs, variantIDs []string) (*adapter.CatalogSnapshot, error) {

@@ -360,6 +360,7 @@ services:
     environment:
       <<: *service-env-defaults
       INTERNAL_SERVICE_NAME: catalog
+      FEATURE_VARIANT_PRICING_ENABLED: ${FEATURE_VARIANT_PRICING_ENABLED:-false}
       DB_MAX_CONNS: "24"
       GOMEMLIMIT: 136MiB
       INTERNAL_SERVICE_KEY: ${CATALOG_INTERNAL_KEY:-}

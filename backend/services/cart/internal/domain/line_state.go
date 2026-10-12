@@ -47,12 +47,13 @@ const (
 
 // ProductFacts is what Cart learned from Catalog about a line's product.
 type ProductFacts struct {
-	Found       bool
-	Status      string
-	IsVisible   bool
-	HasVariants bool
-	PriceAmount int64
-	Currency    string
+	PricingVersion int64
+	Found          bool
+	Status         string
+	IsVisible      bool
+	HasVariants    bool
+	PriceAmount    int64
+	Currency       string
 }
 
 // VariantFacts is what Cart learned from Catalog about a line's variant.
@@ -104,18 +105,21 @@ func EvaluateLine(item *CartItem, product *ProductFacts, variant *VariantFacts, 
 	if item.SeenPriceAmount != nil && item.SeenCurrency != nil {
 		eval.PriceChanged = *item.SeenPriceAmount != product.PriceAmount || *item.SeenCurrency != product.Currency
 	}
+	if item.VariantID != nil && product.PricingVersion > 0 {
+		eval.PriceChanged = eval.PriceChanged || item.SeenPricingVersion == nil || *item.SeenPricingVersion != product.PricingVersion || item.SeenPriceAmount == nil || item.SeenCurrency == nil
+	}
 
 	switch {
 	case product.Status != "" && product.Status != "approved":
 		eval.State = LineUnderReview
-	case !product.IsVisible:
-		eval.State = LineNotForSale
 	case item.VariantID == nil && product.HasVariants:
 		eval.State = LineOptionRequired
 	case item.VariantID != nil && variantLookupFailed:
 		eval.State = LineUnverified
 	case item.VariantID != nil && (variant == nil || !variant.Found || variant.ProductID != item.ProductID):
 		eval.State = LineOptionUnavailable
+	case !product.IsVisible:
+		eval.State = LineNotForSale
 	case eval.Stock == StockOut:
 		eval.State = LineOutOfStock
 	case eval.Stock == StockInsufficient:

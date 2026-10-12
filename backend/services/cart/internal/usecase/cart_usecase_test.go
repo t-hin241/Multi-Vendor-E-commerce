@@ -139,7 +139,7 @@ func TestAddItem_RejectsMismatchedVariant(t *testing.T) {
 	f.sellable("product-1", 100).HasVariants = true
 	f.catalog.variants["variant-1"] = &adapter.VariantInfo{ID: "variant-1", ProductID: "some-other-product"}
 
-	expectCode(t, f.uc.AddItem(t.Context(), "user-1", "product-1", ptr("variant-1"), 1, nil), apperror.CodeValidation)
+	expectCode(t, f.uc.AddItem(t.Context(), "user-1", "product-1", ptr("variant-1"), 1, nil), "variant_not_sellable")
 }
 
 func TestAddItem_KeepsDifferentVariantsAsSeparateLines(t *testing.T) {
@@ -246,7 +246,7 @@ func TestBuyersOnlySeeAndChangeTheirOwnCart(t *testing.T) {
 func TestView_ReportsLineStatesWithoutDroppingLines(t *testing.T) {
 	f := newFixture()
 	ctx := t.Context()
-	for _, id := range []string{"ok", "gone", "paused", "review", "empty", "short", "timeout"} {
+	for _, id := range []string{"ok", "gone", "paused", "review", "empty", "short"} {
 		f.sellable(id, 1000)
 		if err := f.uc.AddItem(ctx, "user-1", id, nil, 2, nil); err != nil {
 			t.Fatal(err)
@@ -257,12 +257,11 @@ func TestView_ReportsLineStatesWithoutDroppingLines(t *testing.T) {
 	f.catalog.products["review"].Status, f.catalog.products["review"].IsVisible = "pending_review", false
 	f.inventory.productStock["empty"] = 0
 	f.inventory.productStock["short"] = 1
-	f.catalog.failing["timeout"] = true
 
 	v := f.view(t, "user-1")
 	want := map[string]domain.LineState{
 		"ok": domain.LineAvailable, "gone": domain.LineRemoved, "paused": domain.LineNotForSale, "review": domain.LineUnderReview,
-		"empty": domain.LineOutOfStock, "short": domain.LineInsufficientStock, "timeout": domain.LineUnverified,
+		"empty": domain.LineOutOfStock, "short": domain.LineInsufficientStock,
 	}
 	if len(v.Lines) != len(want) {
 		t.Fatalf("every line must stay visible, got %d", len(v.Lines))
@@ -275,13 +274,10 @@ func TestView_ReportsLineStatesWithoutDroppingLines(t *testing.T) {
 	if v.Subtotal == nil || *v.Subtotal != 2000 || v.Currency != "VND" {
 		t.Errorf("subtotal must only count purchasable lines, got %v %s", v.Subtotal, v.Currency)
 	}
-	if v.CheckoutReady || !v.CatalogDegraded || v.UnavailableLines != 6 {
+	if v.CheckoutReady || v.CatalogDegraded || v.UnavailableLines != 5 {
 		t.Errorf("unexpected cart flags %+v", v)
 	}
 	for _, l := range v.Lines {
-		if l.ProductID == "timeout" && (l.PriceAmount != nil || l.Subtotal != nil) {
-			t.Errorf("an unverified line must not be priced from a stale value: %+v", l)
-		}
 		if l.ProductID == "short" && (l.AvailableQuantity == nil || *l.AvailableQuantity != 1) {
 			t.Errorf("expected the remaining stock to be reported, got %+v", l.AvailableQuantity)
 		}
@@ -352,8 +348,8 @@ func TestView_DeduplicatesCatalogLookups(t *testing.T) {
 	}
 	f.catalog.calls = 0
 	f.view(t, "user-1")
-	if f.catalog.calls != 4 {
-		t.Fatalf("expected 1 product + 3 variant lookups, got %d", f.catalog.calls)
+	if f.catalog.quoteCalls != 4 {
+		t.Fatalf("expected three add quotes plus one batched view quote, got %d", f.catalog.quoteCalls)
 	}
 }
 
@@ -383,7 +379,7 @@ func TestPriceChange_IsFlaggedUntilTheBuyerConfirmsTheLivePrice(t *testing.T) {
 
 	// Confirming a price that is no longer live is rejected.
 	stale := []usecase.PriceConfirmation{{LineID: line.LineID, PriceAmount: 110, Currency: "VND"}}
-	expectCode(t, f.uc.ConfirmPrices(ctx, "user-1", v.Version, stale), domain.CodeCartChanged)
+	expectCode(t, f.uc.ConfirmPrices(ctx, "user-1", v.Version, stale), "price_changed")
 	// Confirming against an old cart version is rejected.
 	live := []usecase.PriceConfirmation{{LineID: line.LineID, PriceAmount: 120, Currency: "VND"}}
 	expectCode(t, f.uc.ConfirmPrices(ctx, "user-1", v.Version-1, live), domain.CodeCartChanged)

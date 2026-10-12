@@ -23,11 +23,13 @@ func (r *ProductRepository) ReadCheckout(ctx context.Context, productIDs, varian
   'price_amount', p.price_amount, 'currency', p.currency, 'status', p.status,
   'is_active', p.is_active, 'version', p.version, 'enforced_version', p.enforced_version,
   'has_variants', EXISTS(SELECT 1 FROM product_variants v WHERE v.product_id=p.id),
+  'has_differentiated_prices', EXISTS(SELECT 1 FROM product_variants v WHERE v.product_id=p.id AND v.price_amount<>p.price_amount),
   'package_weight_grams', packaging.weight_grams) ORDER BY p.id)
  FROM products p LEFT JOIN product_packaging packaging ON packaging.product_id=p.id
  WHERE p.id=ANY($1::uuid[])), '[]'::jsonb),
  COALESCE((SELECT jsonb_agg(jsonb_build_object(
   'id', v.id, 'product_id', v.product_id, 'vendor_id', p.vendor_id, 'sku', v.sku,
+  'price_amount',v.price_amount,'price_version',v.price_version,
   'options', COALESCE((SELECT jsonb_agg(jsonb_build_object(
    'attribute_id', sel.attribute_id, 'attribute_name', COALESCE(a.name, sel.attribute_id::text),
    'option_id', sel.option_id, 'option_value', COALESCE(o.value, sel.option_id::text)) ORDER BY sel.attribute_id)

@@ -36,16 +36,16 @@ func TestCheckoutBatchRetainsValidationAndCreatesNoOrderOnFailure(t *testing.T) 
 		{"missing_variant", func(f *checkoutFixture) {
 			v := "gone"
 			f.cartOf(adapter.CartLine{ProductID: "p", VariantID: &v, Quantity: 1})
-		}, apperror.CodeValidation},
+		}, "variant_not_sellable"},
 		{"wrong_product_variant", func(f *checkoutFixture) {
 			v := "v"
 			f.catalog.variants[v] = &adapter.VariantInfo{ID: v, ProductID: "other", SKU: "s"}
 			f.cartOf(adapter.CartLine{ProductID: "p", VariantID: &v, Quantity: 1})
-		}, apperror.CodeValidation},
+		}, "variant_not_sellable"},
 		{"stale_price", func(f *checkoutFixture) {
 			p, c := int64(1), "VND"
 			f.cartOf(adapter.CartLine{ProductID: "p", Quantity: 1, SeenPriceAmount: &p, SeenCurrency: &c})
-		}, domain.CodeCartChanged},
+		}, "price_changed"},
 		{"weight_overflow", func(f *checkoutFixture) {
 			w := int64(math.MaxInt64)
 			f.catalog.products["p"].PackageWeightGrams = &w
@@ -87,7 +87,7 @@ func TestCheckoutAndPreviewUseFreshBatchAndPreserveVariantSnapshots(t *testing.T
 	expectCode(t, err, domain.CodeCheckoutTotalChanged)
 	order := f.checkout(t, "batch-current-total")
 	items, _ := f.orders.ListItemsByOrder(t.Context(), order.ID)
-	if f.catalog.batchCalls != 3 || order.SubtotalAmount != 500 || order.ShippingAmount != 30000 || len(items) != 2 || *items[0].VariantSKU != "A" || *items[1].VariantSKU != "B" {
+	if f.catalog.batchCalls != 4 || order.SubtotalAmount != 500 || order.ShippingAmount != 30000 || len(items) != 2 || *items[0].VariantSKU != "A" || *items[1].VariantSKU != "B" {
 		t.Fatalf("snapshots changed: %+v %+v", order, items)
 	}
 }

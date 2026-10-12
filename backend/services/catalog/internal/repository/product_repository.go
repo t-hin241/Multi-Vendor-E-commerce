@@ -29,7 +29,9 @@ func (r *ProductRepository) UpdateContent(ctx context.Context, p *domain.Product
 
 const productSelectColumns = `
 	SELECT id, vendor_id, category_id, name, slug, description, price_amount, currency,
-	       status, rejection_reason, is_active, created_at, updated_at, version, enforced_version
+	       status, rejection_reason, is_active, created_at, updated_at, version, enforced_version,
+	       COALESCE((SELECT min(v.price_amount) FROM product_variants v WHERE v.product_id=products.id),price_amount),
+	       COALESCE((SELECT max(v.price_amount) FROM product_variants v WHERE v.product_id=products.id),price_amount)
 	`
 
 func (r *ProductRepository) Create(ctx context.Context, p *domain.Product) error {
@@ -136,9 +138,9 @@ func (r *ProductRepository) ListStorefront(ctx context.Context, categoryID, vend
 	if len(sortBy) > 0 {
 		switch sortBy[0] {
 		case "price_asc":
-			order = "price_amount ASC, id ASC"
+			order = "COALESCE((SELECT min(v.price_amount) FROM product_variants v WHERE v.product_id=products.id),price_amount) ASC, id ASC"
 		case "price_desc":
-			order = "price_amount DESC, id DESC"
+			order = "COALESCE((SELECT min(v.price_amount) FROM product_variants v WHERE v.product_id=products.id),price_amount) DESC, id DESC"
 		}
 	}
 	query += ` ORDER BY ` + order + ` LIMIT $` + strconv.Itoa(len(args)-1) + ` OFFSET $` + strconv.Itoa(len(args))
@@ -190,7 +192,7 @@ func (r *ProductRepository) UpdateActive(ctx context.Context, id string, isActiv
 func scanProduct(row pgx.Row) (*domain.Product, error) {
 	var p domain.Product
 	err := row.Scan(&p.ID, &p.VendorID, &p.CategoryID, &p.Name, &p.Slug, &p.Description, &p.PriceAmount, &p.Currency,
-		&p.Status, &p.RejectionReason, &p.IsActive, &p.CreatedAt, &p.UpdatedAt, &p.Version, &p.EnforcedVersion)
+		&p.Status, &p.RejectionReason, &p.IsActive, &p.CreatedAt, &p.UpdatedAt, &p.Version, &p.EnforcedVersion, &p.MinPriceAmount, &p.MaxPriceAmount)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrProductNotFound
@@ -205,7 +207,7 @@ func scanProducts(rows pgx.Rows) ([]*domain.Product, error) {
 	for rows.Next() {
 		var p domain.Product
 		err := rows.Scan(&p.ID, &p.VendorID, &p.CategoryID, &p.Name, &p.Slug, &p.Description, &p.PriceAmount, &p.Currency,
-			&p.Status, &p.RejectionReason, &p.IsActive, &p.CreatedAt, &p.UpdatedAt, &p.Version, &p.EnforcedVersion)
+			&p.Status, &p.RejectionReason, &p.IsActive, &p.CreatedAt, &p.UpdatedAt, &p.Version, &p.EnforcedVersion, &p.MinPriceAmount, &p.MaxPriceAmount)
 		if err != nil {
 			return nil, err
 		}

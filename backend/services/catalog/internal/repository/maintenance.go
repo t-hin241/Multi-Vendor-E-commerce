@@ -17,6 +17,8 @@ func (r Maintenance) Stats(ctx context.Context) (map[string]int64, error) {
  SELECT 'status_delivery_failures',COALESCE(sum(attempts),0)::bigint FROM product_status_outbox UNION ALL
  SELECT 'cleanup_failures',COALESCE(sum(attempts),0)::bigint FROM catalog_object_cleanup UNION ALL
  SELECT 'status_parked',count(*) FROM product_status_outbox WHERE attempts>=10 UNION ALL
+ SELECT 'variant_price_pending',count(*) FROM variant_price_outbox WHERE attempts<5 UNION ALL
+ SELECT 'variant_price_parked',count(*) FROM variant_price_outbox WHERE attempts>=5 UNION ALL
  SELECT 'cleanup_pending',count(*) FROM catalog_object_cleanup UNION ALL
  SELECT 'cleanup_parked',count(*) FROM catalog_object_cleanup WHERE attempts>=10 UNION ALL
  SELECT 'vendor_cache_stale',count(*) FROM vendor_name_cache WHERE updated_at<=now()-interval '15 minutes' UNION ALL
@@ -43,6 +45,8 @@ func (r Maintenance) Replay(ctx context.Context, actor, kind, id, reason string)
 		var err error
 		if kind == "status" {
 			err = q.QueryRow(ctx, `UPDATE product_status_outbox SET attempts=0,next_attempt_at=now(),last_error=NULL WHERE product_id::text=$1 RETURNING product_id`, id).Scan(&product)
+		} else if kind == "variant_price" {
+			err = q.QueryRow(ctx, `UPDATE variant_price_outbox SET attempts=0,next_attempt_at=now() WHERE variant_id::text=$1 RETURNING product_id`, id).Scan(&product)
 		} else {
 			err = q.QueryRow(ctx, `UPDATE catalog_object_cleanup SET attempts=0,next_attempt_at=greatest(created_at+interval '24 hours',now()),last_error=NULL WHERE object_key=$1 RETURNING product_id`, id).Scan(&product)
 		}

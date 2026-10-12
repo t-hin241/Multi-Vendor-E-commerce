@@ -1,0 +1,9 @@
+**
+!backend/
+!backend/pkg/
+!backend/pkg/**
+!deploy/
+!deploy/loadtest/
+!deploy/loadtest/authorize-probe/
+!deploy/loadtest/authorize-probe/main.go
+!deploy/loadtest/authorize-probe/Dockerfile

@@ -2,6 +2,8 @@
 
 Đo tải để tìm điểm nghẽn, không phải để "chạy cho có số". Kết quả và cách đọc: [17-observability-capacity](../../docs/module-details/17-observability-capacity.md). Dashboard và cảnh báo: [observability-runbook](../observability-runbook.md).
 
+PW-020: [đo chuỗi authorize Vendor → Identity, timeout và phục hồi](authorize.md).
+
 ## Môi trường
 
 - Project Compose riêng `shopee-loadtest`, có volume riêng. Stack dev và dữ liệu của nó không bị đụng tới.

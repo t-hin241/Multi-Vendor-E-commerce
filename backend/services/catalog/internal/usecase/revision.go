@@ -5,6 +5,7 @@ import (
 	"strconv"
 
 	"shopee/backend/pkg/apperror"
+	"shopee/backend/pkg/middleware"
 	"shopee/backend/pkg/shopaccess"
 	"shopee/backend/services/catalog/internal/domain"
 )
@@ -34,6 +35,23 @@ func (uc *ProductUseCase) UpdateContent(ctx context.Context, userID, productID, 
 		p.PriceAmount = price
 		if err := uc.products.UpdateContent(ctx, p); err != nil {
 			return err
+		}
+		// While the capability is off, product price remains the single price
+		// vendors edit. Keep every stored SKU price in sync so the compatibility
+		// gate cannot strand an otherwise legacy product after re-approval.
+		if !uc.VariantPricingEnabled {
+			variants, err := uc.variants.ListForProduct(ctx, p.ID)
+			if err != nil {
+				return err
+			}
+			for _, variant := range variants {
+				if variant.PriceAmount == price {
+					continue
+				}
+				if _, err := uc.variants.UpdatePrice(ctx, p.ID, variant.ID, variant.PriceVersion, price, userID, middleware.RequestIDFromContext(ctx)); err != nil {
+					return err
+				}
+			}
 		}
 		if err := uc.attributeValues.ReplaceForProduct(ctx, p.ID, values); err != nil {
 			return err

@@ -109,6 +109,8 @@ func toProductMediaResponseList(items []*domain.ProductMedia) []productMediaResp
 type productResponse struct {
 	Version            int64                    `json:"version"`
 	SellingSyncPending bool                     `json:"selling_sync_pending"`
+	MinPrice           *int64                   `json:"min_price"`
+	MaxPrice           *int64                   `json:"max_price"`
 	ID                 string                   `json:"id"`
 	VendorID           string                   `json:"vendor_id"`
 	CategoryID         string                   `json:"category_id"`
@@ -173,6 +175,7 @@ func toProductResponse(p *domain.Product) productResponse {
 		Slug:        p.Slug,
 		Description: domain.SanitizeDescription(p.Description),
 		Version:     p.Version, SellingSyncPending: p.EnforcedVersion < p.Version,
+		MinPrice: p.MinPriceAmount, MaxPrice: p.MaxPriceAmount,
 		PriceAmount:     p.PriceAmount,
 		Currency:        p.Currency,
 		Status:          string(p.Status),
@@ -385,8 +388,9 @@ func toAttributeTemplateResponse(resolved []domain.ResolvedAttribute) attributeT
 }
 
 type createVariantRequest struct {
-	SKU       string   `json:"sku" binding:"required"`
-	OptionIDs []string `json:"option_ids" binding:"required,min=1"`
+	PriceAmount *int64   `json:"price_amount"`
+	SKU         string   `json:"sku" binding:"required"`
+	OptionIDs   []string `json:"option_ids" binding:"required,min=1"`
 }
 
 type variantOptionResponse struct {
@@ -397,10 +401,12 @@ type variantOptionResponse struct {
 }
 
 type variantResponse struct {
-	ID        string                  `json:"id"`
-	ProductID string                  `json:"product_id"`
-	SKU       string                  `json:"sku"`
-	Options   []variantOptionResponse `json:"options"`
+	PriceAmount    int64                   `json:"price_amount"`
+	PricingVersion int64                   `json:"pricing_version"`
+	ID             string                  `json:"id"`
+	ProductID      string                  `json:"product_id"`
+	SKU            string                  `json:"sku"`
+	Options        []variantOptionResponse `json:"options"`
 	// Pointer, not a plain int64: a genuinely out-of-stock variant (0) must
 	// stay distinguishable from "not populated" (vendor-facing variant
 	// endpoints never set this) — omitempty on a value type would drop a
@@ -421,7 +427,7 @@ func toVariantOptionResponseListFromDetails(details []domain.VariantOptionDetail
 }
 
 func toVariantResponse(v *domain.ProductVariant, details []domain.VariantOptionDetail) variantResponse {
-	return variantResponse{ID: v.ID, ProductID: v.ProductID, SKU: v.SKU, Options: toVariantOptionResponseListFromDetails(details), CreatedAt: v.CreatedAt}
+	return variantResponse{ID: v.ID, ProductID: v.ProductID, SKU: v.SKU, PriceAmount: v.PriceAmount, PricingVersion: v.PriceVersion, Options: toVariantOptionResponseListFromDetails(details), CreatedAt: v.CreatedAt}
 }
 
 // toPublicVariantResponse is the public product-detail page's builder —

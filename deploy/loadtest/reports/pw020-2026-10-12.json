@@ -1,0 +1,1507 @@
+{
+    "source_commit":  "ea556140f8d42ad4e9692dfc21a5f3f79d5269ff",
+    "date_utc":  "2026-10-12",
+    "scope":  "PW-020 authorization chain on isolated shopee-loadtest",
+    "k6":  "2.3.0",
+    "runs":  [
+                 {
+                     "parameters":  {
+                                        "rate":  10,
+                                        "duration":  "10s",
+                                        "vendor_delay_ms":  0,
+                                        "p99_limit_ms":  500,
+                                        "target":  "client",
+                                        "expected":  "allowed",
+                                        "completed_at_utc":  "2026-10-12T05:48:44.329Z",
+                                        "identity_delay_ms":  0,
+                                        "p95_limit_ms":  250,
+                                        "run":  "smoke"
+                                    },
+                     "thresholds_passed":  false,
+                     "metrics":  {
+                                     "authorization_latency":  {
+                                                                   "values":  {
+                                                                                  "p(50)":  4.992301,
+                                                                                  "p(95)":  178.395495,
+                                                                                  "p(99)":  576.453527,
+                                                                                  "max":  673.394072,
+                                                                                  "avg":  33.951591316831674
+                                                                              },
+                                                                   "thresholds":  {
+                                                                                      "p(95)\u003c250":  {
+                                                                                                             "ok":  true
+                                                                                                         },
+                                                                                      "p(99)\u003c500":  {
+                                                                                                             "ok":  false
+                                                                                                         }
+                                                                                  }
+                                                               },
+                                     "authorization_correct":  {
+                                                                   "values":  {
+                                                                                  "rate":  1,
+                                                                                  "passes":  101,
+                                                                                  "fails":  0
+                                                                              },
+                                                                   "thresholds":  {
+                                                                                      "rate==1":  {
+                                                                                                      "ok":  true
+                                                                                                  }
+                                                                                  }
+                                                               },
+                                     "authorization_available":  {
+                                                                     "values":  {
+                                                                                    "rate":  1,
+                                                                                    "passes":  101,
+                                                                                    "fails":  0
+                                                                                },
+                                                                     "thresholds":  {
+                                                                                        "rate\u003e0.999":  {
+                                                                                                                "ok":  true
+                                                                                                            }
+                                                                                    }
+                                                                 },
+                                     "dropped_iterations":  {
+                                                                "values":  {
+                                                                               "count":  0,
+                                                                               "rate":  0
+                                                                           },
+                                                                "thresholds":  {
+                                                                                   "count==0":  {
+                                                                                                    "ok":  true
+                                                                                                }
+                                                                               }
+                                                            },
+                                     "checks":  {
+                                                    "values":  {
+                                                                   "passes":  101,
+                                                                   "fails":  0,
+                                                                   "rate":  1
+                                                               },
+                                                    "thresholds":  {
+                                                                       "rate==1":  {
+                                                                                       "ok":  true
+                                                                                   }
+                                                                   }
+                                                }
+                                 },
+                     "raw_sha256":  "760cf2956ecfd1c76fbbaa4a6b61a03df176cefd65c944cd499a30fee6392c99"
+                 },
+                 {
+                     "parameters":  {
+                                        "completed_at_utc":  "2026-10-12T05:51:15.517Z",
+                                        "rate":  20,
+                                        "duration":  "2m",
+                                        "p95_limit_ms":  250,
+                                        "p99_limit_ms":  500,
+                                        "run":  "healthy20",
+                                        "target":  "vendor",
+                                        "expected":  "allowed",
+                                        "identity_delay_ms":  0,
+                                        "vendor_delay_ms":  0
+                                    },
+                     "thresholds_passed":  true,
+                     "metrics":  {
+                                     "authorization_latency":  {
+                                                                   "values":  {
+                                                                                  "avg":  5.16543944481466,
+                                                                                  "p(50)":  4.111362,
+                                                                                  "p(95)":  10.528379,
+                                                                                  "p(99)":  15.754773,
+                                                                                  "max":  32.776661
+                                                                              },
+                                                                   "thresholds":  {
+                                                                                      "p(95)\u003c250":  {
+                                                                                                             "ok":  true
+                                                                                                         },
+                                                                                      "p(99)\u003c500":  {
+                                                                                                             "ok":  true
+                                                                                                         }
+                                                                                  }
+                                                               },
+                                     "authorization_correct":  {
+                                                                   "values":  {
+                                                                                  "rate":  1,
+                                                                                  "passes":  2401,
+                                                                                  "fails":  0
+                                                                              },
+                                                                   "thresholds":  {
+                                                                                      "rate==1":  {
+                                                                                                      "ok":  true
+                                                                                                  }
+                                                                                  }
+                                                               },
+                                     "authorization_available":  {
+                                                                     "values":  {
+                                                                                    "rate":  1,
+                                                                                    "passes":  2401,
+                                                                                    "fails":  0
+                                                                                },
+                                                                     "thresholds":  {
+                                                                                        "rate\u003e0.999":  {
+                                                                                                                "ok":  true
+                                                                                                            }
+                                                                                    }
+                                                                 },
+                                     "dropped_iterations":  {
+                                                                "values":  {
+                                                                               "count":  0,
+                                                                               "rate":  0
+                                                                           },
+                                                                "thresholds":  {
+                                                                                   "count==0":  {
+                                                                                                    "ok":  true
+                                                                                                }
+                                                                               }
+                                                            },
+                                     "checks":  {
+                                                    "values":  {
+                                                                   "rate":  1,
+                                                                   "passes":  2401,
+                                                                   "fails":  0
+                                                               },
+                                                    "thresholds":  {
+                                                                       "rate==1":  {
+                                                                                       "ok":  true
+                                                                                   }
+                                                                   }
+                                                }
+                                 },
+                     "raw_sha256":  "adfb91b82752eb53bb6a5d91f2ce1af3f3f4c84b4074fe3312de722b69fc8c93"
+                 },
+                 {
+                     "parameters":  {
+                                        "target":  "vendor",
+                                        "completed_at_utc":  "2026-10-12T05:53:18.339Z",
+                                        "p99_limit_ms":  500,
+                                        "expected":  "allowed",
+                                        "rate":  40,
+                                        "duration":  "2m",
+                                        "identity_delay_ms":  0,
+                                        "vendor_delay_ms":  0,
+                                        "p95_limit_ms":  250,
+                                        "run":  "healthy40"
+                                    },
+                     "thresholds_passed":  true,
+                     "metrics":  {
+                                     "authorization_latency":  {
+                                                                   "values":  {
+                                                                                  "p(95)":  10.451406,
+                                                                                  "p(99)":  14.128699,
+                                                                                  "max":  34.583713,
+                                                                                  "avg":  5.099854528015001,
+                                                                                  "p(50)":  3.886015
+                                                                              },
+                                                                   "thresholds":  {
+                                                                                      "p(99)\u003c500":  {
+                                                                                                             "ok":  true
+                                                                                                         },
+                                                                                      "p(95)\u003c250":  {
+                                                                                                             "ok":  true
+                                                                                                         }
+                                                                                  }
+                                                               },
+                                     "authorization_correct":  {
+                                                                   "values":  {
+                                                                                  "rate":  1,
+                                                                                  "passes":  4801,
+                                                                                  "fails":  0
+                                                                              },
+                                                                   "thresholds":  {
+                                                                                      "rate==1":  {
+                                                                                                      "ok":  true
+                                                                                                  }
+                                                                                  }
+                                                               },
+                                     "authorization_available":  {
+                                                                     "values":  {
+                                                                                    "rate":  1,
+                                                                                    "passes":  4801,
+                                                                                    "fails":  0
+                                                                                },
+                                                                     "thresholds":  {
+                                                                                        "rate\u003e0.999":  {
+                                                                                                                "ok":  true
+                                                                                                            }
+                                                                                    }
+                                                                 },
+                                     "dropped_iterations":  {
+                                                                "values":  {
+                                                                               "count":  0,
+                                                                               "rate":  0
+                                                                           },
+                                                                "thresholds":  {
+                                                                                   "count==0":  {
+                                                                                                    "ok":  true
+                                                                                                }
+                                                                               }
+                                                            },
+                                     "checks":  {
+                                                    "values":  {
+                                                                   "rate":  1,
+                                                                   "passes":  4801,
+                                                                   "fails":  0
+                                                               },
+                                                    "thresholds":  {
+                                                                       "rate==1":  {
+                                                                                       "ok":  true
+                                                                                   }
+                                                                   }
+                                                }
+                                 },
+                     "raw_sha256":  "5979badcc1ec558d774cac714eb9a58aa8d5bbc36db9902e7da4dddcf6638681"
+                 },
+                 {
+                     "parameters":  {
+                                        "duration":  "2m",
+                                        "identity_delay_ms":  0,
+                                        "p95_limit_ms":  250,
+                                        "run":  "healthy80",
+                                        "target":  "vendor",
+                                        "completed_at_utc":  "2026-10-12T05:55:22.078Z",
+                                        "vendor_delay_ms":  0,
+                                        "p99_limit_ms":  500,
+                                        "expected":  "allowed",
+                                        "rate":  80
+                                    },
+                     "thresholds_passed":  true,
+                     "metrics":  {
+                                     "authorization_latency":  {
+                                                                   "values":  {
+                                                                                  "avg":  5.175903506770844,
+                                                                                  "p(50)":  4.164603,
+                                                                                  "p(95)":  9.999151049999996,
+                                                                                  "p(99)":  13.70708553000003,
+                                                                                  "max":  50.798771
+                                                                              },
+                                                                   "thresholds":  {
+                                                                                      "p(95)\u003c250":  {
+                                                                                                             "ok":  true
+                                                                                                         },
+                                                                                      "p(99)\u003c500":  {
+                                                                                                             "ok":  true
+                                                                                                         }
+                                                                                  }
+                                                               },
+                                     "authorization_correct":  {
+                                                                   "values":  {
+                                                                                  "rate":  1,
+                                                                                  "passes":  9600,
+                                                                                  "fails":  0
+                                                                              },
+                                                                   "thresholds":  {
+                                                                                      "rate==1":  {
+                                                                                                      "ok":  true
+                                                                                                  }
+                                                                                  }
+                                                               },
+                                     "authorization_available":  {
+                                                                     "values":  {
+                                                                                    "fails":  0,
+                                                                                    "rate":  1,
+                                                                                    "passes":  9600
+                                                                                },
+                                                                     "thresholds":  {
+                                                                                        "rate\u003e0.999":  {
+                                                                                                                "ok":  true
+                                                                                                            }
+                                                                                    }
+                                                                 },
+                                     "dropped_iterations":  {
+                                                                "values":  {
+                                                                               "rate":  0,
+                                                                               "count":  0
+                                                                           },
+                                                                "thresholds":  {
+                                                                                   "count==0":  {
+                                                                                                    "ok":  true
+                                                                                                }
+                                                                               }
+                                                            },
+                                     "checks":  {
+                                                    "values":  {
+                                                                   "rate":  1,
+                                                                   "passes":  9600,
+                                                                   "fails":  0
+                                                               },
+                                                    "thresholds":  {
+                                                                       "rate==1":  {
+                                                                                       "ok":  true
+                                                                                   }
+                                                                   }
+                                                }
+                                 },
+                     "raw_sha256":  "e7331e178fd7d09ae3dcfe7c8da374b7896127fcc6b5523144131f975e33fcda"
+                 },
+                 {
+                     "parameters":  {
+                                        "run":  "soak",
+                                        "completed_at_utc":  "2026-10-12T06:00:41.162Z",
+                                        "duration":  "5m",
+                                        "target":  "client",
+                                        "expected":  "allowed",
+                                        "rate":  40,
+                                        "identity_delay_ms":  0,
+                                        "vendor_delay_ms":  0,
+                                        "p95_limit_ms":  250,
+                                        "p99_limit_ms":  500
+                                    },
+                     "thresholds_passed":  true,
+                     "metrics":  {
+                                     "authorization_latency":  {
+                                                                   "values":  {
+                                                                                  "avg":  6.795112135405419,
+                                                                                  "p(50)":  5.243223,
+                                                                                  "p(95)":  13.465874,
+                                                                                  "p(99)":  17.36415,
+                                                                                  "max":  46.967721
+                                                                              },
+                                                                   "thresholds":  {
+                                                                                      "p(99)\u003c500":  {
+                                                                                                             "ok":  true
+                                                                                                         },
+                                                                                      "p(95)\u003c250":  {
+                                                                                                             "ok":  true
+                                                                                                         }
+                                                                                  }
+                                                               },
+                                     "authorization_correct":  {
+                                                                   "values":  {
+                                                                                  "rate":  1,
+                                                                                  "passes":  12001,
+                                                                                  "fails":  0
+                                                                              },
+                                                                   "thresholds":  {
+                                                                                      "rate==1":  {
+                                                                                                      "ok":  true
+                                                                                                  }
+                                                                                  }
+                                                               },
+                                     "authorization_available":  {
+                                                                     "values":  {
+                                                                                    "rate":  1,
+                                                                                    "passes":  12001,
+                                                                                    "fails":  0
+                                                                                },
+                                                                     "thresholds":  {
+                                                                                        "rate\u003e0.999":  {
+                                                                                                                "ok":  true
+                                                                                                            }
+                                                                                    }
+                                                                 },
+                                     "dropped_iterations":  {
+                                                                "values":  {
+                                                                               "count":  0,
+                                                                               "rate":  0
+                                                                           },
+                                                                "thresholds":  {
+                                                                                   "count==0":  {
+                                                                                                    "ok":  true
+                                                                                                }
+                                                                               }
+                                                            },
+                                     "checks":  {
+                                                    "values":  {
+                                                                   "rate":  1,
+                                                                   "passes":  12001,
+                                                                   "fails":  0
+                                                               },
+                                                    "thresholds":  {
+                                                                       "rate==1":  {
+                                                                                       "ok":  true
+                                                                                   }
+                                                                   }
+                                                }
+                                 },
+                     "raw_sha256":  "64f6c0b18eba17c11f7a112adc31e3f2bc664e3075c3f64ffcbeb78e013a2991"
+                 },
+                 {
+                     "parameters":  {
+                                        "run":  "slow",
+                                        "target":  "client",
+                                        "rate":  20,
+                                        "vendor_delay_ms":  0,
+                                        "p95_limit_ms":  1000,
+                                        "expected":  "allowed",
+                                        "completed_at_utc":  "2026-10-12T06:02:00.182Z",
+                                        "duration":  "30s",
+                                        "identity_delay_ms":  500,
+                                        "p99_limit_ms":  1500
+                                    },
+                     "thresholds_passed":  true,
+                     "metrics":  {
+                                     "authorization_latency":  {
+                                                                   "values":  {
+                                                                                  "p(50)":  506.899685,
+                                                                                  "p(95)":  514.394592,
+                                                                                  "p(99)":  518.723659,
+                                                                                  "max":  538.842138,
+                                                                                  "avg":  508.0443492013308
+                                                                              },
+                                                                   "thresholds":  {
+                                                                                      "p(95)\u003c1000":  {
+                                                                                                              "ok":  true
+                                                                                                          },
+                                                                                      "p(99)\u003c1500":  {
+                                                                                                              "ok":  true
+                                                                                                          }
+                                                                                  }
+                                                               },
+                                     "authorization_correct":  {
+                                                                   "values":  {
+                                                                                  "rate":  1,
+                                                                                  "passes":  601,
+                                                                                  "fails":  0
+                                                                              },
+                                                                   "thresholds":  {
+                                                                                      "rate==1":  {
+                                                                                                      "ok":  true
+                                                                                                  }
+                                                                                  }
+                                                               },
+                                     "authorization_available":  {
+                                                                     "values":  {
+                                                                                    "rate":  1,
+                                                                                    "passes":  601,
+                                                                                    "fails":  0
+                                                                                },
+                                                                     "thresholds":  {
+                                                                                        "rate\u003e0.999":  {
+                                                                                                                "ok":  true
+                                                                                                            }
+                                                                                    }
+                                                                 },
+                                     "dropped_iterations":  {
+                                                                "values":  {
+                                                                               "count":  0,
+                                                                               "rate":  0
+                                                                           },
+                                                                "thresholds":  {
+                                                                                   "count==0":  {
+                                                                                                    "ok":  true
+                                                                                                }
+                                                                               }
+                                                            },
+                                     "checks":  {
+                                                    "values":  {
+                                                                   "passes":  601,
+                                                                   "fails":  0,
+                                                                   "rate":  1
+                                                               },
+                                                    "thresholds":  {
+                                                                       "rate==1":  {
+                                                                                       "ok":  true
+                                                                                   }
+                                                                   }
+                                                }
+                                 },
+                     "raw_sha256":  "3c0c6f703c8d01d21277c512dee977ee5d74b2d07dcb12f3fdb232d1359450b9"
+                 },
+                 {
+                     "parameters":  {
+                                        "p95_limit_ms":  2250,
+                                        "p99_limit_ms":  2500,
+                                        "target":  "vendor",
+                                        "expected":  "unavailable",
+                                        "completed_at_utc":  "2026-10-12T06:02:35.248Z",
+                                        "identity_delay_ms":  2500,
+                                        "run":  "identity-timeout-direct",
+                                        "rate":  20,
+                                        "duration":  "30s",
+                                        "vendor_delay_ms":  0
+                                    },
+                     "thresholds_passed":  true,
+                     "metrics":  {
+                                     "authorization_latency":  {
+                                                                   "values":  {
+                                                                                  "p(99)":  2007.967556,
+                                                                                  "max":  2013.173088,
+                                                                                  "avg":  2003.1414786306177,
+                                                                                  "p(50)":  2002.834068,
+                                                                                  "p(95)":  2005.897475
+                                                                              },
+                                                                   "thresholds":  {
+                                                                                      "p(95)\u003c2250":  {
+                                                                                                              "ok":  true
+                                                                                                          },
+                                                                                      "p(99)\u003c2500":  {
+                                                                                                              "ok":  true
+                                                                                                          }
+                                                                                  }
+                                                               },
+                                     "authorization_correct":  {
+                                                                   "values":  {
+                                                                                  "fails":  0,
+                                                                                  "rate":  1,
+                                                                                  "passes":  601
+                                                                              },
+                                                                   "thresholds":  {
+                                                                                      "rate==1":  {
+                                                                                                      "ok":  true
+                                                                                                  }
+                                                                                  }
+                                                               },
+                                     "authorization_available":  {
+                                                                     "values":  {
+                                                                                    "rate":  0,
+                                                                                    "passes":  0,
+                                                                                    "fails":  601
+                                                                                },
+                                                                     "thresholds":  {
+                                                                                        "rate==0":  {
+                                                                                                        "ok":  true
+                                                                                                    }
+                                                                                    }
+                                                                 },
+                                     "dropped_iterations":  {
+                                                                "values":  {
+                                                                               "rate":  0,
+                                                                               "count":  0
+                                                                           },
+                                                                "thresholds":  {
+                                                                                   "count==0":  {
+                                                                                                    "ok":  true
+                                                                                                }
+                                                                               }
+                                                            },
+                                     "checks":  {
+                                                    "values":  {
+                                                                   "rate":  1,
+                                                                   "passes":  601,
+                                                                   "fails":  0
+                                                               },
+                                                    "thresholds":  {
+                                                                       "rate==1":  {
+                                                                                       "ok":  true
+                                                                                   }
+                                                                   }
+                                                }
+                                 },
+                     "raw_sha256":  "d53182ae12f6ef82a582626eb6af93e94c96959a02e6f5df7efe6581c26783f6"
+                 },
+                 {
+                     "parameters":  {
+                                        "rate":  20,
+                                        "duration":  "30s",
+                                        "p99_limit_ms":  2500,
+                                        "target":  "client",
+                                        "expected":  "unavailable",
+                                        "identity_delay_ms":  2500,
+                                        "vendor_delay_ms":  0,
+                                        "p95_limit_ms":  2250,
+                                        "run":  "identity-timeout",
+                                        "completed_at_utc":  "2026-10-12T06:03:10.343Z"
+                                    },
+                     "thresholds_passed":  true,
+                     "metrics":  {
+                                     "authorization_latency":  {
+                                                                   "values":  {
+                                                                                  "avg":  2004.9842469900177,
+                                                                                  "p(50)":  2004.568224,
+                                                                                  "p(95)":  2008.961667,
+                                                                                  "p(99)":  2013.808252,
+                                                                                  "max":  2017.609975
+                                                                              },
+                                                                   "thresholds":  {
+                                                                                      "p(95)\u003c2250":  {
+                                                                                                              "ok":  true
+                                                                                                          },
+                                                                                      "p(99)\u003c2500":  {
+                                                                                                              "ok":  true
+                                                                                                          }
+                                                                                  }
+                                                               },
+                                     "authorization_correct":  {
+                                                                   "values":  {
+                                                                                  "passes":  601,
+                                                                                  "fails":  0,
+                                                                                  "rate":  1
+                                                                              },
+                                                                   "thresholds":  {
+                                                                                      "rate==1":  {
+                                                                                                      "ok":  true
+                                                                                                  }
+                                                                                  }
+                                                               },
+                                     "authorization_available":  {
+                                                                     "values":  {
+                                                                                    "rate":  0,
+                                                                                    "passes":  0,
+                                                                                    "fails":  601
+                                                                                },
+                                                                     "thresholds":  {
+                                                                                        "rate==0":  {
+                                                                                                        "ok":  true
+                                                                                                    }
+                                                                                    }
+                                                                 },
+                                     "dropped_iterations":  {
+                                                                "values":  {
+                                                                               "count":  0,
+                                                                               "rate":  0
+                                                                           },
+                                                                "thresholds":  {
+                                                                                   "count==0":  {
+                                                                                                    "ok":  true
+                                                                                                }
+                                                                               }
+                                                            },
+                                     "checks":  {
+                                                    "values":  {
+                                                                   "rate":  1,
+                                                                   "passes":  601,
+                                                                   "fails":  0
+                                                               },
+                                                    "thresholds":  {
+                                                                       "rate==1":  {
+                                                                                       "ok":  true
+                                                                                   }
+                                                                   }
+                                                }
+                                 },
+                     "raw_sha256":  "0db68ccc8f4ee211dc623d002d211daedfde05c3381954fcfa061e6abf3b165b"
+                 },
+                 {
+                     "parameters":  {
+                                        "run":  "vendor-timeout",
+                                        "expected":  "unavailable",
+                                        "duration":  "30s",
+                                        "p95_limit_ms":  3250,
+                                        "target":  "client",
+                                        "completed_at_utc":  "2026-10-12T06:03:46.322Z",
+                                        "rate":  20,
+                                        "identity_delay_ms":  0,
+                                        "vendor_delay_ms":  3500,
+                                        "p99_limit_ms":  3500
+                                    },
+                     "thresholds_passed":  true,
+                     "metrics":  {
+                                     "authorization_latency":  {
+                                                                   "values":  {
+                                                                                  "p(50)":  3001.130605,
+                                                                                  "p(95)":  3002.656359,
+                                                                                  "p(99)":  3003.771787,
+                                                                                  "max":  3010.435406,
+                                                                                  "avg":  3001.100002908483
+                                                                              },
+                                                                   "thresholds":  {
+                                                                                      "p(95)\u003c3250":  {
+                                                                                                              "ok":  true
+                                                                                                          },
+                                                                                      "p(99)\u003c3500":  {
+                                                                                                              "ok":  true
+                                                                                                          }
+                                                                                  }
+                                                               },
+                                     "authorization_correct":  {
+                                                                   "values":  {
+                                                                                  "rate":  1,
+                                                                                  "passes":  601,
+                                                                                  "fails":  0
+                                                                              },
+                                                                   "thresholds":  {
+                                                                                      "rate==1":  {
+                                                                                                      "ok":  true
+                                                                                                  }
+                                                                                  }
+                                                               },
+                                     "authorization_available":  {
+                                                                     "values":  {
+                                                                                    "rate":  0,
+                                                                                    "passes":  0,
+                                                                                    "fails":  601
+                                                                                },
+                                                                     "thresholds":  {
+                                                                                        "rate==0":  {
+                                                                                                        "ok":  true
+                                                                                                    }
+                                                                                    }
+                                                                 },
+                                     "dropped_iterations":  {
+                                                                "values":  {
+                                                                               "count":  0,
+                                                                               "rate":  0
+                                                                           },
+                                                                "thresholds":  {
+                                                                                   "count==0":  {
+                                                                                                    "ok":  true
+                                                                                                }
+                                                                               }
+                                                            },
+                                     "checks":  {
+                                                    "values":  {
+                                                                   "rate":  1,
+                                                                   "passes":  601,
+                                                                   "fails":  0
+                                                               },
+                                                    "thresholds":  {
+                                                                       "rate==1":  {
+                                                                                       "ok":  true
+                                                                                   }
+                                                                   }
+                                                }
+                                 },
+                     "raw_sha256":  "2a66d98e3316da1932552727e6447c0a04f50a08583cc0c5ed03bbb2e9f9e25f"
+                 },
+                 {
+                     "parameters":  {
+                                        "duration":  "15s",
+                                        "identity_delay_ms":  0,
+                                        "vendor_delay_ms":  0,
+                                        "p95_limit_ms":  2250,
+                                        "run":  "identity-down-direct",
+                                        "target":  "vendor",
+                                        "completed_at_utc":  "2026-10-12T06:06:56.020Z",
+                                        "p99_limit_ms":  2500,
+                                        "expected":  "unavailable",
+                                        "rate":  20
+                                    },
+                     "thresholds_passed":  true,
+                     "metrics":  {
+                                     "authorization_latency":  {
+                                                                   "values":  {
+                                                                                  "avg":  1479.836732019934,
+                                                                                  "p(50)":  1835.987064,
+                                                                                  "p(95)":  2005.581728,
+                                                                                  "p(99)":  2007.348696,
+                                                                                  "max":  2011.071149
+                                                                              },
+                                                                   "thresholds":  {
+                                                                                      "p(95)\u003c2250":  {
+                                                                                                              "ok":  true
+                                                                                                          },
+                                                                                      "p(99)\u003c2500":  {
+                                                                                                              "ok":  true
+                                                                                                          }
+                                                                                  }
+                                                               },
+                                     "authorization_correct":  {
+                                                                   "values":  {
+                                                                                  "rate":  1,
+                                                                                  "passes":  301,
+                                                                                  "fails":  0
+                                                                              },
+                                                                   "thresholds":  {
+                                                                                      "rate==1":  {
+                                                                                                      "ok":  true
+                                                                                                  }
+                                                                                  }
+                                                               },
+                                     "authorization_available":  {
+                                                                     "values":  {
+                                                                                    "rate":  0,
+                                                                                    "passes":  0,
+                                                                                    "fails":  301
+                                                                                },
+                                                                     "thresholds":  {
+                                                                                        "rate==0":  {
+                                                                                                        "ok":  true
+                                                                                                    }
+                                                                                    }
+                                                                 },
+                                     "dropped_iterations":  {
+                                                                "values":  {
+                                                                               "rate":  0,
+                                                                               "count":  0
+                                                                           },
+                                                                "thresholds":  {
+                                                                                   "count==0":  {
+                                                                                                    "ok":  true
+                                                                                                }
+                                                                               }
+                                                            },
+                                     "checks":  {
+                                                    "values":  {
+                                                                   "rate":  1,
+                                                                   "passes":  301,
+                                                                   "fails":  0
+                                                               },
+                                                    "thresholds":  {
+                                                                       "rate==1":  {
+                                                                                       "ok":  true
+                                                                                   }
+                                                                   }
+                                                }
+                                 },
+                     "raw_sha256":  "15c91ef9d1947689c844fb7054d5aace7a35d17a0e877449d865e432ab2dcf75"
+                 },
+                 {
+                     "parameters":  {
+                                        "run":  "identity-down",
+                                        "expected":  "unavailable",
+                                        "completed_at_utc":  "2026-10-12T06:07:28.669Z",
+                                        "identity_delay_ms":  0,
+                                        "p95_limit_ms":  2250,
+                                        "p99_limit_ms":  2500,
+                                        "target":  "client",
+                                        "rate":  20,
+                                        "duration":  "30s",
+                                        "vendor_delay_ms":  0
+                                    },
+                     "thresholds_passed":  true,
+                     "metrics":  {
+                                     "authorization_latency":  {
+                                                                   "values":  {
+                                                                                  "avg":  1416.3868261966675,
+                                                                                  "p(50)":  1684.496295,
+                                                                                  "p(95)":  2007.7622834000001,
+                                                                                  "p(99)":  2012.00365293,
+                                                                                  "max":  2017.324961
+                                                                              },
+                                                                   "thresholds":  {
+                                                                                      "p(95)\u003c2250":  {
+                                                                                                              "ok":  true
+                                                                                                          },
+                                                                                      "p(99)\u003c2500":  {
+                                                                                                              "ok":  true
+                                                                                                          }
+                                                                                  }
+                                                               },
+                                     "authorization_correct":  {
+                                                                   "values":  {
+                                                                                  "fails":  0,
+                                                                                  "rate":  1,
+                                                                                  "passes":  600
+                                                                              },
+                                                                   "thresholds":  {
+                                                                                      "rate==1":  {
+                                                                                                      "ok":  true
+                                                                                                  }
+                                                                                  }
+                                                               },
+                                     "authorization_available":  {
+                                                                     "values":  {
+                                                                                    "rate":  0,
+                                                                                    "passes":  0,
+                                                                                    "fails":  600
+                                                                                },
+                                                                     "thresholds":  {
+                                                                                        "rate==0":  {
+                                                                                                        "ok":  true
+                                                                                                    }
+                                                                                    }
+                                                                 },
+                                     "dropped_iterations":  {
+                                                                "values":  {
+                                                                               "count":  0,
+                                                                               "rate":  0
+                                                                           },
+                                                                "thresholds":  {
+                                                                                   "count==0":  {
+                                                                                                    "ok":  true
+                                                                                                }
+                                                                               }
+                                                            },
+                                     "checks":  {
+                                                    "values":  {
+                                                                   "rate":  1,
+                                                                   "passes":  600,
+                                                                   "fails":  0
+                                                               },
+                                                    "thresholds":  {
+                                                                       "rate==1":  {
+                                                                                       "ok":  true
+                                                                                   }
+                                                                   }
+                                                }
+                                 },
+                     "raw_sha256":  "af84bc87a3eb23656b8f3f8581a05039afd0d5d7320273172f108cf9367f5186"
+                 },
+                 {
+                     "parameters":  {
+                                        "run":  "identity-recovered",
+                                        "expected":  "allowed",
+                                        "completed_at_utc":  "2026-10-12T06:08:34.789Z",
+                                        "rate":  40,
+                                        "vendor_delay_ms":  0,
+                                        "p99_limit_ms":  500,
+                                        "target":  "client",
+                                        "duration":  "1m",
+                                        "identity_delay_ms":  0,
+                                        "p95_limit_ms":  250
+                                    },
+                     "thresholds_passed":  true,
+                     "metrics":  {
+                                     "authorization_latency":  {
+                                                                   "values":  {
+                                                                                  "avg":  6.406202002082472,
+                                                                                  "p(50)":  5.138165,
+                                                                                  "p(95)":  12.540405,
+                                                                                  "p(99)":  15.605094,
+                                                                                  "max":  37.916922
+                                                                              },
+                                                                   "thresholds":  {
+                                                                                      "p(95)\u003c250":  {
+                                                                                                             "ok":  true
+                                                                                                         },
+                                                                                      "p(99)\u003c500":  {
+                                                                                                             "ok":  true
+                                                                                                         }
+                                                                                  }
+                                                               },
+                                     "authorization_correct":  {
+                                                                   "values":  {
+                                                                                  "rate":  1,
+                                                                                  "passes":  2401,
+                                                                                  "fails":  0
+                                                                              },
+                                                                   "thresholds":  {
+                                                                                      "rate==1":  {
+                                                                                                      "ok":  true
+                                                                                                  }
+                                                                                  }
+                                                               },
+                                     "authorization_available":  {
+                                                                     "values":  {
+                                                                                    "rate":  1,
+                                                                                    "passes":  2401,
+                                                                                    "fails":  0
+                                                                                },
+                                                                     "thresholds":  {
+                                                                                        "rate\u003e0.999":  {
+                                                                                                                "ok":  true
+                                                                                                            }
+                                                                                    }
+                                                                 },
+                                     "dropped_iterations":  {
+                                                                "values":  {
+                                                                               "count":  0,
+                                                                               "rate":  0
+                                                                           },
+                                                                "thresholds":  {
+                                                                                   "count==0":  {
+                                                                                                    "ok":  true
+                                                                                                }
+                                                                               }
+                                                            },
+                                     "checks":  {
+                                                    "values":  {
+                                                                   "fails":  0,
+                                                                   "rate":  1,
+                                                                   "passes":  2401
+                                                               },
+                                                    "thresholds":  {
+                                                                       "rate==1":  {
+                                                                                       "ok":  true
+                                                                                   }
+                                                                   }
+                                                }
+                                 },
+                     "raw_sha256":  "35ac2f27c0319c5490474cd788110307558a701d1e547ff6787223b2655e9d69"
+                 },
+                 {
+                     "parameters":  {
+                                        "identity_delay_ms":  0,
+                                        "p95_limit_ms":  3250,
+                                        "p99_limit_ms":  3500,
+                                        "expected":  "unavailable",
+                                        "completed_at_utc":  "2026-10-12T06:09:32.983Z",
+                                        "duration":  "30s",
+                                        "vendor_delay_ms":  0,
+                                        "run":  "vendor-down",
+                                        "target":  "client",
+                                        "rate":  20
+                                    },
+                     "thresholds_passed":  true,
+                     "metrics":  {
+                                     "authorization_latency":  {
+                                                                   "values":  {
+                                                                                  "avg":  1682.516599213332,
+                                                                                  "p(50)":  1702.6553025,
+                                                                                  "p(95)":  3001.30645865,
+                                                                                  "p(99)":  3002.08779129,
+                                                                                  "max":  3002.472758
+                                                                              },
+                                                                   "thresholds":  {
+                                                                                      "p(95)\u003c3250":  {
+                                                                                                              "ok":  true
+                                                                                                          },
+                                                                                      "p(99)\u003c3500":  {
+                                                                                                              "ok":  true
+                                                                                                          }
+                                                                                  }
+                                                               },
+                                     "authorization_correct":  {
+                                                                   "values":  {
+                                                                                  "passes":  600,
+                                                                                  "fails":  0,
+                                                                                  "rate":  1
+                                                                              },
+                                                                   "thresholds":  {
+                                                                                      "rate==1":  {
+                                                                                                      "ok":  true
+                                                                                                  }
+                                                                                  }
+                                                               },
+                                     "authorization_available":  {
+                                                                     "values":  {
+                                                                                    "rate":  0,
+                                                                                    "passes":  0,
+                                                                                    "fails":  600
+                                                                                },
+                                                                     "thresholds":  {
+                                                                                        "rate==0":  {
+                                                                                                        "ok":  true
+                                                                                                    }
+                                                                                    }
+                                                                 },
+                                     "dropped_iterations":  {
+                                                                "values":  {
+                                                                               "rate":  0,
+                                                                               "count":  0
+                                                                           },
+                                                                "thresholds":  {
+                                                                                   "count==0":  {
+                                                                                                    "ok":  true
+                                                                                                }
+                                                                               }
+                                                            },
+                                     "checks":  {
+                                                    "values":  {
+                                                                   "fails":  0,
+                                                                   "rate":  1,
+                                                                   "passes":  600
+                                                               },
+                                                    "thresholds":  {
+                                                                       "rate==1":  {
+                                                                                       "ok":  true
+                                                                                   }
+                                                                   }
+                                                }
+                                 },
+                     "raw_sha256":  "2e4b02364de3ab1238f944d6fe90cd87eb8ed1a5461d6b6c3a4a28ca7455441d"
+                 },
+                 {
+                     "parameters":  {
+                                        "rate":  40,
+                                        "duration":  "1m",
+                                        "identity_delay_ms":  0,
+                                        "p95_limit_ms":  250,
+                                        "p99_limit_ms":  500,
+                                        "completed_at_utc":  "2026-10-12T06:10:39.102Z",
+                                        "vendor_delay_ms":  0,
+                                        "run":  "vendor-recovered",
+                                        "target":  "client",
+                                        "expected":  "allowed"
+                                    },
+                     "thresholds_passed":  true,
+                     "metrics":  {
+                                     "authorization_latency":  {
+                                                                   "values":  {
+                                                                                  "max":  30.263276,
+                                                                                  "avg":  6.454808519366925,
+                                                                                  "p(50)":  4.973907,
+                                                                                  "p(95)":  12.966759,
+                                                                                  "p(99)":  17.166803
+                                                                              },
+                                                                   "thresholds":  {
+                                                                                      "p(95)\u003c250":  {
+                                                                                                             "ok":  true
+                                                                                                         },
+                                                                                      "p(99)\u003c500":  {
+                                                                                                             "ok":  true
+                                                                                                         }
+                                                                                  }
+                                                               },
+                                     "authorization_correct":  {
+                                                                   "values":  {
+                                                                                  "rate":  1,
+                                                                                  "passes":  2401,
+                                                                                  "fails":  0
+                                                                              },
+                                                                   "thresholds":  {
+                                                                                      "rate==1":  {
+                                                                                                      "ok":  true
+                                                                                                  }
+                                                                                  }
+                                                               },
+                                     "authorization_available":  {
+                                                                     "values":  {
+                                                                                    "rate":  1,
+                                                                                    "passes":  2401,
+                                                                                    "fails":  0
+                                                                                },
+                                                                     "thresholds":  {
+                                                                                        "rate\u003e0.999":  {
+                                                                                                                "ok":  true
+                                                                                                            }
+                                                                                    }
+                                                                 },
+                                     "dropped_iterations":  {
+                                                                "values":  {
+                                                                               "count":  0,
+                                                                               "rate":  0
+                                                                           },
+                                                                "thresholds":  {
+                                                                                   "count==0":  {
+                                                                                                    "ok":  true
+                                                                                                }
+                                                                               }
+                                                            },
+                                     "checks":  {
+                                                    "values":  {
+                                                                   "rate":  1,
+                                                                   "passes":  2401,
+                                                                   "fails":  0
+                                                               },
+                                                    "thresholds":  {
+                                                                       "rate==1":  {
+                                                                                       "ok":  true
+                                                                                   }
+                                                                   }
+                                                }
+                                 },
+                     "raw_sha256":  "4039fdf7a5c0ec12a0ddc52e726cbde1581b08312f0faaa72c1277688c016389"
+                 },
+                 {
+                     "parameters":  {
+                                        "run":  "denied-direct",
+                                        "completed_at_utc":  "2026-10-12T06:11:12.272Z",
+                                        "rate":  20,
+                                        "duration":  "30s",
+                                        "identity_delay_ms":  0,
+                                        "p99_limit_ms":  500,
+                                        "target":  "vendor",
+                                        "expected":  "denied",
+                                        "vendor_delay_ms":  0,
+                                        "p95_limit_ms":  250
+                                    },
+                     "thresholds_passed":  true,
+                     "metrics":  {
+                                     "authorization_latency":  {
+                                                                   "values":  {
+                                                                                  "max":  12.454992,
+                                                                                  "avg":  2.8756655191347735,
+                                                                                  "p(50)":  2.184474,
+                                                                                  "p(95)":  5.890304,
+                                                                                  "p(99)":  7.294403
+                                                                              },
+                                                                   "thresholds":  {
+                                                                                      "p(95)\u003c250":  {
+                                                                                                             "ok":  true
+                                                                                                         },
+                                                                                      "p(99)\u003c500":  {
+                                                                                                             "ok":  true
+                                                                                                         }
+                                                                                  }
+                                                               },
+                                     "authorization_correct":  {
+                                                                   "values":  {
+                                                                                  "fails":  0,
+                                                                                  "rate":  1,
+                                                                                  "passes":  601
+                                                                              },
+                                                                   "thresholds":  {
+                                                                                      "rate==1":  {
+                                                                                                      "ok":  true
+                                                                                                  }
+                                                                                  }
+                                                               },
+                                     "authorization_available":  {
+                                                                     "values":  {
+                                                                                    "passes":  601,
+                                                                                    "fails":  0,
+                                                                                    "rate":  1
+                                                                                },
+                                                                     "thresholds":  {
+                                                                                        "rate\u003e0.999":  {
+                                                                                                                "ok":  true
+                                                                                                            }
+                                                                                    }
+                                                                 },
+                                     "dropped_iterations":  {
+                                                                "values":  {
+                                                                               "count":  0,
+                                                                               "rate":  0
+                                                                           },
+                                                                "thresholds":  {
+                                                                                   "count==0":  {
+                                                                                                    "ok":  true
+                                                                                                }
+                                                                               }
+                                                            },
+                                     "checks":  {
+                                                    "values":  {
+                                                                   "rate":  1,
+                                                                   "passes":  601,
+                                                                   "fails":  0
+                                                               },
+                                                    "thresholds":  {
+                                                                       "rate==1":  {
+                                                                                       "ok":  true
+                                                                                   }
+                                                                   }
+                                                }
+                                 },
+                     "raw_sha256":  "6fafd866b3277061172654b062050360230ab7bfb6826b815733d46e2b8e0cfc"
+                 },
+                 {
+                     "parameters":  {
+                                        "run":  "denied",
+                                        "target":  "client",
+                                        "expected":  "denied",
+                                        "completed_at_utc":  "2026-10-12T06:11:45.273Z",
+                                        "rate":  40,
+                                        "p95_limit_ms":  250,
+                                        "duration":  "30s",
+                                        "identity_delay_ms":  0,
+                                        "vendor_delay_ms":  0,
+                                        "p99_limit_ms":  500
+                                    },
+                     "thresholds_passed":  true,
+                     "metrics":  {
+                                     "authorization_latency":  {
+                                                                   "values":  {
+                                                                                  "avg":  5.252337107410489,
+                                                                                  "p(50)":  4.535047,
+                                                                                  "p(95)":  9.364522,
+                                                                                  "p(99)":  12.035717,
+                                                                                  "max":  19.332296
+                                                                              },
+                                                                   "thresholds":  {
+                                                                                      "p(95)\u003c250":  {
+                                                                                                             "ok":  true
+                                                                                                         },
+                                                                                      "p(99)\u003c500":  {
+                                                                                                             "ok":  true
+                                                                                                         }
+                                                                                  }
+                                                               },
+                                     "authorization_correct":  {
+                                                                   "values":  {
+                                                                                  "fails":  0,
+                                                                                  "rate":  1,
+                                                                                  "passes":  1201
+                                                                              },
+                                                                   "thresholds":  {
+                                                                                      "rate==1":  {
+                                                                                                      "ok":  true
+                                                                                                  }
+                                                                                  }
+                                                               },
+                                     "authorization_available":  {
+                                                                     "values":  {
+                                                                                    "rate":  1,
+                                                                                    "passes":  1201,
+                                                                                    "fails":  0
+                                                                                },
+                                                                     "thresholds":  {
+                                                                                        "rate\u003e0.999":  {
+                                                                                                                "ok":  true
+                                                                                                            }
+                                                                                    }
+                                                                 },
+                                     "dropped_iterations":  {
+                                                                "values":  {
+                                                                               "count":  0,
+                                                                               "rate":  0
+                                                                           },
+                                                                "thresholds":  {
+                                                                                   "count==0":  {
+                                                                                                    "ok":  true
+                                                                                                }
+                                                                               }
+                                                            },
+                                     "checks":  {
+                                                    "values":  {
+                                                                   "rate":  1,
+                                                                   "passes":  1201,
+                                                                   "fails":  0
+                                                               },
+                                                    "thresholds":  {
+                                                                       "rate==1":  {
+                                                                                       "ok":  true
+                                                                                   }
+                                                                   }
+                                                }
+                                 },
+                     "raw_sha256":  "29e72bea3e10402f368393fcefcfe83bcd0657eca397575f711810cfce09c17a"
+                 }
+             ],
+    "recoveries":  [
+                       {
+                           "service":  "identity",
+                           "recovered":  true,
+                           "elapsed_ms":  2785,
+                           "utc":  "2026-10-12T06:07:32Z"
+                       },
+                       {
+                           "service":  "vendor",
+                           "recovered":  true,
+                           "elapsed_ms":  3359,
+                           "utc":  "2026-10-12T06:09:37Z"
+                       }
+                   ],
+    "restoration":  {
+                        "utc":  "2026-10-12T06:13:26.6704526Z",
+                        "vendor_config":  [
+                                              "SHOP_STAFF_INVITES_PAUSED=false",
+                                              "IDENTITY_SERVICE_URL=http://identity:8081",
+                                              "FEATURE_SHOP_STAFF_ENABLED=false"
+                                          ],
+                        "containers":  [
+                                           {
+                                               "name":  "/shopee-loadtest-vendor-1",
+                                               "status":  "exited",
+                                               "exit_code":  137,
+                                               "oom_killed":  false
+                                           },
+                                           {
+                                               "name":  "/shopee-loadtest-authorize-probe-1",
+                                               "status":  "exited",
+                                               "exit_code":  143,
+                                               "oom_killed":  false
+                                           },
+                                           {
+                                               "name":  "/shopee-loadtest-gateway-1",
+                                               "status":  "exited",
+                                               "exit_code":  0,
+                                               "oom_killed":  false
+                                           },
+                                           {
+                                               "name":  "/shopee-loadtest-shipment-1",
+                                               "status":  "exited",
+                                               "exit_code":  0,
+                                               "oom_killed":  false
+                                           },
+                                           {
+                                               "name":  "/shopee-loadtest-payment-1",
+                                               "status":  "exited",
+                                               "exit_code":  0,
+                                               "oom_killed":  false
+                                           },
+                                           {
+                                               "name":  "/shopee-loadtest-review-1",
+                                               "status":  "exited",
+                                               "exit_code":  0,
+                                               "oom_killed":  false
+                                           },
+                                           {
+                                               "name":  "/shopee-loadtest-order-1",
+                                               "status":  "exited",
+                                               "exit_code":  0,
+                                               "oom_killed":  false
+                                           },
+                                           {
+                                               "name":  "/shopee-loadtest-cart-1",
+                                               "status":  "exited",
+                                               "exit_code":  0,
+                                               "oom_killed":  false
+                                           },
+                                           {
+                                               "name":  "/shopee-loadtest-inventory-1",
+                                               "status":  "exited",
+                                               "exit_code":  137,
+                                               "oom_killed":  false
+                                           },
+                                           {
+                                               "name":  "/shopee-loadtest-catalog-1",
+                                               "status":  "exited",
+                                               "exit_code":  137,
+                                               "oom_killed":  false
+                                           },
+                                           {
+                                               "name":  "/shopee-loadtest-admin-1",
+                                               "status":  "exited",
+                                               "exit_code":  0,
+                                               "oom_killed":  false
+                                           },
+                                           {
+                                               "name":  "/shopee-loadtest-notification-1",
+                                               "status":  "exited",
+                                               "exit_code":  0,
+                                               "oom_killed":  false
+                                           },
+                                           {
+                                               "name":  "/shopee-loadtest-identity-1",
+                                               "status":  "exited",
+                                               "exit_code":  0,
+                                               "oom_killed":  false
+                                           },
+                                           {
+                                               "name":  "/shopee-loadtest-grafana-1",
+                                               "status":  "exited",
+                                               "exit_code":  137,
+                                               "oom_killed":  false
+                                           },
+                                           {
+                                               "name":  "/shopee-loadtest-tempo-1",
+                                               "status":  "exited",
+                                               "exit_code":  137,
+                                               "oom_killed":  false
+                                           },
+                                           {
+                                               "name":  "/shopee-loadtest-redis-exporter-1",
+                                               "status":  "exited",
+                                               "exit_code":  0,
+                                               "oom_killed":  false
+                                           },
+                                           {
+                                               "name":  "/shopee-loadtest-redis-queue-exporter-1",
+                                               "status":  "exited",
+                                               "exit_code":  0,
+                                               "oom_killed":  false
+                                           },
+                                           {
+                                               "name":  "/shopee-loadtest-redis-1",
+                                               "status":  "exited",
+                                               "exit_code":  0,
+                                               "oom_killed":  false
+                                           },
+                                           {
+                                               "name":  "/shopee-loadtest-minio-1",
+                                               "status":  "exited",
+                                               "exit_code":  0,
+                                               "oom_killed":  false
+                                           },
+                                           {
+                                               "name":  "/shopee-loadtest-redis-queue-1",
+                                               "status":  "exited",
+                                               "exit_code":  0,
+                                               "oom_killed":  false
+                                           },
+                                           {
+                                               "name":  "/shopee-loadtest-cadvisor-1",
+                                               "status":  "exited",
+                                               "exit_code":  0,
+                                               "oom_killed":  false
+                                           },
+                                           {
+                                               "name":  "/shopee-loadtest-nats-exporter-1",
+                                               "status":  "exited",
+                                               "exit_code":  0,
+                                               "oom_killed":  false
+                                           },
+                                           {
+                                               "name":  "/shopee-loadtest-prometheus-1",
+                                               "status":  "exited",
+                                               "exit_code":  0,
+                                               "oom_killed":  false
+                                           },
+                                           {
+                                               "name":  "/shopee-loadtest-postgres-exporter-1",
+                                               "status":  "exited",
+                                               "exit_code":  2,
+                                               "oom_killed":  false
+                                           },
+                                           {
+                                               "name":  "/shopee-loadtest-node-exporter-1",
+                                               "status":  "exited",
+                                               "exit_code":  143,
+                                               "oom_killed":  false
+                                           },
+                                           {
+                                               "name":  "/shopee-loadtest-nats-1",
+                                               "status":  "exited",
+                                               "exit_code":  0,
+                                               "oom_killed":  false
+                                           },
+                                           {
+                                               "name":  "/shopee-loadtest-postgres-1",
+                                               "status":  "exited",
+                                               "exit_code":  0,
+                                               "oom_killed":  false
+                                           }
+                                       ],
+                        "volumes_preserved":  true
+                    }
+}

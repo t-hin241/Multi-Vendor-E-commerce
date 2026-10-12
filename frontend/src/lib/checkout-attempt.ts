@@ -54,6 +54,7 @@ export function nextAttempt(
     cartVersion: number;
     expectedTotalAmount: number;
     acceptedPolicyVersions?: Record<string, number>;
+    expectedQuoteVersion?: string;
   },
   now = Date.now(),
   s = store(),

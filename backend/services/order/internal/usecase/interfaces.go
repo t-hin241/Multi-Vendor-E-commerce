@@ -3,6 +3,7 @@ package usecase
 import (
 	"context"
 	"io"
+	"shopee/backend/pkg/purchasequote"
 	"time"
 
 	"shopee/backend/pkg/apperror"
@@ -169,6 +170,7 @@ type CartGateway interface {
 
 // CatalogGateway is the checkout pricing snapshot's source of truth.
 type CatalogGateway interface {
+	PurchaseQuotes(context.Context, []purchasequote.Input) (*purchasequote.Quote, error)
 	GetCheckoutSnapshot(ctx context.Context, productIDs, variantIDs []string) (*adapter.CatalogSnapshot, error)
 	GetProduct(ctx context.Context, productID string) (*adapter.ProductInfo, error)
 	GetVariant(ctx context.Context, variantID string) (*adapter.VariantInfo, error)

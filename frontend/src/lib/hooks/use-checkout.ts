@@ -39,6 +39,7 @@ export function useCheckout() {
       cartVersion: number;
       expectedTotalAmount: number;
       acceptedPolicyVersions?: Record<string, number>;
+      expectedQuoteVersion?: string;
     }) => {
       if (!user) throw new api.ApiError(401, "unauthorized", "You must be signed in.");
       const { key } = nextAttempt(user.id, vars);

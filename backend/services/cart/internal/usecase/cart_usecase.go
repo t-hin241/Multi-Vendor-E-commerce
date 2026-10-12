@@ -7,11 +7,11 @@ package usecase
 import (
 	"context"
 	"errors"
-	"strings"
 
 	"github.com/rs/zerolog"
 
 	"shopee/backend/pkg/apperror"
+	"shopee/backend/pkg/purchasequote"
 	"shopee/backend/services/cart/internal/adapter"
 	"shopee/backend/services/cart/internal/domain"
 )
@@ -66,7 +66,6 @@ func (uc *CartUseCase) AddItem(ctx context.Context, userID, productID string, va
 			return false, err
 		}
 		line.Quantity = next
-		line.SeenPriceAmount, line.SeenCurrency = priceReference(product)
 		return true, uc.items.Update(ctx, line)
 	})
 }
@@ -95,10 +94,6 @@ func (uc *CartUseCase) SetItemQuantity(ctx context.Context, userID, productID st
 			return true, uc.insertLine(ctx, cart, productID, variantID, quantity, product)
 		}
 		line.Quantity = quantity
-		if line.SeenPriceAmount == nil {
-			// Legacy line from before price references existed.
-			line.SeenPriceAmount, line.SeenCurrency = priceReference(product)
-		}
 		return true, uc.items.Update(ctx, line)
 	})
 }
@@ -128,9 +123,11 @@ func (uc *CartUseCase) Clear(ctx context.Context, userID string, expectedVersion
 // PriceConfirmation is the price the buyer saw for a line when they
 // accepted its new price.
 type PriceConfirmation struct {
-	LineID      string
-	PriceAmount int64
-	Currency    string
+	VariantID      *string
+	PricingVersion int64
+	LineID         string
+	PriceAmount    int64
+	Currency       string
 }
 
 // ConfirmPrices records that the buyer has seen and accepted the current
@@ -160,24 +157,30 @@ func (uc *CartUseCase) ConfirmPrices(ctx context.Context, userID string, expecte
 	for _, l := range lines {
 		byID[l.ID] = l
 	}
-	productIDs := make([]string, 0, len(lines))
+	inputs := make([]purchasequote.Input, 0, len(confirmations))
+	seen := map[string]bool{}
 	for _, c := range confirmations {
-		line, ok := byID[c.LineID]
-		if !ok {
-			return domain.CartChanged("An item in your cart changed. Please review it again.")
+		line := byID[c.LineID]
+		if line == nil || seen[c.LineID] {
+			return domain.CartChanged("Invalid price confirmation")
 		}
-		productIDs = append(productIDs, line.ProductID)
+		seen[c.LineID] = true
+		if purchasequote.Key(line.ProductID, line.VariantID) != purchasequote.Key(line.ProductID, c.VariantID) {
+			return domain.CartChanged("The selected option changed")
+		}
+		inputs = append(inputs, purchasequote.Input{ProductID: line.ProductID, VariantID: line.VariantID, Quantity: line.Quantity})
 	}
-
-	products, failed := uc.lookupProducts(ctx, productIDs)
-	for _, c := range confirmations {
-		productID := byID[c.LineID].ProductID
-		if failed[productID] {
-			return apperror.Internal(errors.New("catalog lookup failed while confirming prices"))
+	quote, err := uc.catalog.PurchaseQuotes(ctx, inputs)
+	if err != nil {
+		return err
+	}
+	for i, c := range confirmations {
+		q := quote.Lines[i]
+		if !q.IsSellable {
+			return purchasequote.Unavailable()
 		}
-		product := products[productID]
-		if product == nil || product.PriceAmount != c.PriceAmount || product.Currency != c.Currency {
-			return domain.CartChanged("A price changed again. Please review your cart.")
+		if q.UnitPrice != c.PriceAmount || q.Currency != c.Currency || (q.VariantID != nil && q.VariantVersion != c.PricingVersion) {
+			return purchasequote.PriceChanged()
 		}
 	}
 
@@ -197,6 +200,10 @@ func (uc *CartUseCase) ConfirmPrices(ctx context.Context, userID string, expecte
 			c := confirmed[line.ID]
 			amount, currency := c.PriceAmount, c.Currency
 			line.SeenPriceAmount, line.SeenCurrency = &amount, &currency
+			if line.VariantID != nil {
+				version := c.PricingVersion
+				line.SeenPricingVersion = &version
+			}
 			if err := uc.items.Update(ctx, line); err != nil {
 				return false, err
 			}
@@ -239,6 +246,10 @@ func (uc *CartUseCase) insertLine(ctx context.Context, cart *domain.Cart, produc
 	}
 	item := &domain.CartItem{CartID: cart.ID, ProductID: productID, VariantID: variantID, Quantity: quantity}
 	item.SeenPriceAmount, item.SeenCurrency = priceReference(product)
+	if variantID != nil {
+		version := product.PricingVersion
+		item.SeenPricingVersion = &version
+	}
 	return uc.items.Insert(ctx, item)
 }
 
@@ -258,29 +269,18 @@ func (uc *CartUseCase) ensureSingleCurrency(ctx context.Context, cartID, currenc
 // HasVariants but got no variantID is rejected: once a product has any
 // variant, there's no product-level stock left to reserve against.
 func (uc *CartUseCase) assertSellable(ctx context.Context, productID string, variantID *string) (*adapter.ProductInfo, error) {
-	product, err := uc.catalog.GetProduct(ctx, productID)
+	quote, err := uc.catalog.PurchaseQuotes(ctx, []purchasequote.Input{{ProductID: productID, VariantID: variantID, Quantity: 1}})
 	if err != nil {
 		return nil, err
 	}
-	if !product.IsVisible {
-		return nil, apperror.Validation("This product is not currently available for purchase")
-	}
-	if product.PriceAmount <= 0 || product.Currency == "" {
-		return nil, apperror.Validation("This product is not currently available for purchase")
-	}
-	if product.HasVariants && variantID == nil {
-		return nil, apperror.Validation("Please select a product option before adding to cart")
-	}
-	if variantID != nil {
-		variant, err := uc.catalog.GetVariant(ctx, *variantID)
-		if err != nil {
-			return nil, err
+	q := quote.Lines[0]
+	if !q.IsSellable {
+		if variantID == nil {
+			return nil, apperror.Validation("This product is not currently available; select an option if required")
 		}
-		if variant.ProductID != productID {
-			return nil, apperror.Validation("This option does not belong to the selected product")
-		}
+		return nil, purchasequote.Unavailable()
 	}
-	return product, nil
+	return &adapter.ProductInfo{ID: q.ProductID, VendorID: q.VendorID, Name: q.ProductName, PriceAmount: q.UnitPrice, Currency: q.Currency, Status: q.Status, IsVisible: q.IsSellable, HasVariants: q.HasVariants, PricingVersion: q.VariantVersion}, nil
 }
 
 func priceReference(product *adapter.ProductInfo) (*int64, *string) {
@@ -299,14 +299,4 @@ func asAppError(err error) error {
 		return appErr
 	}
 	return apperror.Internal(err)
-}
-
-// variantLabel joins a variant's option labels into one display string,
-// e.g. "Color: Red, Size: L".
-func variantLabel(options []adapter.VariantOptionInfo) string {
-	parts := make([]string, 0, len(options))
-	for _, o := range options {
-		parts = append(parts, o.AttributeName+": "+o.OptionValue)
-	}
-	return strings.Join(parts, ", ")
 }

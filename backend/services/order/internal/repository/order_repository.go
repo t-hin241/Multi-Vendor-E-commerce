@@ -133,11 +133,11 @@ func (r *OrderRepository) CreateFromPlan(ctx context.Context, plan *domain.Plan)
 				return err
 			}
 			if _, err := tx.Exec(ctx,
-				`INSERT INTO order_items (order_id, vendor_order_id, product_id, product_name, variant_id, variant_sku, variant_label, price_amount, quantity, subtotal_amount)
-				 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+				`INSERT INTO order_items (order_id, vendor_order_id, product_id, product_name, variant_id, variant_sku, variant_label, price_amount, quantity, subtotal_amount,pricing_source,catalog_product_version,catalog_variant_version)
+				 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10,COALESCE(NULLIF($11,''),'product'),NULLIF($12,0),NULLIF($13,0))`,
 				order.ID, vendorOrderIDs[vendorIdx], item.ProductID, item.ProductName,
 				item.VariantID, item.VariantSKU, item.VariantLabel,
-				item.PriceAmount, item.Quantity, item.SubtotalAmount,
+				item.PriceAmount, item.Quantity, item.SubtotalAmount, item.PricingSource, item.CatalogProductVersion, item.CatalogVariantVersion,
 			); err != nil {
 				return err
 			}
@@ -284,7 +284,7 @@ func (r *OrderRepository) AddRefunded(ctx context.Context, id string, amount int
 	return nil
 }
 
-const orderItemColumns = `id, order_id, vendor_order_id, product_id, product_name, variant_id, variant_sku, variant_label, price_amount, quantity, subtotal_amount, created_at`
+const orderItemColumns = `id, order_id, vendor_order_id, product_id, product_name, variant_id, variant_sku, variant_label, price_amount, quantity, subtotal_amount, created_at,pricing_source,COALESCE(catalog_product_version,0),COALESCE(catalog_variant_version,0)`
 
 func scanOrderItem(row scanner) (*domain.OrderItem, error) {
 	var item domain.OrderItem
@@ -292,6 +292,7 @@ func scanOrderItem(row scanner) (*domain.OrderItem, error) {
 		&item.ID, &item.OrderID, &item.VendorOrderID, &item.ProductID, &item.ProductName,
 		&item.VariantID, &item.VariantSKU, &item.VariantLabel,
 		&item.PriceAmount, &item.Quantity, &item.SubtotalAmount, &item.CreatedAt,
+		&item.PricingSource, &item.CatalogProductVersion, &item.CatalogVariantVersion,
 	)
 	if err != nil {
 		return nil, err

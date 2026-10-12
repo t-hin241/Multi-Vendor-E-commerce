@@ -38,16 +38,17 @@ type Cart struct {
 }
 
 type CartItem struct {
-	ID              string
-	CartID          string
-	ProductID       string
-	VariantID       *string
-	Quantity        int64
-	Version         int64
-	SeenPriceAmount *int64
-	SeenCurrency    *string
-	CreatedAt       time.Time
-	UpdatedAt       time.Time
+	ID                 string
+	CartID             string
+	ProductID          string
+	VariantID          *string
+	Quantity           int64
+	Version            int64
+	SeenPriceAmount    *int64
+	SeenCurrency       *string
+	SeenPricingVersion *int64
+	CreatedAt          time.Time
+	UpdatedAt          time.Time
 }
 
 // SameLine reports whether the item is the line for productID/variantID. A

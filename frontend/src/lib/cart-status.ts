@@ -82,6 +82,8 @@ export function priceConfirmations(cart: Cart) {
     .filter((line) => line.price_changed && line.price_amount !== null && line.currency)
     .map((line) => ({
       line_id: line.line_id,
+      variant_id: line.variant_id,
+      pricing_version: line.pricing_version,
       price_amount: line.price_amount as number,
       currency: line.currency as string,
     }));
@@ -119,5 +121,8 @@ export function checkoutBlockers(cart: Cart): string[] {
 // The cart changed elsewhere (another tab, device, or a finished checkout)
 // or a price moved: the buyer must review the refreshed cart.
 export function isCartChanged(err: unknown): boolean {
-  return err instanceof ApiError && err.code === "cart_changed";
+  return (
+    err instanceof ApiError &&
+    ["cart_changed", "price_changed", "variant_not_sellable"].includes(err.code)
+  );
 }

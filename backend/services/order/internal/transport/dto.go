@@ -2,6 +2,7 @@ package transport
 
 import (
 	"encoding/json"
+	"shopee/backend/pkg/purchasequote"
 	"sort"
 	"time"
 
@@ -10,20 +11,24 @@ import (
 )
 
 type orderItemResponse struct {
-	ID             string  `json:"id"`
-	VendorOrderID  string  `json:"vendor_order_id"`
-	ProductID      string  `json:"product_id"`
-	ProductName    string  `json:"product_name"`
-	VariantID      *string `json:"variant_id,omitempty"`
-	VariantSKU     *string `json:"variant_sku,omitempty"`
-	VariantLabel   *string `json:"variant_label,omitempty"`
-	PriceAmount    int64   `json:"price_amount"`
-	Quantity       int64   `json:"quantity"`
-	SubtotalAmount int64   `json:"subtotal_amount"`
+	PricingSource         string  `json:"pricing_source"`
+	CatalogProductVersion int64   `json:"catalog_product_version,omitempty"`
+	CatalogVariantVersion int64   `json:"catalog_variant_version,omitempty"`
+	ID                    string  `json:"id"`
+	VendorOrderID         string  `json:"vendor_order_id"`
+	ProductID             string  `json:"product_id"`
+	ProductName           string  `json:"product_name"`
+	VariantID             *string `json:"variant_id,omitempty"`
+	VariantSKU            *string `json:"variant_sku,omitempty"`
+	VariantLabel          *string `json:"variant_label,omitempty"`
+	PriceAmount           int64   `json:"price_amount"`
+	Quantity              int64   `json:"quantity"`
+	SubtotalAmount        int64   `json:"subtotal_amount"`
 }
 
 func toOrderItemResponse(i *domain.OrderItem) orderItemResponse {
 	return orderItemResponse{
+		PricingSource: i.PricingSource, CatalogProductVersion: i.CatalogProductVersion, CatalogVariantVersion: i.CatalogVariantVersion,
 		ID: i.ID, VendorOrderID: i.VendorOrderID, ProductID: i.ProductID, ProductName: i.ProductName,
 		VariantID: i.VariantID, VariantSKU: i.VariantSKU, VariantLabel: i.VariantLabel,
 		PriceAmount: i.PriceAmount, Quantity: i.Quantity, SubtotalAmount: i.SubtotalAmount,
@@ -190,9 +195,10 @@ func toVendorOrderResponseList(vendorOrders []*domain.VendorOrder, itemsByVendor
 // reviewed; a different cart or total is refused instead of bought unseen.
 // The Idempotency-Key header identifies the attempt.
 type checkoutRequest struct {
-	AddressID           string `json:"address_id" binding:"required,uuid"`
-	CartVersion         *int64 `json:"cart_version" binding:"omitempty,min=1"`
-	ExpectedTotalAmount *int64 `json:"expected_total_amount" binding:"omitempty,min=1"`
+	ExpectedQuoteVersion string `json:"expected_quote_version" binding:"omitempty,len=64"`
+	AddressID            string `json:"address_id" binding:"required,uuid"`
+	CartVersion          *int64 `json:"cart_version" binding:"omitempty,min=1"`
+	ExpectedTotalAmount  *int64 `json:"expected_total_amount" binding:"omitempty,min=1"`
 	// AcceptedPolicyVersions: kind → version the buyer was shown (AF-02),
 	// plus "shop:<vendor_id>" → version of each shop's policy (PW-013).
 	AcceptedPolicyVersions map[string]int64 `json:"accepted_policy_versions" binding:"omitempty,max=110"`
@@ -211,6 +217,8 @@ type previewVendorResponse struct {
 }
 
 type previewResponse struct {
+	QuoteVersion   string                  `json:"quote_version"`
+	Lines          []purchasequote.Line    `json:"lines"`
 	CartVersion    int64                   `json:"cart_version"`
 	Currency       string                  `json:"currency"`
 	SubtotalAmount int64                   `json:"subtotal_amount"`
@@ -232,7 +240,7 @@ type shopPolicyResponse struct {
 }
 
 func toPreviewResponse(p *usecase.CheckoutPreview) previewResponse {
-	resp := previewResponse{CartVersion: p.CartVersion, Currency: p.Currency, SubtotalAmount: p.SubtotalAmount,
+	resp := previewResponse{QuoteVersion: p.QuoteVersion, Lines: p.Lines, CartVersion: p.CartVersion, Currency: p.Currency, SubtotalAmount: p.SubtotalAmount,
 		ShippingAmount: p.ShippingAmount, TotalAmount: p.TotalAmount, Ready: p.Ready, Vendors: make([]previewVendorResponse, 0, len(p.Vendors))}
 	for _, v := range p.Vendors {
 		resp.Vendors = append(resp.Vendors, previewVendorResponse{VendorID: v.VendorID, SubtotalAmount: v.SubtotalAmount,

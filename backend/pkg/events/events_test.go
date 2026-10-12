@@ -53,6 +53,9 @@ func TestEventContracts(t *testing.T) {
 	env, err = ProductStatus("product-x", productsales.Status{ProductID: product, Version: 2, Visible: true})
 	pin(t, env, err, ProductStatusChanged, product, `{"product_id":"`+product+`","version":2,"is_visible":true}`)
 
+	env, err = VariantPriceChangedEvent("variant-price-x", VariantPriceChange{ProductID: product, VariantID: vendor, ProductVersion: 3, PricingVersion: 2})
+	pin(t, env, err, VariantPriceChanged, vendor, `{"product_id":"`+product+`","variant_id":"`+vendor+`","product_version":3,"pricing_version":2}`)
+
 	env, err = VendorNotification("notice-1", vendor, NotificationRequest{UserID: "u-1", Type: "vendor_approved", ReferenceID: vendor})
 	pin(t, env, err, VendorNotificationRequested, vendor, `{"user_id":"u-1","type":"vendor_approved","reference_id":"`+vendor+`"}`)
 

@@ -98,7 +98,7 @@ func (h *CartHandler) ConfirmPrices(c *gin.Context) {
 	}
 	confirmations := make([]usecase.PriceConfirmation, 0, len(req.Lines))
 	for _, l := range req.Lines {
-		confirmations = append(confirmations, usecase.PriceConfirmation{LineID: l.LineID, PriceAmount: l.PriceAmount, Currency: l.Currency})
+		confirmations = append(confirmations, usecase.PriceConfirmation{LineID: l.LineID, PriceAmount: l.PriceAmount, Currency: l.Currency, VariantID: l.VariantID, PricingVersion: l.PricingVersion})
 	}
 	if err := h.cart.ConfirmPrices(c.Request.Context(), middleware.GetUserID(c), req.ExpectedVersion, confirmations); err != nil {
 		httpresponse.HandleError(c, h.log, err)

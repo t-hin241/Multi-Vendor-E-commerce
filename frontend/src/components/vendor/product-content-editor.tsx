@@ -108,6 +108,10 @@ function EditorForm({
           required
         />
       </label>
+      <p className="text-xs text-muted-foreground">
+        Giá sản phẩm áp dụng khi không có phiên bản. Giá từng SKU được chỉnh trong phần tồn kho và
+        phiên bản; thay đổi giá ở đây không đổi giá các SKU đã tạo.
+      </p>
       <label className="block text-sm">
         Mô tả
         <Textarea name="description" defaultValue={data.product.description} maxLength={50000} />

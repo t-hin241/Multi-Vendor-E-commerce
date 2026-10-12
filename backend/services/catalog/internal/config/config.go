@@ -14,11 +14,12 @@ import (
 )
 
 type Config struct {
-	Base                config.Base
-	VendorServiceURL    string
-	OrderServiceURL     string
-	InventoryServiceURL string
-	ObjectStorage       objectstorage.Config
+	VariantPricingEnabled bool
+	Base                  config.Base
+	VendorServiceURL      string
+	OrderServiceURL       string
+	InventoryServiceURL   string
+	ObjectStorage         objectstorage.Config
 }
 
 func Load() (Config, error) {
@@ -47,12 +48,20 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 
+	pricingEnabled := false
+	if raw := os.Getenv("FEATURE_VARIANT_PRICING_ENABLED"); raw != "" {
+		pricingEnabled, err = strconv.ParseBool(raw)
+		if err != nil {
+			return Config{}, fmt.Errorf("config: invalid FEATURE_VARIANT_PRICING_ENABLED")
+		}
+	}
 	return Config{
-		Base:                base,
-		VendorServiceURL:    vendorServiceURL,
-		OrderServiceURL:     orderServiceURL,
-		InventoryServiceURL: inventoryServiceURL,
-		ObjectStorage:       objectStorageCfg,
+		VariantPricingEnabled: pricingEnabled,
+		Base:                  base,
+		VendorServiceURL:      vendorServiceURL,
+		OrderServiceURL:       orderServiceURL,
+		InventoryServiceURL:   inventoryServiceURL,
+		ObjectStorage:         objectStorageCfg,
 	}, nil
 }
 

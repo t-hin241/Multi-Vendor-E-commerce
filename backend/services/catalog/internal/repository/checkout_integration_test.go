@@ -27,7 +27,7 @@ func TestCheckoutSnapshotReadsPackagingVariantsLabelsAndMissingIDs(t *testing.T)
 	if _, err := f.pool.Exec(t.Context(), `INSERT INTO attribute_options(id,attribute_id,value) VALUES($1,$2,'L')`, opt, attr); err != nil {
 		t.Fatal(err)
 	}
-	v := &domain.ProductVariant{ProductID: p.ID, SKU: "SKU-L", VariantKey: "size-L"}
+	v := &domain.ProductVariant{ProductID: p.ID, SKU: "SKU-L", VariantKey: "size-L", PriceAmount: p.PriceAmount}
 	if err := repository.NewProductVariantRepository(f.pool).Create(t.Context(), v, []domain.VariantOptionSelection{{AttributeID: attr, OptionID: opt}}); err != nil {
 		t.Fatal(err)
 	}
@@ -72,7 +72,7 @@ func TestCheckoutSnapshotCannotMixFactsAcrossConcurrentCatalogEdits(t *testing.T
 	if err := repository.NewProductPackagingRepository(f.pool).Upsert(t.Context(), p.ID, domain.Packaging{WeightGrams: &weight}); err != nil {
 		t.Fatal(err)
 	}
-	v := &domain.ProductVariant{ProductID: p.ID, SKU: strconv.FormatInt(weight, 10), VariantKey: "plain"}
+	v := &domain.ProductVariant{ProductID: p.ID, SKU: strconv.FormatInt(weight, 10), VariantKey: "plain", PriceAmount: p.PriceAmount}
 	if err := repository.NewProductVariantRepository(f.pool).Create(t.Context(), v, nil); err != nil {
 		t.Fatal(err)
 	}

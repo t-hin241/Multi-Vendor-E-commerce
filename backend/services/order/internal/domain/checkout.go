@@ -88,13 +88,14 @@ func BuildCheckoutPlan(buyerID string, lines []CheckoutLine) (*Plan, error) {
 				return nil, apperror.Validation("Order amount is too large")
 			}
 			plan.Items = append(plan.Items, OrderItem{
-				VendorOrderID:  strconv.Itoa(vendorIdx),
-				ProductID:      line.ProductID,
-				ProductName:    line.ProductName,
-				VariantID:      line.VariantID,
-				VariantSKU:     line.VariantSKU,
-				VariantLabel:   line.VariantLabel,
-				PriceAmount:    line.PriceAmount,
+				VendorOrderID: strconv.Itoa(vendorIdx),
+				ProductID:     line.ProductID,
+				ProductName:   line.ProductName,
+				VariantID:     line.VariantID,
+				VariantSKU:    line.VariantSKU,
+				VariantLabel:  line.VariantLabel,
+				PriceAmount:   line.PriceAmount,
+				PricingSource: line.PricingSource, CatalogProductVersion: line.CatalogProductVersion, CatalogVariantVersion: line.CatalogVariantVersion,
 				Quantity:       line.Quantity,
 				SubtotalAmount: subtotal,
 			})

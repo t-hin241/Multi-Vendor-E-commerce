@@ -17,14 +17,15 @@ import (
 )
 
 type ProductInfo struct {
-	ID          string
-	VendorID    string
-	Name        string
-	PriceAmount int64
-	Currency    string
-	Status      string
-	IsVisible   bool
-	HasVariants bool
+	PricingVersion int64
+	ID             string
+	VendorID       string
+	Name           string
+	PriceAmount    int64
+	Currency       string
+	Status         string
+	IsVisible      bool
+	HasVariants    bool
 }
 
 // VariantOptionInfo is one axis=value label pair of a variant, e.g.
@@ -38,10 +39,12 @@ type VariantOptionInfo struct {
 // belongs to the product it was added against, and to display it on a
 // cart line.
 type VariantInfo struct {
-	ID        string
-	ProductID string
-	SKU       string
-	Options   []VariantOptionInfo
+	PriceAmount  int64
+	PriceVersion int64
+	ID           string
+	ProductID    string
+	SKU          string
+	Options      []VariantOptionInfo
 }
 
 type HTTPCatalogClient struct {

@@ -122,6 +122,7 @@ func main() {
 		usecase.Operations{Identity: identityclient.Client{URL: internalServices.IdentityURL, Key: internalServices.Key}, Transactions: repository.Transactions{Pool: dbPool}, Cleanup: repository.ObjectCleanup{Pool: dbPool}, Log: log},
 	)
 
+	productUseCase.VariantPricingEnabled = cfg.VariantPricingEnabled
 	categoryHandler := transport.NewCategoryHandler(categoryUseCase, log)
 	productHandler := transport.NewProductHandler(productUseCase, log)
 	storefrontHandler := transport.NewStorefrontHandler(productUseCase, log)
@@ -151,6 +152,9 @@ func main() {
 		publishStatus = (adapter.ProductStatusPublisher{URL: cfg.OrderServiceURL, Key: internalServices.Key}).Publish
 	}
 	go (repository.StatusOutbox{Pool: dbPool, Publish: publishStatus}).Run(reconcileCtx, log)
+	if bus.Publish {
+		go (repository.VariantPriceOutbox{Pool: dbPool, Publish: bus.Bus.Publish}).Run(reconcileCtx, log)
+	}
 	// PLT-03: shop status and stock changes arrive from the event bus; the
 	// internal HTTP routes stay for producers in rollback mode.
 	bus.Run(reconcileCtx,

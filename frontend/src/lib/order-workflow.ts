@@ -23,6 +23,7 @@ export function checkoutAttempt(
     cartVersion?: number;
     expectedTotalAmount?: number;
     acceptedPolicyVersions?: Record<string, number>;
+    expectedQuoteVersion?: string;
   },
   newKey: () => string = newIdempotencyKey,
 ): CheckoutAttempt {
@@ -37,6 +38,7 @@ export function checkoutAttempt(
     input.cartVersion ?? "",
     input.expectedTotalAmount ?? "",
     ...(policies ? [policies] : []),
+    ...(input.expectedQuoteVersion ? ["quote=" + input.expectedQuoteVersion] : []),
   ].join("|");
   if (previous && previous.fingerprint === fingerprint) return previous;
   return { fingerprint, key: newKey() };
@@ -62,6 +64,8 @@ export type CheckoutErrorKind =
 export function checkoutErrorKind(err: unknown): CheckoutErrorKind {
   if (!(err instanceof ApiError)) return "other";
   switch (err.code) {
+    case "price_changed":
+    case "variant_not_sellable":
     case "cart_changed":
       return "cart_changed";
     case "checkout_total_changed":

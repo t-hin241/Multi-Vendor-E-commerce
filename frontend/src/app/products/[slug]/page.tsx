@@ -26,7 +26,7 @@ import type { ProductVariant } from "@/lib/api-client";
 import { useAuth } from "@/lib/auth-context";
 import { removeNonSizeImages } from "@/lib/description-images";
 import { sanitizeDescription } from "@/lib/sanitize-html";
-import { formatMoney } from "@/lib/format";
+import { productPriceText } from "@/lib/product-price";
 import { useAddCartItem } from "@/lib/hooks/use-cart";
 import { useProduct } from "@/lib/hooks/use-product";
 import { cn } from "@/lib/utils";
@@ -185,7 +185,7 @@ export default function ProductDetailPage() {
           )}
 
           <p className="mt-3 text-3xl font-semibold text-primary">
-            {formatMoney(product.price_amount, product.currency)}
+            {productPriceText(product, selectedVariantId)}
           </p>
           <p className="mt-1 text-sm text-muted-foreground">Đã bán {product.quantity_sold ?? 0}</p>
           {/* Only present for an admin or this product's own vendor viewing
@@ -314,7 +314,7 @@ export default function ProductDetailPage() {
       {canBuy && !buyBoxVisible && (
         <div className="fixed inset-x-0 bottom-0 z-30 flex items-center gap-3 border-t bg-background p-3 pb-[calc(env(safe-area-inset-bottom)+0.75rem)] shadow-lg md:hidden">
           <span className="flex-1 text-lg font-semibold text-primary">
-            {formatMoney(product.price_amount, product.currency)}
+            {productPriceText(product, selectedVariantId)}
           </span>
           <Button variant="outline" onClick={handleAddToCart} disabled={addToCart.isPending}>
             Thêm vào giỏ

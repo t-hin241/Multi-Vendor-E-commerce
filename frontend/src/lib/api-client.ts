@@ -283,6 +283,8 @@ export type AttributeValue = {
 };
 
 export type Product = {
+  min_price?: number | null;
+  max_price?: number | null;
   version?: number;
   selling_sync_pending?: boolean;
   id: string;
@@ -398,6 +400,8 @@ export type VariantOption = {
 };
 
 export type ProductVariant = {
+  price_amount: number;
+  pricing_version: number;
   id: string;
   product_id: string;
   sku: string;
@@ -414,16 +418,34 @@ export function createProductVariant(
   productId: string,
   sku: string,
   optionIds: string[],
+  priceAmount?: number,
 ): Promise<ProductVariant> {
   return request<ProductVariant>(`/api/catalog/products/${productId}/variants`, {
     method: "POST",
     token,
-    json: { sku, option_ids: optionIds },
+    json: { sku, option_ids: optionIds, price_amount: priceAmount },
   });
 }
 
 export function listProductVariants(token: string, productId: string): Promise<ProductVariant[]> {
   return request<ProductVariant[]>(`/api/catalog/products/${productId}/variants`, { token });
+}
+
+export function catalogCapabilities(): Promise<{ variant_pricing_enabled: boolean }> {
+  return request("/api/catalog/capabilities");
+}
+export function updateVariantPrice(
+  token: string,
+  productId: string,
+  variantId: string,
+  priceAmount: number,
+  expectedVersion: number,
+): Promise<ProductVariant> {
+  return request(`/api/catalog/products/${productId}/variants/${variantId}/price`, {
+    method: "PATCH",
+    token,
+    json: { price_amount: priceAmount, expected_version: expectedVersion },
+  });
 }
 
 // ---------- Inventory ----------
@@ -966,6 +988,8 @@ export type CartLineState =
 export type CartStockStatus = "unknown" | "in_stock" | "insufficient" | "out_of_stock";
 
 export type CartLine = {
+  pricing_version?: number;
+  seen_pricing_version?: number;
   line_id: string;
   line_version: number;
   product_id: string;
@@ -1073,7 +1097,13 @@ export function clearCart(token: string, expectedVersion?: number): Promise<{ cl
 export function confirmCartPrices(
   token: string,
   expectedVersion: number,
-  lines: { line_id: string; price_amount: number; currency: string }[],
+  lines: {
+    line_id: string;
+    price_amount: number;
+    currency: string;
+    variant_id?: string;
+    pricing_version?: number;
+  }[],
 ): Promise<Cart> {
   return request<Cart>("/api/cart/price-confirmations", {
     method: "POST",
@@ -1090,6 +1120,9 @@ export type OrderStatus =
 export type OrderItem = {
   id: string;
   vendor_order_id?: string;
+  pricing_source: "product" | "variant";
+  catalog_product_version?: number;
+  catalog_variant_version?: number;
   product_id: string;
   product_name: string;
   variant_id?: string;
@@ -1316,6 +1349,15 @@ export type CheckoutPreviewVendor = {
 };
 
 export type CheckoutPreview = {
+  quote_version?: string;
+  lines?: {
+    product_id: string;
+    variant_id?: string;
+    unit_price: number;
+    currency: string;
+    product_version: number;
+    variant_version: number;
+  }[];
   cart_version: number;
   currency: string;
   subtotal_amount: number;
@@ -1341,6 +1383,7 @@ export function previewCheckout(token: string, addressId: string): Promise<Check
 }
 
 export type CheckoutInput = {
+  expectedQuoteVersion?: string;
   addressId: string;
   // The cart version the buyer reviewed; 409 cart_changed if it moved.
   cartVersion?: number;
@@ -1363,6 +1406,7 @@ export function checkout(token: string, input: CheckoutInput): Promise<Order> {
       address_id: input.addressId,
       cart_version: input.cartVersion,
       expected_total_amount: input.expectedTotalAmount,
+      expected_quote_version: input.expectedQuoteVersion,
       accepted_policy_versions: input.acceptedPolicyVersions,
     },
   });

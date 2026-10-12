@@ -12,11 +12,13 @@ import (
 // option values for a product (e.g. Color=Red, Size=L), with its own SKU
 // and its own stock (tracked by Inventory, keyed off this id).
 type ProductVariant struct {
-	ID         string
-	ProductID  string
-	SKU        string
-	VariantKey string
-	CreatedAt  time.Time
+	ID           string
+	ProductID    string
+	SKU          string
+	VariantKey   string
+	PriceAmount  int64
+	PriceVersion int64
+	CreatedAt    time.Time
 }
 
 // VariantOptionSelection is one axis=value pair of a variant, e.g.

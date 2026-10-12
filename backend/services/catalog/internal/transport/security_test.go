@@ -29,6 +29,16 @@ func TestInternalCatalogRequiresServiceAuthentication(t *testing.T) {
 		}
 	}
 	response := httptest.NewRecorder()
+	r.ServeHTTP(response, httptest.NewRequest("POST", "/internal/catalog/purchase-quotes", strings.NewReader(`{"lines":[]}`)))
+	if response.Code != 401 && response.Code != 403 {
+		t.Fatalf("unprotected purchase quotes: %d", response.Code)
+	}
+	response = httptest.NewRecorder()
+	r.ServeHTTP(response, httptest.NewRequest("PATCH", "/api/catalog/products/00000000-0000-0000-0000-000000000001/variants/00000000-0000-0000-0000-000000000002/price", nil))
+	if response.Code != 401 {
+		t.Fatalf("unprotected SKU price mutation: %d", response.Code)
+	}
+	response = httptest.NewRecorder()
 	r.ServeHTTP(response, httptest.NewRequest("PATCH", "/api/catalog/products/00000000-0000-0000-0000-000000000001/active", nil))
 	if response.Code != 401 {
 		t.Fatalf("unprotected vendor mutation: %d", response.Code)

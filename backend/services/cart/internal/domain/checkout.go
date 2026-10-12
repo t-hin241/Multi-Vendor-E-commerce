@@ -15,13 +15,14 @@ import (
 // checkout operation. LineID + LineVersion identify the line instance: a
 // line removed and re-added later is a different line.
 type SnapshotLine struct {
-	LineID          string  `json:"line_id"`
-	ProductID       string  `json:"product_id"`
-	VariantID       *string `json:"variant_id,omitempty"`
-	Quantity        int64   `json:"quantity"`
-	LineVersion     int64   `json:"line_version"`
-	SeenPriceAmount *int64  `json:"seen_price_amount,omitempty"`
-	SeenCurrency    *string `json:"seen_currency,omitempty"`
+	LineID             string  `json:"line_id"`
+	ProductID          string  `json:"product_id"`
+	VariantID          *string `json:"variant_id,omitempty"`
+	Quantity           int64   `json:"quantity"`
+	LineVersion        int64   `json:"line_version"`
+	SeenPriceAmount    *int64  `json:"seen_price_amount,omitempty"`
+	SeenCurrency       *string `json:"seen_currency,omitempty"`
+	SeenPricingVersion *int64  `json:"seen_pricing_version,omitempty"`
 }
 
 // CheckoutOperation is the durable record of one checkout operation against
@@ -154,6 +155,7 @@ func SnapshotFromItems(items []*CartItem) ([]SnapshotLine, error) {
 			LineID: item.ID, ProductID: item.ProductID, VariantID: item.VariantID,
 			Quantity: item.Quantity, LineVersion: item.Version,
 			SeenPriceAmount: item.SeenPriceAmount, SeenCurrency: item.SeenCurrency,
+			SeenPricingVersion: item.SeenPricingVersion,
 		})
 	}
 	return lines, nil

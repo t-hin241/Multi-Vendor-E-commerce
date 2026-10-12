@@ -20,6 +20,7 @@ const (
 	VendorNotificationRequested  = "vendor.notification_requested"
 	VendorPolicyPublished        = "vendor.policy_published"
 	ProductStatusChanged         = "catalog.product_status_changed"
+	VariantPriceChanged          = "catalog.variant_price_changed"
 	ReservationExpired           = "inventory.reservation_expired"
 	StockChanged                 = "inventory.stock_changed"
 	OrderNotificationRequested   = "order.notification_requested"
@@ -47,6 +48,20 @@ func VendorStatus(eventID string, s vendorsales.Status) (eventbus.Envelope, erro
 // Order). Consumers keep the highest version.
 func ProductStatus(eventID string, s productsales.Status) (eventbus.Envelope, error) {
 	return eventbus.New(eventID, ProductStatusChanged, V1, s.ProductID, s.Version, s)
+}
+
+// VariantPriceChange invalidates projections only. Consumers must re-read
+// Catalog and keep the highest pricing/product versions; prices never travel
+// on the bus and checkout always uses the authoritative quote API.
+type VariantPriceChange struct {
+	ProductID      string `json:"product_id"`
+	VariantID      string `json:"variant_id"`
+	ProductVersion int64  `json:"product_version"`
+	PricingVersion int64  `json:"pricing_version"`
+}
+
+func VariantPriceChangedEvent(eventID string, p VariantPriceChange) (eventbus.Envelope, error) {
+	return eventbus.New(eventID, VariantPriceChanged, V1, p.VariantID, p.PricingVersion, p)
 }
 
 // NotificationRequest asks Notification to tell a user about a fact

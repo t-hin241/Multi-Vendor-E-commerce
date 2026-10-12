@@ -1,0 +1,20 @@
+# PW-020 only; compose AFTER compose.loadtest.yml. No published ports.
+services:
+  vendor:
+    environment:
+      FEATURE_SHOP_STAFF_ENABLED: "true"
+      SHOP_STAFF_INVITES_PAUSED: "true"
+      STAFF_INVITATION_ACCEPT_URL: https://pw020.example.invalid/staff-invitations/accept
+      IDENTITY_SERVICE_URL: http://authorize-probe:8080/identity
+  authorize-probe:
+    build:
+      context: .
+      dockerfile: deploy/loadtest/authorize-probe/Dockerfile
+    cpuset: "4-7"
+    mem_limit: 256m
+    networks: [shopee]
+    environment:
+      CATALOG_INTERNAL_KEY: ${CATALOG_INTERNAL_KEY:?loadtest caller key required}
+  k6:
+    environment:
+      CATALOG_INTERNAL_KEY: ${CATALOG_INTERNAL_KEY:?loadtest caller key required}
