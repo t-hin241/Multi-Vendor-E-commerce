@@ -1,9 +1,11 @@
 package repository_test
 
 import (
-	"github.com/google/uuid"
-	"shopee/backend/services/order/internal/repository"
 	"testing"
+
+	"github.com/google/uuid"
+
+	"shopee/backend/services/order/internal/repository"
 )
 
 func TestSKUPriceSnapshotPersistsAndCannotBeRewritten(t *testing.T) {

@@ -7,14 +7,12 @@ package usecase
 import (
 	"context"
 	"errors"
-	"strings"
 	"time"
 
 	"github.com/rs/zerolog"
 
 	"shopee/backend/pkg/adminaccess"
 	"shopee/backend/pkg/apperror"
-	"shopee/backend/services/order/internal/adapter"
 	"shopee/backend/services/order/internal/domain"
 	"shopee/backend/services/order/internal/repository"
 )
@@ -149,16 +147,6 @@ const (
 	notifySupportCaseOpened   = "support_case_opened"
 	notifySupportCaseResolved = "support_case_resolved"
 )
-
-// variantLabel joins a variant's option labels into one display string,
-// e.g. "Color: Red, Size: L", snapshotted onto the order item at checkout.
-func variantLabel(options []adapter.VariantOptionInfo) string {
-	parts := make([]string, 0, len(options))
-	for _, o := range options {
-		parts = append(parts, o.AttributeName+": "+o.OptionValue)
-	}
-	return strings.Join(parts, ", ")
-}
 
 // appError keeps business errors and wraps anything else as internal.
 func appError(err error) *apperror.Error {
