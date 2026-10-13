@@ -55,6 +55,7 @@ export function nextAttempt(
     expectedTotalAmount: number;
     acceptedPolicyVersions?: Record<string, number>;
     expectedQuoteVersion?: string;
+    selectedLineIds?: string[];
   },
   now = Date.now(),
   s = store(),

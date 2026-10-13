@@ -20,6 +20,7 @@ import (
 // Deps are OrderUseCase's collaborators. Repositories own Order's data;
 // gateways reach other services over their contracts.
 type Deps struct {
+	SelectiveCheckoutEnabled bool
 	// AdminPermissions (AF-19), when set, also requires a support case
 	// assignee to hold support.manage.
 	AdminPermissions adminaccess.Checker

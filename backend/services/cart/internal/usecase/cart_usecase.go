@@ -17,13 +17,14 @@ import (
 )
 
 type CartUseCase struct {
-	tx         TxRunner
-	carts      CartRepositoryPort
-	items      CartItemRepositoryPort
-	operations CheckoutOperationRepositoryPort
-	catalog    CatalogGateway
-	inventory  InventoryGateway
-	log        zerolog.Logger
+	SelectiveCheckoutEnabled bool
+	tx                       TxRunner
+	carts                    CartRepositoryPort
+	items                    CartItemRepositoryPort
+	operations               CheckoutOperationRepositoryPort
+	catalog                  CatalogGateway
+	inventory                InventoryGateway
+	log                      zerolog.Logger
 }
 
 func NewCartUseCase(

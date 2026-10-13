@@ -29,14 +29,15 @@ type SnapshotLine struct {
 // a cart: the snapshot Order priced, and — once Order confirms the order
 // exists — the receipt of consuming exactly those lines.
 type CheckoutOperation struct {
-	OperationID string
-	BuyerID     string
-	CartID      string
-	CartVersion int64
-	Lines       []SnapshotLine
-	CreatedAt   time.Time
-	ConsumeHash *string
-	Receipt     *ConsumeReceipt
+	SelectionHash string
+	OperationID   string
+	BuyerID       string
+	CartID        string
+	CartVersion   int64
+	Lines         []SnapshotLine
+	CreatedAt     time.Time
+	ConsumeHash   *string
+	Receipt       *ConsumeReceipt
 }
 
 // Consumed reports whether the operation already has a consume receipt.

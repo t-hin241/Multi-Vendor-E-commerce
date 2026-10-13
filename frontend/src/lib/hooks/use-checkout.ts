@@ -1,6 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 
@@ -9,19 +10,43 @@ import { useAuth } from "@/lib/auth-context";
 import { describeApiError } from "@/lib/errors";
 import { clearAttempt, nextAttempt } from "@/lib/checkout-attempt";
 import { checkoutErrorKind } from "@/lib/order-workflow";
+import { selectionKey } from "@/lib/cart-selection";
+import { useDebouncedValue } from "@/lib/use-debounced-value";
 import { queryKeys } from "@/lib/query-keys";
 
 // Order's price for the cart at an address, with shipping quoted per shop.
 // Keyed by cart version so any cart change re-quotes.
-export function useCheckoutPreview(addressId: string, cartVersion: number, enabled: boolean) {
-  const { callWithAuth } = useAuth();
-  return useQuery({
-    queryKey: queryKeys.checkoutPreview(addressId, cartVersion),
-    queryFn: () => callWithAuth((token) => api.previewCheckout(token, addressId)),
-    enabled: enabled && Boolean(addressId),
-    staleTime: 30_000,
+export function useCheckoutPreview(
+  addressId: string,
+  cartVersion: number,
+  enabled: boolean,
+  selectedLineIds?: string[],
+) {
+  const { user, callWithAuth } = useAuth();
+  const queryClient = useQueryClient();
+  const key = selectionKey(selectedLineIds);
+  const requestKey = JSON.stringify([addressId, cartVersion, key]);
+  const debouncedKey = useDebouncedValue(requestKey, 300);
+  const settled = requestKey === debouncedKey;
+  const query = useQuery({
+    queryKey: [...queryKeys.checkoutPreview(addressId, cartVersion), user?.id, key],
+    queryFn: () =>
+      callWithAuth((token) => api.previewCheckout(token, addressId, cartVersion, selectedLineIds)),
+    enabled: enabled && Boolean(addressId) && settled,
+    staleTime: 0,
     retry: false,
   });
+  useEffect(() => {
+    if (checkoutErrorKind(query.error) === "cart_changed") {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.cart() });
+    }
+  }, [query.error, queryClient]);
+  // Never expose the preceding selection/address quote during debounce or refresh.
+  return {
+    ...query,
+    data: enabled && settled && !query.isFetching ? query.data : undefined,
+    isFetching: query.isFetching || !settled,
+  };
 }
 
 // Places the order for the cart version and total the buyer confirmed. The
@@ -40,6 +65,7 @@ export function useCheckout() {
       expectedTotalAmount: number;
       acceptedPolicyVersions?: Record<string, number>;
       expectedQuoteVersion?: string;
+      selectedLineIds?: string[];
     }) => {
       if (!user) throw new api.ApiError(401, "unauthorized", "You must be signed in.");
       const { key } = nextAttempt(user.id, vars);

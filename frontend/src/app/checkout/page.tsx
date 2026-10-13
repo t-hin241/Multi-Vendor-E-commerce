@@ -1,5 +1,7 @@
 "use client";
 
+import { useCartSelection } from "@/lib/hooks/use-cart-selection";
+import { SelectionControls } from "@/components/cart/selection-controls";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -54,10 +56,12 @@ export default function CheckoutPage() {
     selectedAddressId ||
     (addresses.find((address) => address.is_default)?.id ?? addresses[0]?.id ?? "");
   const cartVersion = cart.data?.version ?? 0;
+  const selection = useCartSelection(cart.data);
   const preview = useCheckoutPreview(
     addressId,
     cartVersion,
-    Boolean(enabled && cart.data?.checkout_ready && cart.data.items.length > 0),
+    Boolean(enabled && !selection.pending && selection.view?.checkout_ready),
+    selection.ids,
   );
 
   useEffect(() => {
@@ -109,15 +113,28 @@ export default function CheckoutPage() {
   const quote = preview.data;
   const placeable = canPlaceOrder(quote, data.version);
   const blocked =
-    !data.checkout_ready || cart.isFetching || confirmPrices.isPending || preview.isFetching;
+    selection.pending ||
+    !selection.view?.checkout_ready ||
+    cart.isFetching ||
+    confirmPrices.isPending ||
+    preview.isFetching;
 
   return (
     <PageShell maxWidth="lg">
       <h1 className="text-2xl font-semibold tracking-tight">Xác nhận mua hàng</h1>
       <div className="mt-6 grid gap-6 lg:grid-cols-3">
         <div className="min-w-0 space-y-4 lg:col-span-2">
+          {selection.active && selection.ids && (
+            <SelectionControls
+              cart={data}
+              ids={selection.ids}
+              toggle={selection.toggle}
+              disabled={checkout.isPending}
+              showLines
+            />
+          )}
           <CartReadiness
-            cart={data}
+            cart={selection.view ?? data}
             onRefresh={() => cart.refetch()}
             refreshing={cart.isFetching}
             onConfirmPrices={(vars) => confirmPrices.mutate(vars)}
@@ -184,7 +201,7 @@ export default function CheckoutPage() {
             <CardTitle className="text-base">Đơn hàng</CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
-            {data.items.map((item) => (
+            {(selection.view ?? data).items.map((item) => (
               <div key={item.line_id} className="text-sm">
                 <p className="font-medium">{item.product_name ?? "Sản phẩm"}</p>
                 {item.variant_label && (
@@ -199,6 +216,10 @@ export default function CheckoutPage() {
             <Separator />
             {quote && quote.cart_version === data.version ? (
               <CheckoutQuote preview={quote} />
+            ) : selection.active ? (
+              <p className="text-sm text-muted-foreground">
+                Tổng tiền sẽ được báo theo sản phẩm đã chọn.
+              </p>
             ) : (
               <CartSubtotal cart={data} />
             )}
@@ -256,6 +277,7 @@ export default function CheckoutPage() {
                 setChangedFrom(null);
                 checkout.mutate(
                   {
+                    selectedLineIds: selection.ids,
                     addressId,
                     cartVersion: quote.cart_version,
                     expectedTotalAmount: confirmed,
@@ -272,7 +294,7 @@ export default function CheckoutPage() {
             >
               {!addressId
                 ? "Cần địa chỉ giao hàng"
-                : !data.checkout_ready
+                : !selection.view?.checkout_ready
                   ? "Cần xử lý giỏ hàng"
                   : checkout.isPending
                     ? "Đang tạo đơn…"

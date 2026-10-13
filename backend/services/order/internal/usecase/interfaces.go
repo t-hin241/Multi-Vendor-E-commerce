@@ -3,12 +3,11 @@ package usecase
 import (
 	"context"
 	"io"
-	"shopee/backend/pkg/purchasequote"
 	"time"
 
 	"shopee/backend/pkg/apperror"
 	"shopee/backend/pkg/eventbus"
-
+	"shopee/backend/pkg/purchasequote"
 	"shopee/backend/services/order/internal/adapter"
 	"shopee/backend/services/order/internal/domain"
 	"shopee/backend/services/order/internal/repository"
@@ -164,7 +163,7 @@ type AttachmentStore interface {
 // stands — consume only the purchased lines.
 type CartGateway interface {
 	Lines(ctx context.Context, buyerID string) (*adapter.CartSnapshot, error)
-	Snapshot(ctx context.Context, buyerID, operationID string, expectedVersion *int64) (*adapter.CartSnapshot, error)
+	Snapshot(ctx context.Context, buyerID, operationID string, expectedVersion *int64, selections ...[]string) (*adapter.CartSnapshot, error)
 	Consume(ctx context.Context, buyerID, operationID string, lines []adapter.CartConsumeLine) error
 }
 

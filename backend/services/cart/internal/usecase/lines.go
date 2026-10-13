@@ -3,28 +3,30 @@ package usecase
 import (
 	"context"
 
-	"shopee/backend/pkg/apperror"
 	"shopee/backend/services/cart/internal/domain"
 )
 
-// CurrentLines returns the buyer's cart lines and version without creating
-// a checkout operation. Order uses it to price a checkout preview; the real
-// checkout still takes a snapshot.
-func (uc *CartUseCase) CurrentLines(ctx context.Context, buyerID string) (int64, []domain.SnapshotLine, error) {
-	cart, err := uc.carts.GetOrCreateForUser(ctx, buyerID)
+// CurrentLines reads version and items under the same lock as cart mutations.
+func (uc *CartUseCase) CurrentLines(ctx context.Context, buyerID string) (version int64, lines []domain.SnapshotLine, err error) {
+	err = uc.tx.Run(ctx, func(ctx context.Context) error {
+		cart, e := uc.carts.LockForUser(ctx, buyerID)
+		if e != nil {
+			return e
+		}
+		items, e := uc.items.ListByCart(ctx, cart.ID)
+		if e != nil {
+			return e
+		}
+		version = cart.Version
+		lines = make([]domain.SnapshotLine, 0, len(items))
+		// Preview can select valid lines even in an old over-limit cart.
+		for _, item := range items {
+			lines = append(lines, domain.SnapshotLine{LineID: item.ID, ProductID: item.ProductID, VariantID: item.VariantID, Quantity: item.Quantity, LineVersion: item.Version, SeenPriceAmount: item.SeenPriceAmount, SeenCurrency: item.SeenCurrency, SeenPricingVersion: item.SeenPricingVersion})
+		}
+		return nil
+	})
 	if err != nil {
-		return 0, nil, apperror.Internal(err)
+		return 0, nil, asAppError(err)
 	}
-	items, err := uc.items.ListByCart(ctx, cart.ID)
-	if err != nil {
-		return 0, nil, apperror.Internal(err)
-	}
-	if len(items) == 0 {
-		return cart.Version, []domain.SnapshotLine{}, nil
-	}
-	lines, err := domain.SnapshotFromItems(items)
-	if err != nil {
-		return 0, nil, err
-	}
-	return cart.Version, lines, nil
+	return version, lines, nil
 }

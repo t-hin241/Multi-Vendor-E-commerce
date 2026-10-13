@@ -21,10 +21,11 @@ const (
 )
 
 type Config struct {
-	Base                config.Base
-	CatalogServiceURL   string
-	InventoryServiceURL string
-	Retention           Retention
+	SelectiveCheckoutEnabled bool
+	Base                     config.Base
+	CatalogServiceURL        string
+	InventoryServiceURL      string
+	Retention                Retention
 }
 
 type Retention struct {
@@ -54,7 +55,11 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 
-	return Config{Base: base, CatalogServiceURL: catalogServiceURL,
+	selective, err := boolEnv("FEATURE_SELECTIVE_CHECKOUT_ENABLED", false)
+	if err != nil {
+		return Config{}, err
+	}
+	return Config{SelectiveCheckoutEnabled: selective, Base: base, CatalogServiceURL: catalogServiceURL,
 		InventoryServiceURL: inventoryServiceURL, Retention: retention}, nil
 }
 

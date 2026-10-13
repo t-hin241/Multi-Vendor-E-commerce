@@ -2,10 +2,11 @@ package transport
 
 import (
 	"encoding/json"
-	"shopee/backend/pkg/purchasequote"
 	"sort"
 	"time"
 
+	"shopee/backend/pkg/cartselection"
+	"shopee/backend/pkg/purchasequote"
 	"shopee/backend/services/order/internal/domain"
 	"shopee/backend/services/order/internal/usecase"
 )
@@ -44,6 +45,8 @@ func toOrderItemResponseList(items []*domain.OrderItem) []orderItemResponse {
 }
 
 type orderResponse struct {
+	SelectedLineIDs    []string               `json:"selected_line_ids,omitempty"`
+	SelectionHash      string                 `json:"selection_hash,omitempty"`
 	ID                 string                 `json:"id"`
 	Status             string                 `json:"status"`
 	CheckoutState      string                 `json:"checkout_state"`
@@ -195,17 +198,20 @@ func toVendorOrderResponseList(vendorOrders []*domain.VendorOrder, itemsByVendor
 // reviewed; a different cart or total is refused instead of bought unseen.
 // The Idempotency-Key header identifies the attempt.
 type checkoutRequest struct {
-	ExpectedQuoteVersion string `json:"expected_quote_version" binding:"omitempty,len=64"`
-	AddressID            string `json:"address_id" binding:"required,uuid"`
-	CartVersion          *int64 `json:"cart_version" binding:"omitempty,min=1"`
-	ExpectedTotalAmount  *int64 `json:"expected_total_amount" binding:"omitempty,min=1"`
+	SelectedLineIDs      cartselection.IDs `json:"selected_line_ids"`
+	ExpectedQuoteVersion string            `json:"expected_quote_version" binding:"omitempty,len=64"`
+	AddressID            string            `json:"address_id" binding:"required,uuid"`
+	CartVersion          *int64            `json:"cart_version" binding:"omitempty,min=1"`
+	ExpectedTotalAmount  *int64            `json:"expected_total_amount" binding:"omitempty,min=1"`
 	// AcceptedPolicyVersions: kind → version the buyer was shown (AF-02),
 	// plus "shop:<vendor_id>" → version of each shop's policy (PW-013).
 	AcceptedPolicyVersions map[string]int64 `json:"accepted_policy_versions" binding:"omitempty,max=110"`
 }
 
 type previewRequest struct {
-	AddressID string `json:"address_id" binding:"required,uuid"`
+	CartVersion     *int64            `json:"cart_version" binding:"omitempty,min=1"`
+	SelectedLineIDs cartselection.IDs `json:"selected_line_ids"`
+	AddressID       string            `json:"address_id" binding:"required,uuid"`
 }
 
 type previewVendorResponse struct {
@@ -217,15 +223,17 @@ type previewVendorResponse struct {
 }
 
 type previewResponse struct {
-	QuoteVersion   string                  `json:"quote_version"`
-	Lines          []purchasequote.Line    `json:"lines"`
-	CartVersion    int64                   `json:"cart_version"`
-	Currency       string                  `json:"currency"`
-	SubtotalAmount int64                   `json:"subtotal_amount"`
-	ShippingAmount *int64                  `json:"shipping_amount"`
-	TotalAmount    *int64                  `json:"total_amount"`
-	Ready          bool                    `json:"ready"`
-	Vendors        []previewVendorResponse `json:"vendors"`
+	SelectedLineIDs []string                `json:"selected_line_ids,omitempty"`
+	SelectionHash   string                  `json:"selection_hash,omitempty"`
+	QuoteVersion    string                  `json:"quote_version"`
+	Lines           []purchasequote.Line    `json:"lines"`
+	CartVersion     int64                   `json:"cart_version"`
+	Currency        string                  `json:"currency"`
+	SubtotalAmount  int64                   `json:"subtotal_amount"`
+	ShippingAmount  *int64                  `json:"shipping_amount"`
+	TotalAmount     *int64                  `json:"total_amount"`
+	Ready           bool                    `json:"ready"`
+	Vendors         []previewVendorResponse `json:"vendors"`
 	// PolicyVersions (kind → version) and Policies are what a checkout now
 	// is placed under; send policy_versions back as accepted_policy_versions.
 	PolicyVersions map[string]int64        `json:"policy_versions,omitempty"`
@@ -240,7 +248,7 @@ type shopPolicyResponse struct {
 }
 
 func toPreviewResponse(p *usecase.CheckoutPreview) previewResponse {
-	resp := previewResponse{QuoteVersion: p.QuoteVersion, Lines: p.Lines, CartVersion: p.CartVersion, Currency: p.Currency, SubtotalAmount: p.SubtotalAmount,
+	resp := previewResponse{SelectedLineIDs: p.SelectedLineIDs, SelectionHash: p.SelectionHash, QuoteVersion: p.QuoteVersion, Lines: p.Lines, CartVersion: p.CartVersion, Currency: p.Currency, SubtotalAmount: p.SubtotalAmount,
 		ShippingAmount: p.ShippingAmount, TotalAmount: p.TotalAmount, Ready: p.Ready, Vendors: make([]previewVendorResponse, 0, len(p.Vendors))}
 	for _, v := range p.Vendors {
 		resp.Vendors = append(resp.Vendors, previewVendorResponse{VendorID: v.VendorID, SubtotalAmount: v.SubtotalAmount,

@@ -1,5 +1,8 @@
 "use client";
 
+import { useCartSelection } from "@/lib/hooks/use-cart-selection";
+import { SelectionControls } from "@/components/cart/selection-controls";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Trash2 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -57,17 +60,23 @@ export default function CartPage() {
   const defaultAddressId = addresses.find((a) => a.is_default)?.id ?? addresses[0]?.id ?? "";
   const effectiveAddressId = selectedAddressId || defaultAddressId;
   const selectedAddress = addresses.find((a) => a.id === effectiveAddressId);
+  const selection = useCartSelection(cartQuery.data);
   const preview = useCheckoutPreview(
     effectiveAddressId,
     cartQuery.data?.version ?? 0,
-    Boolean(enabled && cartQuery.data?.checkout_ready && cartQuery.data.items.length > 0),
+    Boolean(enabled && !selection.pending && selection.view?.checkout_ready),
+    selection.ids,
   );
 
   if (!user || user.role !== "buyer") return null;
 
   const cart = cartQuery.data;
   const busy =
-    setQuantity.isPending || confirmPrices.isPending || cartQuery.isFetching || preview.isFetching;
+    setQuantity.isPending ||
+    confirmPrices.isPending ||
+    cartQuery.isFetching ||
+    preview.isFetching ||
+    selection.pending;
   const quote = preview.data;
 
   return (
@@ -95,8 +104,16 @@ export default function CartPage() {
       {cart && cart.items.length > 0 && (
         <div className="mt-6 grid gap-6 lg:grid-cols-3">
           <div className="flex flex-col gap-4 lg:col-span-2">
+            {selection.active && selection.ids && (
+              <SelectionControls
+                cart={cart}
+                ids={selection.ids}
+                toggle={selection.toggle}
+                disabled={checkout.isPending}
+              />
+            )}
             <CartReadiness
-              cart={cart}
+              cart={selection.view ?? cart}
               onRefresh={() => cartQuery.refetch()}
               refreshing={cartQuery.isFetching}
               onConfirmPrices={(vars) => confirmPrices.mutate(vars)}
@@ -108,6 +125,16 @@ export default function CartPage() {
                 <div key={line.line_id}>
                   {i > 0 && <Separator />}
                   <div className="flex flex-wrap items-center justify-between gap-4 p-4">
+                    {selection.active && selection.ids && (
+                      <Checkbox
+                        aria-label={`Chọn ${line.product_name ?? "sản phẩm"}`}
+                        checked={selection.ids.includes(line.line_id)}
+                        disabled={checkout.isPending}
+                        onCheckedChange={(checked) =>
+                          selection.toggle([line.line_id], checked === true)
+                        }
+                      />
+                    )}
                     <div className="min-w-0 flex-1">
                       <p className="font-medium">{line.product_name ?? "Sản phẩm"}</p>
                       {line.variant_label && (
@@ -215,7 +242,13 @@ export default function CartPage() {
                 <CheckoutQuote preview={quote} />
               ) : (
                 <>
-                  <CartSubtotal cart={cart} />
+                  {selection.active ? (
+                    <p className="text-sm text-muted-foreground">
+                      Tổng tiền sẽ được báo theo sản phẩm đã chọn.
+                    </p>
+                  ) : (
+                    <CartSubtotal cart={cart} />
+                  )}
                   <ShippingFeeNote />
                 </>
               )}
@@ -232,6 +265,8 @@ export default function CartPage() {
                 onClick={() => {
                   if (!canPlaceOrder(quote, cart.version)) return;
                   checkout.mutate({
+                    selectedLineIds: selection.ids,
+                    acceptedPolicyVersions: quote.policy_versions,
                     addressId: effectiveAddressId,
                     cartVersion: quote.cart_version,
                     expectedTotalAmount: quote.total_amount,
@@ -242,13 +277,13 @@ export default function CartPage() {
                   checkout.isPending ||
                   busy ||
                   !effectiveAddressId ||
-                  !cart.checkout_ready ||
+                  !selection.view?.checkout_ready ||
                   !canPlaceOrder(quote, cart.version)
                 }
               >
                 {!effectiveAddressId
                   ? "Cần địa chỉ giao hàng"
-                  : !cart.checkout_ready
+                  : !selection.view?.checkout_ready
                     ? "Cần xử lý giỏ hàng"
                     : checkout.isPending
                       ? "Đang tạo đơn…"

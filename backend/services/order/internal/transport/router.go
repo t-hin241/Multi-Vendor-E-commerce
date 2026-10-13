@@ -55,6 +55,7 @@ func NewRouter(
 
 	buyerGroup := r.Group("/api/orders", requireAuth, middleware.RequireRole("buyer"))
 	{
+		buyerGroup.GET("/checkout/capabilities", orderHandler.CheckoutCapabilities)
 		buyerGroup.POST("/checkout", orderHandler.Checkout)
 		buyerGroup.POST("/checkout/preview", orderHandler.Preview)
 		buyerGroup.GET("/mine", orderHandler.ListMine)

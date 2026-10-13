@@ -3,13 +3,13 @@ package usecase_test
 import (
 	"context"
 	"fmt"
-	"shopee/backend/pkg/purchasequote"
 	"sort"
 	"strconv"
 	"sync"
 	"time"
 
 	"shopee/backend/pkg/apperror"
+	"shopee/backend/pkg/purchasequote"
 	"shopee/backend/services/order/internal/adapter"
 	"shopee/backend/services/order/internal/domain"
 	"shopee/backend/services/order/internal/repository"
@@ -932,10 +932,10 @@ func (f *fakeCartGateway) lines(buyerID string) []adapter.CartLine {
 func (f *fakeCartGateway) Lines(_ context.Context, buyerID string) (*adapter.CartSnapshot, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return &adapter.CartSnapshot{CartVersion: 1, Lines: f.lines(buyerID)}, nil
+	return &adapter.CartSnapshot{SelectiveCheckoutEnabled: true, CartVersion: 1, Lines: f.lines(buyerID)}, nil
 }
 
-func (f *fakeCartGateway) Snapshot(_ context.Context, buyerID, operationID string, _ *int64) (*adapter.CartSnapshot, error) {
+func (f *fakeCartGateway) Snapshot(_ context.Context, buyerID, operationID string, _ *int64, selections ...[]string) (*adapter.CartSnapshot, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.snapshotErr != nil {
@@ -945,6 +945,13 @@ func (f *fakeCartGateway) Snapshot(_ context.Context, buyerID, operationID strin
 		return snap, nil
 	}
 	snap := &adapter.CartSnapshot{OperationID: operationID, CartVersion: 1, Lines: f.lines(buyerID)}
+	if len(selections) > 0 && selections[0] != nil {
+		var err error
+		snap.Lines, err = adapter.SelectCartLines(snap.Lines, selections[0])
+		if err != nil {
+			return nil, err
+		}
+	}
 	f.snapshots[operationID] = snap
 	return snap, nil
 }

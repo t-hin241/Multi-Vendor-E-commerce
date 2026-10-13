@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"shopee/backend/pkg/apperror"
+	"shopee/backend/pkg/cartselection"
 	"shopee/backend/pkg/serviceauth"
 	"shopee/backend/pkg/telemetry"
 )
@@ -34,9 +35,11 @@ type CartLine struct {
 // CartSnapshot is Cart's frozen view of the buyer's cart for one checkout
 // operation.
 type CartSnapshot struct {
-	OperationID string
-	CartVersion int64
-	Lines       []CartLine
+	SelectionHash            string
+	SelectiveCheckoutEnabled bool
+	OperationID              string
+	CartVersion              int64
+	Lines                    []CartLine
 }
 
 // CartConsumeLine is a purchased quantity of one snapshotted line.
@@ -60,9 +63,11 @@ func NewHTTPCartClient(baseURL, key string) *HTTPCartClient {
 
 type snapshotEnvelope struct {
 	Data struct {
-		OperationID string `json:"operation_id"`
-		CartVersion int64  `json:"cart_version"`
-		Lines       []struct {
+		SelectionHash            string `json:"selection_hash"`
+		SelectiveCheckoutEnabled bool   `json:"selective_checkout_enabled"`
+		OperationID              string `json:"operation_id"`
+		CartVersion              int64  `json:"cart_version"`
+		Lines                    []struct {
 			LineID             string  `json:"line_id"`
 			ProductID          string  `json:"product_id"`
 			VariantID          *string `json:"variant_id"`
@@ -78,8 +83,15 @@ type snapshotEnvelope struct {
 // with the same operationID returns the same snapshot. expectedVersion, when
 // given, makes Cart reject a cart the buyer has changed since they last
 // reviewed it (409 cart_changed).
-func (c *HTTPCartClient) Snapshot(ctx context.Context, buyerID, operationID string, expectedVersion *int64) (*CartSnapshot, error) {
+func (c *HTTPCartClient) Snapshot(ctx context.Context, buyerID, operationID string, expectedVersion *int64, selections ...[]string) (*CartSnapshot, error) {
 	payload := map[string]any{"operation_id": operationID}
+	var selected []string
+	if len(selections) > 0 {
+		selected = selections[0]
+	}
+	if selected != nil {
+		payload["selected_line_ids"] = selected
+	}
 	if expectedVersion != nil {
 		payload["expected_version"] = *expectedVersion
 	}
@@ -87,10 +99,22 @@ func (c *HTTPCartClient) Snapshot(ctx context.Context, buyerID, operationID stri
 	if err := c.post(ctx, "/internal/carts/"+url.PathEscape(buyerID)+"/checkout-snapshots", payload, &body); err != nil {
 		return nil, err
 	}
-	snap := &CartSnapshot{OperationID: body.Data.OperationID, CartVersion: body.Data.CartVersion, Lines: make([]CartLine, 0, len(body.Data.Lines))}
+	if selected != nil && body.Data.SelectionHash != cartselection.Hash(selected) {
+		return nil, cartselection.Disabled()
+	}
+	snap := &CartSnapshot{SelectionHash: body.Data.SelectionHash, OperationID: body.Data.OperationID, CartVersion: body.Data.CartVersion, Lines: make([]CartLine, 0, len(body.Data.Lines))}
 	for _, l := range body.Data.Lines {
 		snap.Lines = append(snap.Lines, CartLine{LineID: l.LineID, ProductID: l.ProductID, VariantID: l.VariantID,
 			Quantity: l.Quantity, SeenPriceAmount: l.SeenPriceAmount, SeenCurrency: l.SeenCurrency, SeenPricingVersion: l.SeenPricingVersion})
+	}
+	if selected != nil {
+		actual := make([]string, 0, len(snap.Lines))
+		for _, line := range snap.Lines {
+			actual = append(actual, line.LineID)
+		}
+		if cartselection.Hash(actual) != cartselection.Hash(selected) || expectedVersion == nil || snap.CartVersion != *expectedVersion {
+			return nil, cartselection.Stale()
+		}
 	}
 	return snap, nil
 }
@@ -115,7 +139,7 @@ func (c *HTTPCartClient) Lines(ctx context.Context, buyerID string) (*CartSnapsh
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&body); err != nil {
 		return nil, apperror.Internal(err)
 	}
-	snap := &CartSnapshot{CartVersion: body.Data.CartVersion, Lines: make([]CartLine, 0, len(body.Data.Lines))}
+	snap := &CartSnapshot{SelectiveCheckoutEnabled: body.Data.SelectiveCheckoutEnabled, CartVersion: body.Data.CartVersion, Lines: make([]CartLine, 0, len(body.Data.Lines))}
 	for _, l := range body.Data.Lines {
 		snap.Lines = append(snap.Lines, CartLine{LineID: l.LineID, ProductID: l.ProductID, VariantID: l.VariantID,
 			Quantity: l.Quantity, SeenPriceAmount: l.SeenPriceAmount, SeenCurrency: l.SeenCurrency, SeenPricingVersion: l.SeenPricingVersion})

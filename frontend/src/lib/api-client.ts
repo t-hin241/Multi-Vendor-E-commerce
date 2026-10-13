@@ -988,6 +988,7 @@ export type CartLineState =
 export type CartStockStatus = "unknown" | "in_stock" | "insufficient" | "out_of_stock";
 
 export type CartLine = {
+  vendor_id?: string;
   pricing_version?: number;
   seen_pricing_version?: number;
   line_id: string;
@@ -1015,6 +1016,8 @@ export type CartLine = {
 export type Money = { amount: number; currency: string };
 
 export type Cart = {
+  cart_id?: string;
+  selective_checkout_enabled?: boolean;
   version: number;
   items: CartLine[];
   // Estimate at current prices for purchasable lines; Order computes the final amount.
@@ -1349,6 +1352,8 @@ export type CheckoutPreviewVendor = {
 };
 
 export type CheckoutPreview = {
+  selected_line_ids?: string[];
+  selection_hash?: string;
   quote_version?: string;
   lines?: {
     product_id: string;
@@ -1374,15 +1379,27 @@ export type CheckoutPreview = {
 
 // previewCheckout prices the cart for an address with a shipping quote per
 // shop. The buyer confirms total_amount; checkout is refused if it moved.
-export function previewCheckout(token: string, addressId: string): Promise<CheckoutPreview> {
+export function previewCheckout(
+  token: string,
+  addressId: string,
+  cartVersion?: number,
+  selectedLineIds?: string[],
+): Promise<CheckoutPreview> {
   return request<CheckoutPreview>("/api/orders/checkout/preview", {
     method: "POST",
     token,
-    json: { address_id: addressId },
+    json: { address_id: addressId, cart_version: cartVersion, selected_line_ids: selectedLineIds },
   });
 }
 
+export function checkoutCapabilities(
+  token: string,
+): Promise<{ selective_checkout_enabled: boolean }> {
+  return request("/api/orders/checkout/capabilities", { token });
+}
+
 export type CheckoutInput = {
+  selectedLineIds?: string[];
   expectedQuoteVersion?: string;
   addressId: string;
   // The cart version the buyer reviewed; 409 cart_changed if it moved.
@@ -1403,6 +1420,7 @@ export function checkout(token: string, input: CheckoutInput): Promise<Order> {
     token,
     headers: { "Idempotency-Key": input.idempotencyKey },
     json: {
+      selected_line_ids: input.selectedLineIds,
       address_id: input.addressId,
       cart_version: input.cartVersion,
       expected_total_amount: input.expectedTotalAmount,

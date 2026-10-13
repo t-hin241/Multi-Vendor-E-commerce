@@ -33,9 +33,9 @@ func (r *CheckoutOperationRepository) Find(ctx context.Context, operationID stri
 		receipt []byte
 	)
 	err := connection(ctx, r.pool).QueryRow(ctx, `
-		SELECT operation_id, buyer_id, cart_id, cart_version, lines, created_at, consume_hash, receipt
+		SELECT operation_id, buyer_id, cart_id, cart_version, selection_hash, lines, created_at, consume_hash, receipt
 		FROM cart_checkout_operations WHERE operation_id = $1`, operationID,
-	).Scan(&op.OperationID, &op.BuyerID, &op.CartID, &op.CartVersion, &lines, &op.CreatedAt, &op.ConsumeHash, &receipt)
+	).Scan(&op.OperationID, &op.BuyerID, &op.CartID, &op.CartVersion, &op.SelectionHash, &lines, &op.CreatedAt, &op.ConsumeHash, &receipt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, nil
 	}
@@ -62,10 +62,10 @@ func (r *CheckoutOperationRepository) Insert(ctx context.Context, op *domain.Che
 	ctx, cancel := statementContext(ctx)
 	defer cancel()
 	return connection(ctx, r.pool).QueryRow(ctx, `
-		INSERT INTO cart_checkout_operations (operation_id, buyer_id, cart_id, cart_version, lines)
-		VALUES ($1, $2, $3, $4, $5)
+		INSERT INTO cart_checkout_operations (operation_id, buyer_id, cart_id, cart_version, lines, selection_hash)
+		VALUES ($1, $2, $3, $4, $5, $6)
 		RETURNING created_at`,
-		op.OperationID, op.BuyerID, op.CartID, op.CartVersion, lines,
+		op.OperationID, op.BuyerID, op.CartID, op.CartVersion, lines, op.SelectionHash,
 	).Scan(&op.CreatedAt)
 }
 

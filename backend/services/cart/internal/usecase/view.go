@@ -33,6 +33,7 @@ type Page struct {
 
 // LineView is one cart line enriched with live Catalog/Inventory data.
 type LineView struct {
+	VendorID           string
 	PricingVersion     int64
 	SeenPricingVersion *int64
 	LineID             string
@@ -63,20 +64,22 @@ func (l LineView) Available() bool { return l.State.Purchasable() }
 // CartView is the buyer's cart. Subtotal is an estimate at current prices;
 // Order computes the final amount at checkout.
 type CartView struct {
-	Version           int64
-	Lines             []LineView
-	TotalLines        int
-	TotalQuantity     int64
-	Subtotal          *int64
-	Currency          string
-	MixedCurrency     bool
-	UnavailableLines  int
-	PriceChangedLines int
-	OverLineLimit     bool
-	CatalogDegraded   bool
-	InventoryDegraded bool
-	CheckoutReady     bool
-	Page              Page
+	CartID                   string
+	SelectiveCheckoutEnabled bool
+	Version                  int64
+	Lines                    []LineView
+	TotalLines               int
+	TotalQuantity            int64
+	Subtotal                 *int64
+	Currency                 string
+	MixedCurrency            bool
+	UnavailableLines         int
+	PriceChangedLines        int
+	OverLineLimit            bool
+	CatalogDegraded          bool
+	InventoryDegraded        bool
+	CheckoutReady            bool
+	Page                     Page
 }
 
 func (uc *CartUseCase) View(ctx context.Context, userID string, page Page) (*CartView, error) {
@@ -90,7 +93,7 @@ func (uc *CartUseCase) View(ctx context.Context, userID string, page Page) (*Car
 	}
 
 	facts := uc.lookup(ctx, items)
-	view := &CartView{Version: cart.Version, TotalLines: len(items), OverLineLimit: len(items) > domain.MaxLinesPerCart, Page: page,
+	view := &CartView{CartID: cart.ID, SelectiveCheckoutEnabled: uc.SelectiveCheckoutEnabled, Version: cart.Version, TotalLines: len(items), OverLineLimit: len(items) > domain.MaxLinesPerCart, Page: page,
 		CatalogDegraded: facts.catalogFailures > 0, InventoryDegraded: facts.inventoryFailures > 0}
 
 	all := make([]LineView, 0, len(items))
@@ -160,6 +163,7 @@ func (f *lineFacts) lineView(item *domain.CartItem) LineView {
 	if found {
 		product = &domain.ProductFacts{Found: q.ProductFound, Status: q.Status, IsVisible: q.IsSellable, HasVariants: q.HasVariants, PriceAmount: q.UnitPrice, Currency: q.Currency, PricingVersion: q.VariantVersion}
 		line.ProductName = q.ProductName
+		line.VendorID = q.VendorID
 		line.PricingVersion = q.VariantVersion
 		if q.ProductFound && q.UnitPrice > 0 {
 			price := q.UnitPrice

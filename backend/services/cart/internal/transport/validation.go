@@ -10,6 +10,7 @@ import (
 	"github.com/go-playground/validator/v10"
 	"github.com/google/uuid"
 
+	"shopee/backend/pkg/apperror"
 	"shopee/backend/pkg/httpresponse"
 	"shopee/backend/services/cart/internal/usecase"
 )
@@ -18,6 +19,11 @@ import (
 // field names (never the raw decoder error) when it is invalid.
 func bindJSON(c *gin.Context, req any) bool {
 	if err := c.ShouldBindJSON(req); err != nil {
+		var app *apperror.Error
+		if errors.As(err, &app) && app.Code == "invalid_selection" {
+			httpresponse.Error(c, app.Status, string(app.Code), app.Message)
+			return false
+		}
 		httpresponse.Error(c, http.StatusBadRequest, "validation_error", describeBindError(err))
 		return false
 	}

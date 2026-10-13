@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"shopee/backend/pkg/apperror"
+	"shopee/backend/pkg/cartselection"
 )
 
 // CheckoutOperation is one buyer checkout attempt identified by the
@@ -46,6 +47,7 @@ const (
 
 // CheckoutRequest is what identifies "the same checkout" for idempotency.
 type CheckoutRequest struct {
+	SelectedLineIDs      []string
 	ExpectedQuoteVersion string
 	AddressID            string
 	CartVersion          *int64
@@ -59,6 +61,9 @@ type CheckoutRequest struct {
 // version or confirmed total is a different request.
 func (r CheckoutRequest) Hash() string {
 	parts := []string{"address=" + r.AddressID}
+	if r.SelectedLineIDs != nil {
+		parts = append(parts, "selection="+cartselection.Hash(r.SelectedLineIDs))
+	}
 	if r.ExpectedQuoteVersion != "" {
 		parts = append(parts, "quote="+r.ExpectedQuoteVersion)
 	}

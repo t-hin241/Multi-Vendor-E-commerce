@@ -1,0 +1,15 @@
+# Isolated, disposable AF-11 integration database. Never uses application data.
+services:
+  postgres:
+    image: postgres:16.15-alpine3.24@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea
+    environment:
+      POSTGRES_USER: selective_test
+      POSTGRES_DB: selective_test
+      POSTGRES_HOST_AUTH_METHOD: trust
+    ports: ["127.0.0.1:55439:5432"]
+    tmpfs: ["/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U selective_test -d selective_test"]
+      interval: 2s
+      timeout: 2s
+      retries: 30

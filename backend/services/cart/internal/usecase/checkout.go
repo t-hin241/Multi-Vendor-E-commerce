@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"shopee/backend/pkg/apperror"
+	"shopee/backend/pkg/cartselection"
 	"shopee/backend/services/cart/internal/domain"
 )
 
@@ -14,7 +15,15 @@ import (
 // Order retry prices exactly what it priced the first time. When
 // expectedVersion is given and the operation is new, a cart that moved on
 // is rejected with cart_changed so the buyer reviews it again.
-func (uc *CartUseCase) CreateCheckoutSnapshot(ctx context.Context, buyerID, operationID string, expectedVersion *int64) (op *domain.CheckoutOperation, replayed bool, err error) {
+func (uc *CartUseCase) CreateCheckoutSnapshot(ctx context.Context, buyerID, operationID string, expectedVersion *int64, selections ...[]string) (op *domain.CheckoutOperation, replayed bool, err error) {
+	var selected []string
+	if len(selections) > 0 {
+		selected = selections[0]
+	}
+	if err := cartselection.Validate(selected); err != nil {
+		return nil, false, err
+	}
+	selectionHash := cartselection.Hash(selected)
 	err = uc.tx.Run(ctx, func(ctx context.Context) error {
 		cart, err := uc.carts.LockForUser(ctx, buyerID)
 		if err != nil {
@@ -28,8 +37,19 @@ func (uc *CartUseCase) CreateCheckoutSnapshot(ctx context.Context, buyerID, oper
 			if existing.BuyerID != buyerID {
 				return apperror.Conflict("Checkout operation belongs to a different buyer")
 			}
+			if existing.SelectionHash != selectionHash || (selectionHash != "" && (expectedVersion == nil || *expectedVersion != existing.CartVersion)) {
+				return cartselection.Stale()
+			}
 			op, replayed = existing, true
 			return nil
+		}
+		if selected != nil {
+			if !uc.SelectiveCheckoutEnabled {
+				return cartselection.Disabled()
+			}
+			if expectedVersion == nil || *expectedVersion != cart.Version {
+				return cartselection.Stale()
+			}
 		}
 		if err := domain.CheckExpectedVersion(expectedVersion, cart.Version); err != nil {
 			return err
@@ -38,11 +58,26 @@ func (uc *CartUseCase) CreateCheckoutSnapshot(ctx context.Context, buyerID, oper
 		if err != nil {
 			return err
 		}
+		if selected != nil {
+			byID := make(map[string]*domain.CartItem, len(items))
+			for _, item := range items {
+				byID[item.ID] = item
+			}
+			chosen := make([]*domain.CartItem, 0, len(selected))
+			for _, id := range selected {
+				item := byID[id]
+				if item == nil {
+					return cartselection.Invalid()
+				}
+				chosen = append(chosen, item)
+			}
+			items = chosen
+		}
 		lines, err := domain.SnapshotFromItems(items)
 		if err != nil {
 			return err
 		}
-		op = &domain.CheckoutOperation{OperationID: operationID, BuyerID: buyerID, CartID: cart.ID, CartVersion: cart.Version, Lines: lines}
+		op = &domain.CheckoutOperation{OperationID: operationID, BuyerID: buyerID, CartID: cart.ID, CartVersion: cart.Version, Lines: lines, SelectionHash: selectionHash}
 		return uc.operations.Insert(ctx, op)
 	})
 	if err != nil {
@@ -75,6 +110,16 @@ func (uc *CartUseCase) ConsumeCheckout(ctx context.Context, buyerID, operationID
 		}
 		if op.BuyerID != buyerID {
 			return apperror.Conflict("Checkout operation belongs to a different buyer")
+		}
+		if op.SelectionHash != "" {
+			frozen := make([]domain.ConsumeLine, 0, len(op.Lines))
+			for _, line := range op.Lines {
+				frozen = append(frozen, domain.ConsumeLine{LineID: line.LineID, Quantity: line.Quantity})
+			}
+			if hash != domain.ConsumeHash(frozen) {
+				return cartselection.Invalid()
+			}
+			lines = frozen
 		}
 		if op.Consumed() {
 			if op.ConsumeHash != nil && *op.ConsumeHash == hash {

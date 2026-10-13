@@ -2,6 +2,7 @@ package transport
 
 import (
 	"encoding/csv"
+	"errors"
 	"net/http"
 	"strconv"
 	"time"
@@ -10,6 +11,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/rs/zerolog"
 
+	"shopee/backend/pkg/apperror"
+	"shopee/backend/pkg/cartselection"
 	"shopee/backend/pkg/httpresponse"
 	"shopee/backend/pkg/middleware"
 	"shopee/backend/services/order/internal/domain"
@@ -31,16 +34,23 @@ func NewOrderHandler(orders *usecase.OrderUseCase, log zerolog.Logger) *OrderHan
 func (h *OrderHandler) Checkout(c *gin.Context) {
 	var req checkoutRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
+		var selectionErr *apperror.Error
+		if errors.As(err, &selectionErr) && selectionErr.Code == cartselection.Invalid().Code {
+			recordSelectionRefusal(err)
+			httpresponse.HandleError(c, h.log, err)
+			return
+		}
 		httpresponse.Error(c, http.StatusBadRequest, "validation_error",
 			"address_id must be a valid id; cart_version and expected_total_amount, when given, must be positive")
 		return
 	}
 	order, replayed, err := h.orders.Checkout(c.Request.Context(), middleware.GetUserID(c), usecase.CheckoutInput{
-		AddressID: req.AddressID, CartVersion: req.CartVersion, ExpectedTotal: req.ExpectedTotalAmount,
+		SelectedLineIDs: req.SelectedLineIDs, AddressID: req.AddressID, CartVersion: req.CartVersion, ExpectedTotal: req.ExpectedTotalAmount,
 		ExpectedQuoteVersion: req.ExpectedQuoteVersion,
 		IdempotencyKey:       c.GetHeader("Idempotency-Key"), AcceptedPolicyVersions: req.AcceptedPolicyVersions,
 	})
 	if err != nil {
+		recordSelectionRefusal(err)
 		httpresponse.HandleError(c, h.log, err)
 		return
 	}
@@ -48,18 +58,28 @@ func (h *OrderHandler) Checkout(c *gin.Context) {
 	if replayed {
 		status = http.StatusOK
 	}
-	httpresponse.OK(c, status, toOrderResponse(order))
+	response := toOrderResponse(order)
+	response.SelectedLineIDs = req.SelectedLineIDs
+	response.SelectionHash = cartselection.Hash(req.SelectedLineIDs)
+	httpresponse.OK(c, status, response)
 }
 
 // Preview prices the cart for an address with a shipping quote per shop.
 func (h *OrderHandler) Preview(c *gin.Context) {
 	var req previewRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
+		var selectionErr *apperror.Error
+		if errors.As(err, &selectionErr) && selectionErr.Code == cartselection.Invalid().Code {
+			recordSelectionRefusal(err)
+			httpresponse.HandleError(c, h.log, err)
+			return
+		}
 		httpresponse.Error(c, http.StatusBadRequest, "validation_error", "address_id must be a valid id")
 		return
 	}
-	preview, err := h.orders.Preview(c.Request.Context(), middleware.GetUserID(c), req.AddressID)
+	preview, err := h.orders.Preview(c.Request.Context(), middleware.GetUserID(c), req.AddressID, usecase.SelectionInput{CartVersion: req.CartVersion, SelectedLineIDs: req.SelectedLineIDs})
 	if err != nil {
+		recordSelectionRefusal(err)
 		httpresponse.HandleError(c, h.log, err)
 		return
 	}

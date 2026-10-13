@@ -16,14 +16,15 @@ import (
 )
 
 type Config struct {
-	Base                   config.Base
-	CartServiceURL         string
-	CatalogServiceURL      string
-	VendorServiceURL       string
-	InventoryServiceURL    string
-	ShipmentServiceURL     string
-	NotificationServiceURL string
-	PaymentServiceURL      string
+	SelectiveCheckoutEnabled bool
+	Base                     config.Base
+	CartServiceURL           string
+	CatalogServiceURL        string
+	VendorServiceURL         string
+	InventoryServiceURL      string
+	ShipmentServiceURL       string
+	NotificationServiceURL   string
+	PaymentServiceURL        string
 	// ReturnWindowDays is how long after delivery (completion) an item may
 	// be returned; it is copied onto every return request with its version.
 	ReturnWindowDays int
@@ -150,6 +151,12 @@ func Load() (Config, error) {
 			return Config{}, fmt.Errorf("config: FEATURE_VENDOR_ACTION_NOTICES_ENABLED must be true or false")
 		}
 	}
+	selective := false
+	if raw := os.Getenv("FEATURE_SELECTIVE_CHECKOUT_ENABLED"); raw != "" {
+		if selective, err = strconv.ParseBool(raw); err != nil {
+			return Config{}, fmt.Errorf("config: FEATURE_SELECTIVE_CHECKOUT_ENABLED must be true or false")
+		}
+	}
 	versionedPolicies := false
 	if raw := os.Getenv("FEATURE_VERSIONED_POLICIES_ENABLED"); raw != "" {
 		if versionedPolicies, err = strconv.ParseBool(raw); err != nil {
@@ -158,22 +165,23 @@ func Load() (Config, error) {
 	}
 
 	return Config{
-		Support:                support,
-		VersionedPolicies:      versionedPolicies,
-		PaidCancellation:       paidCancellation,
-		DeliveryRedelivery:     deliveryRedelivery,
-		ReturnShipping:         returnShipping,
-		ReturnDispatchDays:     returnDispatchDays,
-		VendorActionNotices:    vendorActionNotices,
-		Base:                   base,
-		CartServiceURL:         cartServiceURL,
-		CatalogServiceURL:      catalogServiceURL,
-		VendorServiceURL:       vendorServiceURL,
-		InventoryServiceURL:    inventoryServiceURL,
-		ShipmentServiceURL:     shipmentServiceURL,
-		NotificationServiceURL: notificationServiceURL,
-		PaymentServiceURL:      paymentServiceURL,
-		ReturnWindowDays:       returnWindowDays,
+		SelectiveCheckoutEnabled: selective,
+		Support:                  support,
+		VersionedPolicies:        versionedPolicies,
+		PaidCancellation:         paidCancellation,
+		DeliveryRedelivery:       deliveryRedelivery,
+		ReturnShipping:           returnShipping,
+		ReturnDispatchDays:       returnDispatchDays,
+		VendorActionNotices:      vendorActionNotices,
+		Base:                     base,
+		CartServiceURL:           cartServiceURL,
+		CatalogServiceURL:        catalogServiceURL,
+		VendorServiceURL:         vendorServiceURL,
+		InventoryServiceURL:      inventoryServiceURL,
+		ShipmentServiceURL:       shipmentServiceURL,
+		NotificationServiceURL:   notificationServiceURL,
+		PaymentServiceURL:        paymentServiceURL,
+		ReturnWindowDays:         returnWindowDays,
 	}, nil
 }
 

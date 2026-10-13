@@ -47,3 +47,4 @@ deploy/loadtest/results/
 
 # Repository-local toolchain/test scratch
 .tmp/
+.cache/go-build/

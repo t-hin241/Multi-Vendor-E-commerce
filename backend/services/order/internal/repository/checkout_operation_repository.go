@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"shopee/backend/pkg/apperror"
+	"shopee/backend/pkg/cartselection"
 	"shopee/backend/services/order/internal/domain"
 )
 
@@ -43,6 +44,27 @@ func scanCheckoutOp(row pgx.Row) (*domain.CheckoutOperation, error) {
 func (r *CheckoutOperationRepository) Begin(ctx context.Context, buyerID, key, hash string, ttl time.Duration) (op *domain.CheckoutOperation, started bool, err error) {
 	err = (Transactions{Pool: r.pool}).Run(ctx, func(ctx context.Context) error {
 		q := connection(ctx, r.pool)
+		// Durable preparing operations serialize the entire saga per buyer. The
+		// advisory lock only protects claiming, never an outbound service call.
+		if _, err := q.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('checkout:' || $1, 0))`, buyerID); err != nil {
+			return err
+		}
+		previous, err := scanCheckoutOp(q.QueryRow(ctx, `SELECT `+checkoutOpColumns+` FROM checkout_operations WHERE buyer_id=$1 AND idempotency_key=$2 FOR UPDATE`, buyerID, key))
+		if err != nil {
+			return err
+		}
+		if previous != nil && (!previous.ExpiresAt.Before(time.Now()) || previous.Status == domain.CheckoutOpPreparing) &&
+			(previous.RequestHash != hash || previous.Status != domain.CheckoutOpFailed || domain.ReplayableFailure(previous.StoredError())) {
+			op = previous
+			return nil
+		}
+		var busy bool
+		if err := q.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM checkout_operations WHERE buyer_id=$1 AND status='preparing') OR EXISTS(SELECT 1 FROM cart_consumptions WHERE buyer_id=$1 AND status IN ('held','pending','parked'))`, buyerID).Scan(&busy); err != nil {
+			return err
+		}
+		if busy {
+			return cartselection.Claimed()
+		}
 		inserted, err := scanCheckoutOp(q.QueryRow(ctx, `
 			INSERT INTO checkout_operations (buyer_id, idempotency_key, request_hash, expires_at)
 			VALUES ($1, $2, $3, now() + $4::double precision * interval '1 second')

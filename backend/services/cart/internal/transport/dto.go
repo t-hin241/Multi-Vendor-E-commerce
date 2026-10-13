@@ -3,6 +3,7 @@ package transport
 import (
 	"time"
 
+	"shopee/backend/pkg/cartselection"
 	"shopee/backend/services/cart/internal/domain"
 	"shopee/backend/services/cart/internal/usecase"
 )
@@ -38,6 +39,7 @@ type moneyResponse struct {
 }
 
 type lineResponse struct {
+	VendorID           string  `json:"vendor_id,omitempty"`
 	PricingVersion     int64   `json:"pricing_version"`
 	SeenPricingVersion *int64  `json:"seen_pricing_version,omitempty"`
 	LineID             string  `json:"line_id"`
@@ -77,25 +79,27 @@ type pageResponse struct {
 }
 
 type cartResponse struct {
-	Version           int64            `json:"version"`
-	Items             []lineResponse   `json:"items"`
-	Subtotal          *moneyResponse   `json:"subtotal"`
-	Total             int64            `json:"total"` // legacy: Subtotal.Amount, or 0 when unknown
-	Currency          string           `json:"currency,omitempty"`
-	MixedCurrency     bool             `json:"mixed_currency"`
-	ItemCount         int64            `json:"item_count"`
-	LineCount         int              `json:"line_count"`
-	UnavailableLines  int              `json:"unavailable_lines"`
-	PriceChangedLines int              `json:"price_changed_lines"`
-	OverLineLimit     bool             `json:"over_line_limit"`
-	CheckoutReady     bool             `json:"checkout_ready"`
-	Degraded          degradedResponse `json:"degraded"`
-	Limits            limitsResponse   `json:"limits"`
-	Page              pageResponse     `json:"page"`
+	CartID                   string           `json:"cart_id"`
+	SelectiveCheckoutEnabled bool             `json:"selective_checkout_enabled"`
+	Version                  int64            `json:"version"`
+	Items                    []lineResponse   `json:"items"`
+	Subtotal                 *moneyResponse   `json:"subtotal"`
+	Total                    int64            `json:"total"` // legacy: Subtotal.Amount, or 0 when unknown
+	Currency                 string           `json:"currency,omitempty"`
+	MixedCurrency            bool             `json:"mixed_currency"`
+	ItemCount                int64            `json:"item_count"`
+	LineCount                int              `json:"line_count"`
+	UnavailableLines         int              `json:"unavailable_lines"`
+	PriceChangedLines        int              `json:"price_changed_lines"`
+	OverLineLimit            bool             `json:"over_line_limit"`
+	CheckoutReady            bool             `json:"checkout_ready"`
+	Degraded                 degradedResponse `json:"degraded"`
+	Limits                   limitsResponse   `json:"limits"`
+	Page                     pageResponse     `json:"page"`
 }
 
 func toCartResponse(v *usecase.CartView) cartResponse {
-	resp := cartResponse{
+	resp := cartResponse{CartID: v.CartID, SelectiveCheckoutEnabled: v.SelectiveCheckoutEnabled,
 		Version: v.Version, Items: make([]lineResponse, 0, len(v.Lines)), Currency: v.Currency, MixedCurrency: v.MixedCurrency,
 		ItemCount: v.TotalQuantity, LineCount: v.TotalLines, UnavailableLines: v.UnavailableLines,
 		PriceChangedLines: v.PriceChangedLines, OverLineLimit: v.OverLineLimit, CheckoutReady: v.CheckoutReady,
@@ -109,7 +113,7 @@ func toCartResponse(v *usecase.CartView) cartResponse {
 	}
 	for _, l := range v.Lines {
 		resp.Items = append(resp.Items, lineResponse{
-			PricingVersion: l.PricingVersion, SeenPricingVersion: l.SeenPricingVersion,
+			VendorID: l.VendorID, PricingVersion: l.PricingVersion, SeenPricingVersion: l.SeenPricingVersion,
 			LineID: l.LineID, LineVersion: l.LineVersion, ProductID: l.ProductID, ProductName: l.ProductName,
 			VariantID: l.VariantID, VariantSKU: l.VariantSKU, VariantLabel: l.VariantLabel, Quantity: l.Quantity,
 			PriceAmount: l.PriceAmount, Currency: l.Currency, SeenPriceAmount: l.SeenPriceAmount, SeenCurrency: l.SeenCurrency,
@@ -123,8 +127,9 @@ func toCartResponse(v *usecase.CartView) cartResponse {
 // ---- internal checkout contract (Order → Cart) ----
 
 type snapshotRequest struct {
-	OperationID     string `json:"operation_id" binding:"required,uuid"`
-	ExpectedVersion *int64 `json:"expected_version" binding:"omitempty,min=1"`
+	SelectedLineIDs cartselection.IDs `json:"selected_line_ids"`
+	OperationID     string            `json:"operation_id" binding:"required,uuid"`
+	ExpectedVersion *int64            `json:"expected_version" binding:"omitempty,min=1"`
 }
 
 type snapshotLineResponse struct {
@@ -139,17 +144,18 @@ type snapshotLineResponse struct {
 }
 
 type snapshotResponse struct {
-	OperationID string                 `json:"operation_id"`
-	BuyerID     string                 `json:"buyer_id"`
-	CartVersion int64                  `json:"cart_version"`
-	CreatedAt   time.Time              `json:"created_at"`
-	Consumed    bool                   `json:"consumed"`
-	Replayed    bool                   `json:"replayed"`
-	Lines       []snapshotLineResponse `json:"lines"`
+	SelectionHash string                 `json:"selection_hash,omitempty"`
+	OperationID   string                 `json:"operation_id"`
+	BuyerID       string                 `json:"buyer_id"`
+	CartVersion   int64                  `json:"cart_version"`
+	CreatedAt     time.Time              `json:"created_at"`
+	Consumed      bool                   `json:"consumed"`
+	Replayed      bool                   `json:"replayed"`
+	Lines         []snapshotLineResponse `json:"lines"`
 }
 
 func toSnapshotResponse(op *domain.CheckoutOperation, replayed bool) snapshotResponse {
-	resp := snapshotResponse{OperationID: op.OperationID, BuyerID: op.BuyerID, CartVersion: op.CartVersion,
+	resp := snapshotResponse{SelectionHash: op.SelectionHash, OperationID: op.OperationID, BuyerID: op.BuyerID, CartVersion: op.CartVersion,
 		CreatedAt: op.CreatedAt, Consumed: op.Consumed(), Replayed: replayed, Lines: make([]snapshotLineResponse, 0, len(op.Lines))}
 	for _, l := range op.Lines {
 		resp.Lines = append(resp.Lines, snapshotLineResponse{LineID: l.LineID, ProductID: l.ProductID, VariantID: l.VariantID,

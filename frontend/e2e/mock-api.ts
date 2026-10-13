@@ -373,7 +373,6 @@ export class MockApi {
         },
       });
     }
-
     const me = this.caller(route);
     const signedIn = me !== null;
     for (const r of this.routes) {
@@ -386,6 +385,14 @@ export class MockApi {
       return "code" in out
         ? this.fail(route, out.status, out.code, out.message)
         : this.ok(route, out.data, out.status ?? 200);
+    }
+    if (method === "GET" && path === "/api/catalog/products") {
+      return this.ok(route, {
+        products: [],
+        total: 0,
+        vendor_info_degraded: false,
+        sales_info_degraded: false,
+      });
     }
     if (path.startsWith("/api/notifications/inbox")) {
       return me

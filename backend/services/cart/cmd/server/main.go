@@ -79,6 +79,7 @@ func main() {
 	cartItemRepo := repository.NewCartItemRepository(dbPool)
 	operationRepo := repository.NewCheckoutOperationRepository(dbPool)
 	cartUseCase := usecase.NewCartUseCase(repository.Transactions{Pool: dbPool}, cartRepo, cartItemRepo, operationRepo, catalogClient, inventoryClient, log)
+	cartUseCase.SelectiveCheckoutEnabled = cfg.SelectiveCheckoutEnabled
 	cartHandler := transport.NewCartHandler(cartUseCase, log)
 	internalHandler := transport.NewInternalHandler(cartUseCase, log)
 

@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 
 	"shopee/backend/pkg/apperror"
+	"shopee/backend/pkg/cartselection"
 	"shopee/backend/pkg/purchasequote"
 	"shopee/backend/services/order/internal/adapter"
 	"shopee/backend/services/order/internal/domain"
@@ -18,6 +19,7 @@ import (
 // the attempt (clients send a new key per confirmed order); CartVersion and
 // ExpectedTotal are what the buyer reviewed.
 type CheckoutInput struct {
+	SelectedLineIDs      []string
 	ExpectedQuoteVersion string
 	AddressID            string
 	CartVersion          *int64
@@ -45,13 +47,23 @@ type CheckoutInput struct {
 //
 // replayed is true when an earlier attempt's order is returned.
 func (uc *OrderUseCase) Checkout(ctx context.Context, buyerID string, in CheckoutInput) (order *domain.Order, replayed bool, err error) {
+	if err := cartselection.Validate(in.SelectedLineIDs); err != nil {
+		return nil, false, err
+	}
+	if in.SelectedLineIDs != nil && (in.CartVersion == nil || in.ExpectedTotal == nil) {
+		return nil, false, cartselection.Invalid()
+	}
+	if in.SelectedLineIDs != nil {
+		in.SelectedLineIDs = append([]string{}, in.SelectedLineIDs...)
+		sort.Strings(in.SelectedLineIDs)
+	}
 	key := in.IdempotencyKey
 	if key == "" {
 		key = uuid.NewString() // legacy clients: no retry protection
 	} else if err := domain.ValidateIdempotencyKey(key); err != nil {
 		return nil, false, err
 	}
-	hash := domain.CheckoutRequest{ExpectedQuoteVersion: in.ExpectedQuoteVersion, AddressID: in.AddressID, CartVersion: in.CartVersion, ExpectedTotal: in.ExpectedTotal,
+	hash := domain.CheckoutRequest{SelectedLineIDs: in.SelectedLineIDs, ExpectedQuoteVersion: in.ExpectedQuoteVersion, AddressID: in.AddressID, CartVersion: in.CartVersion, ExpectedTotal: in.ExpectedTotal,
 		AcceptedPolicies: in.AcceptedPolicyVersions}.Hash()
 
 	op, started, err := uc.CheckoutOps.Begin(ctx, buyerID, key, hash, domain.CheckoutKeyTTL)
@@ -92,12 +104,15 @@ func (uc *OrderUseCase) replayCheckout(ctx context.Context, buyerID string, op *
 }
 
 func (uc *OrderUseCase) runCheckout(ctx context.Context, buyerID string, op *domain.CheckoutOperation, in CheckoutInput) (*domain.Order, error) {
+	if in.SelectedLineIDs != nil && !uc.SelectiveCheckoutEnabled {
+		return nil, cartselection.Disabled()
+	}
 	if err := uc.settleOpenCartConsumptions(ctx, buyerID); err != nil {
 		return nil, err
 	}
 
 	cartOperationID := uuid.NewString()
-	snapshot, err := uc.Cart.Snapshot(ctx, buyerID, cartOperationID, in.CartVersion)
+	snapshot, err := uc.Cart.Snapshot(ctx, buyerID, cartOperationID, in.CartVersion, in.SelectedLineIDs)
 	if err != nil {
 		return nil, err
 	}
@@ -393,15 +408,17 @@ func firstFailure(vendorIDs []string, failures map[string]*apperror.Error) *appe
 // CheckoutPreview is the order the buyer is about to confirm: current
 // prices and a shipping quote per shop. Nothing is reserved or created.
 type CheckoutPreview struct {
-	QuoteVersion   string
-	Lines          []purchasequote.Line
-	CartVersion    int64
-	Currency       string
-	SubtotalAmount int64
-	ShippingAmount *int64
-	TotalAmount    *int64
-	Vendors        []PreviewVendor
-	Ready          bool
+	SelectedLineIDs []string
+	SelectionHash   string
+	QuoteVersion    string
+	Lines           []purchasequote.Line
+	CartVersion     int64
+	Currency        string
+	SubtotalAmount  int64
+	ShippingAmount  *int64
+	TotalAmount     *int64
+	Vendors         []PreviewVendor
+	Ready           bool
 	// Policies are the marketplace versions (and return rules) a checkout
 	// now would be placed under; nil while versioned policies are off.
 	Policies *domain.OrderPolicySnapshot
@@ -422,10 +439,34 @@ type PreviewVendor struct {
 
 // Preview prices the buyer's cart for an address. A shop Shipment cannot
 // serve is reported per shop (Ready false), never priced at zero.
-func (uc *OrderUseCase) Preview(ctx context.Context, buyerID, addressID string) (*CheckoutPreview, error) {
+func (uc *OrderUseCase) Preview(ctx context.Context, buyerID, addressID string, selections ...SelectionInput) (*CheckoutPreview, error) {
+	var selection SelectionInput
+	if len(selections) > 0 {
+		selection = selections[0]
+	}
+	if err := cartselection.Validate(selection.SelectedLineIDs); err != nil {
+		return nil, err
+	}
+	if selection.SelectedLineIDs != nil {
+		selection.SelectedLineIDs = append([]string{}, selection.SelectedLineIDs...)
+		sort.Strings(selection.SelectedLineIDs)
+	}
 	snapshot, err := uc.Cart.Lines(ctx, buyerID)
 	if err != nil {
 		return nil, err
+	}
+	if selection.SelectedLineIDs != nil {
+		if !uc.SelectiveCheckoutEnabled || !snapshot.SelectiveCheckoutEnabled {
+			return nil, cartselection.Disabled()
+		}
+		if selection.CartVersion == nil || *selection.CartVersion != snapshot.CartVersion {
+			return nil, cartselection.Stale()
+		}
+		if snapshot.Lines, err = adapter.SelectCartLines(snapshot.Lines, selection.SelectedLineIDs); err != nil {
+			return nil, err
+		}
+	} else if selection.CartVersion != nil && *selection.CartVersion != snapshot.CartVersion {
+		return nil, cartselection.Stale()
 	}
 	if len(snapshot.Lines) == 0 {
 		return nil, apperror.Validation("Your cart is empty")
@@ -451,7 +492,7 @@ func (uc *OrderUseCase) Preview(ctx context.Context, buyerID, addressID string) 
 	for _, l := range priced.lines {
 		counts[l.VendorID] += l.Quantity
 	}
-	preview := &CheckoutPreview{QuoteVersion: priced.quoteVersion, Lines: priced.quotes, CartVersion: snapshot.CartVersion, Currency: plan.Order.Currency, SubtotalAmount: plan.Order.SubtotalAmount}
+	preview := &CheckoutPreview{SelectedLineIDs: selection.SelectedLineIDs, SelectionHash: cartselection.Hash(selection.SelectedLineIDs), QuoteVersion: priced.quoteVersion, Lines: priced.quotes, CartVersion: snapshot.CartVersion, Currency: plan.Order.Currency, SubtotalAmount: plan.Order.SubtotalAmount}
 	if uc.policiesOn() {
 		now := uc.Now()
 		if preview.Policies, err = uc.currentPolicies(ctx, now); err != nil {

@@ -34,7 +34,7 @@ func (h *InternalHandler) CreateSnapshot(c *gin.Context) {
 	if !bindJSON(c, &req) {
 		return
 	}
-	op, replayed, err := h.cart.CreateCheckoutSnapshot(c.Request.Context(), buyerID, req.OperationID, req.ExpectedVersion)
+	op, replayed, err := h.cart.CreateCheckoutSnapshot(c.Request.Context(), buyerID, req.OperationID, req.ExpectedVersion, req.SelectedLineIDs)
 	if err != nil {
 		httpresponse.HandleError(c, h.log, err)
 		return
@@ -62,7 +62,7 @@ func (h *InternalHandler) Lines(c *gin.Context) {
 	op := &domain.CheckoutOperation{BuyerID: buyerID, CartVersion: version, Lines: lines}
 	resp := toSnapshotResponse(op, false)
 	c.Header("Cache-Control", "no-store")
-	httpresponse.OK(c, http.StatusOK, gin.H{"buyer_id": buyerID, "cart_version": resp.CartVersion, "lines": resp.Lines})
+	httpresponse.OK(c, http.StatusOK, gin.H{"buyer_id": buyerID, "cart_version": resp.CartVersion, "lines": resp.Lines, "selective_checkout_enabled": h.cart.SelectiveCheckoutEnabled})
 }
 
 // Consume: POST /internal/carts/:buyerId/checkout-snapshots/:operationId/consume
