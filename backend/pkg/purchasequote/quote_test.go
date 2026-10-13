@@ -33,7 +33,9 @@ func TestClientRejectsIncompleteOrMismatchedQuotes(t *testing.T) {
 				if r.Method != http.MethodPost || r.URL.Path != "/internal/catalog/purchase-quotes" {
 					t.Error("incorrect quote request")
 				}
-				json.NewEncoder(w).Encode(map[string]any{"data": quote})
+				if err := json.NewEncoder(w).Encode(map[string]any{"data": quote}); err != nil {
+					t.Errorf("encode quote response: %v", err)
+				}
 			}))
 			defer server.Close()
 			got, err := (Client{URL: server.URL, Key: "synthetic-test-key"}).PurchaseQuotes(t.Context(), []Input{input})

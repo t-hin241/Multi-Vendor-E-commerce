@@ -43,11 +43,12 @@ func (r Maintenance) Replay(ctx context.Context, actor, kind, id, reason string)
 		q := connection(ctx, r.Pool)
 		var product string
 		var err error
-		if kind == "status" {
+		switch kind {
+		case "status":
 			err = q.QueryRow(ctx, `UPDATE product_status_outbox SET attempts=0,next_attempt_at=now(),last_error=NULL WHERE product_id::text=$1 RETURNING product_id`, id).Scan(&product)
-		} else if kind == "variant_price" {
+		case "variant_price":
 			err = q.QueryRow(ctx, `UPDATE variant_price_outbox SET attempts=0,next_attempt_at=now() WHERE variant_id::text=$1 RETURNING product_id`, id).Scan(&product)
-		} else {
+		default:
 			err = q.QueryRow(ctx, `UPDATE catalog_object_cleanup SET attempts=0,next_attempt_at=greatest(created_at+interval '24 hours',now()),last_error=NULL WHERE object_key=$1 RETURNING product_id`, id).Scan(&product)
 		}
 		if err == pgx.ErrNoRows {

@@ -66,7 +66,9 @@ func catalogDB(t *testing.T, maxVersion ...string) *pgxpool.Pool {
 		t.Fatal(err)
 	}
 	for _, file := range migrations {
-		if len(maxVersion)>0 && filepath.Base(file)[:6]>maxVersion[0] { continue }
+		if len(maxVersion) > 0 && filepath.Base(file)[:6] > maxVersion[0] {
+			continue
+		}
 		sql, err := os.ReadFile(file)
 		if err != nil {
 			t.Fatal(err)

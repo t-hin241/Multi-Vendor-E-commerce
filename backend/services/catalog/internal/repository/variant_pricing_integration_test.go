@@ -3,7 +3,6 @@ package repository_test
 import (
 	"context"
 	"errors"
-	"github.com/google/uuid"
 	"math"
 	"os"
 	"shopee/backend/pkg/apperror"
@@ -12,6 +11,8 @@ import (
 	"shopee/backend/services/catalog/internal/domain"
 	"shopee/backend/services/catalog/internal/repository"
 	"testing"
+
+	"github.com/google/uuid"
 )
 
 func TestVariantPriceBackfillAndRollbackGuards(t *testing.T) {

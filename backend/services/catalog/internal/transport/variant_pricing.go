@@ -1,12 +1,13 @@
 package transport
 
 import (
-	"github.com/gin-gonic/gin"
 	"net/http"
 	"shopee/backend/pkg/apperror"
 	"shopee/backend/pkg/httpresponse"
 	"shopee/backend/pkg/middleware"
 	"shopee/backend/pkg/purchasequote"
+
+	"github.com/gin-gonic/gin"
 )
 
 func (h *ProductHandler) PricingCapabilities(c *gin.Context) {
