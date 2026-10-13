@@ -40,6 +40,11 @@ func (r Maintenance) Stats(ctx context.Context) (map[string]int64, error) {
  SELECT 'overdue',count(*) FROM reservation_operations WHERE status='held' AND expires_at<=now() UNION ALL
  SELECT 'legacy_held',count(*) FROM reservation_operations WHERE status='held' AND legacy UNION ALL
  SELECT 'expiry_parked',count(*) FROM reservation_operations WHERE status='held' AND expiry_attempts>=10 UNION ALL
+ SELECT 'stock_approval_pending',count(*) FROM stock_adjustment_operations WHERE status='approval_required' UNION ALL
+ SELECT 'stock_shortages',count(*) FROM stock_adjustment_operations WHERE status='reserved_stock_conflict' UNION ALL
+ SELECT 'stock_alerts_parked',count(*) FROM stock_alert_episode WHERE delivered_at IS NULL AND attempts>=5 UNION ALL
+ SELECT 'stock_adjustments_applied_24h',count(*) FROM stock_adjustment_operations WHERE status='applied' AND created_at>now()-interval '1 day' UNION ALL
+ SELECT 'negative_stock',count(*) FROM inventory_items WHERE available_quantity<0 OR reserved_quantity<0 UNION ALL
  SELECT 'cache_pending',count(*) FROM inventory_stock_outbox UNION ALL
  SELECT 'cache_parked',count(*) FROM inventory_stock_outbox WHERE attempts>=10 UNION ALL
  SELECT 'events_pending',count(*) FROM inventory_outbox WHERE delivered_at IS NULL UNION ALL

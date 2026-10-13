@@ -5,10 +5,11 @@ import (
 	"errors"
 	"time"
 
+	"shopee/backend/services/identity/internal/domain"
+
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"shopee/backend/services/identity/internal/domain"
 )
 
 var ErrProfileConflict = errors.New("profile version conflict")

@@ -19,6 +19,9 @@ const (
 )
 
 type InventoryItem struct {
+	Version           int64
+	LowStockThreshold int64
+	AlertEnabled      bool
 	ActorUserID       string
 	ID                string
 	ProductID         string

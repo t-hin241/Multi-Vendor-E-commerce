@@ -108,8 +108,14 @@ func main() {
 		health.Checker{Name: "postgres", Ping: func(ctx context.Context) error { return dbPool.Ping(ctx) }},
 	)
 
+	stockStore := repository.StockSelfService{Pool: dbPool}
+	stockUC := usecase.StockSelfService{Enabled: cfg.StockSelfServiceEnabled, Store: stockStore, Items: itemRepo, Vendors: vendorClient,
+		Ops: usecase.Operations{SecondApprovalQuantity: cfg.SecondApprovalQuantity, Transactions: repository.Transactions{Pool: dbPool}, Identity: identityclient.Client{URL: internalServices.IdentityURL, Key: internalServices.Key}, Audit: repository.AdminAudit{Pool: dbPool}}}
+	transport.RegisterStockSelfService(router, jwtManager, adminGuard, transport.StockSelfServiceHandler{UseCase: stockUC, Log: log})
 	workerCtx, stopWorker := context.WithCancel(ctx)
 	defer stopWorker()
+	stockAlerts := usecase.StockAlertWorker{Store: stockStore, Notify: adapter.StockAlertClient{URL: cfg.NotificationServiceURL, Key: internalServices.Key}, Log: log}
+	go stockAlerts.Run(workerCtx)
 	// PLT-03: outbox events go to the event bus (HTTP in rollback mode).
 	orderClient := adapter.OrderClient{URL: cfg.OrderServiceURL, Key: internalServices.Key}
 	var orderEvents usecase.OrderOperations = orderClient

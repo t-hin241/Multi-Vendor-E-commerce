@@ -112,7 +112,7 @@ func (m Maintenance) Reconcile(ctx context.Context) error {
 // alertKeys are the counters that need an operator when non-zero: holds
 // past their deadline, work that ran out of retries, and drift between
 // Inventory, Order and the reserved balance.
-var alertKeys = []string{"overdue", "expiry_parked", "events_parked", "cache_parked", "order_mismatches", "reserved_mismatches"}
+var alertKeys = []string{"overdue", "expiry_parked", "events_parked", "cache_parked", "order_mismatches", "reserved_mismatches", "stock_shortages", "stock_alerts_parked", "negative_stock"}
 
 // AlertCounters returns the non-zero alert counters from a stats snapshot.
 func AlertCounters(stats map[string]int64) map[string]int64 {

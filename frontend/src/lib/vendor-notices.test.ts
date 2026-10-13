@@ -11,6 +11,7 @@ import {
 
 describe("toggleCategory", () => {
   it("adds and removes once, in a stable order", () => {
+    expect(toggleCategory([], "inventory", true)).toEqual(["inventory"]);
     expect(toggleCategory([], "finance", true)).toEqual(["finance"]);
     expect(toggleCategory(["finance"], "orders", true)).toEqual(["orders", "finance"]);
     expect(toggleCategory(["orders", "finance"], "orders", true)).toEqual(["orders", "finance"]);

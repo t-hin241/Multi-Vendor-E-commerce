@@ -8,6 +8,7 @@ export const VENDOR_NOTICE_CATEGORIES: {
   label: string;
   hint: string;
 }[] = [
+  { value: "inventory", label: "Tồn kho", hint: "Tồn khả dụng xuống dưới ngưỡng của mã kho" },
   { value: "orders", label: "Đơn hàng", hint: "Đơn mới đã thanh toán, yêu cầu hủy gói hàng" },
   { value: "returns", label: "Trả hàng", hint: "Yêu cầu trả hàng mới, hàng trả đang gửi về" },
   { value: "finance", label: "Thanh toán cho shop", hint: "Kết quả chuyển khoản payout" },
@@ -44,6 +45,7 @@ export function preferencesErrorMessage(error: unknown): string {
 }
 
 const ACTION_LABELS: Record<string, string> = {
+  low_stock: "Low stock",
   new_order: "New paid order",
   cancellation_requested: "Cancellation requested",
   return_requested: "Return requested",

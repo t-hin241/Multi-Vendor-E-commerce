@@ -20,9 +20,10 @@ import (
 // recipientPurposes maps a notice purpose (AF-08) to the permission a staff
 // member needs to receive it. The owner receives every purpose.
 var recipientPurposes = map[string]string{
-	"orders":  shopaccess.OrdersFulfill,
-	"returns": shopaccess.ReturnsHandle,
-	"finance": shopaccess.FinanceRead,
+	"inventory": shopaccess.InventoryAdjust,
+	"orders":    shopaccess.OrdersFulfill,
+	"returns":   shopaccess.ReturnsHandle,
+	"finance":   shopaccess.FinanceRead,
 	// PW-009: support cases waiting for the shop.
 	"support": shopaccess.SupportReply,
 }
@@ -53,7 +54,7 @@ type NoticeRecipients struct {
 func (uc *StaffUseCase) NotificationRecipients(ctx context.Context, vendorID, purpose string) (*NoticeRecipients, error) {
 	permission, ok := recipientPurposes[purpose]
 	if !ok {
-		return nil, apperror.Validation("purpose must be orders, returns, finance or support")
+		return nil, apperror.Validation("purpose must be orders, returns, finance, support or inventory")
 	}
 	if _, err := uuid.Parse(vendorID); err != nil {
 		return nil, apperror.Validation("Invalid shop ID")

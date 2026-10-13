@@ -12,16 +12,17 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gin-gonic/gin"
-	"github.com/google/uuid"
-	"github.com/redis/go-redis/v9"
-	"github.com/rs/zerolog"
 	"shopee/backend/pkg/apperror"
 	"shopee/backend/services/identity/internal/config"
 	"shopee/backend/services/identity/internal/domain"
 	"shopee/backend/services/identity/internal/repository"
 	"shopee/backend/services/identity/internal/transport"
 	"shopee/backend/services/identity/internal/usecase"
+
+	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
+	"github.com/redis/go-redis/v9"
+	"github.com/rs/zerolog"
 )
 
 func (f *fixture) account() *usecase.AccountUseCase {

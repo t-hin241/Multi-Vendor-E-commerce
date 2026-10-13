@@ -17,6 +17,7 @@ export type VendorNavLink = {
 
 // Shared source for desktop navigation and the account menu.
 export const VENDOR_NAV_LINKS: VendorNavLink[] = [
+  { href: "/vendor/inventory", label: "Tồn kho", icon: Package },
   { href: "/vendor/payout-accounts", label: "Tài khoản nhận tiền", icon: Store },
   { href: "/vendor", label: "Tổng quan", icon: LayoutDashboard },
   { href: "/vendor/products", label: "Sản phẩm", icon: Package },

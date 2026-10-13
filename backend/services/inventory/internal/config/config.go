@@ -11,8 +11,10 @@ import (
 )
 
 type Config struct {
-	OrderServiceURL string
-	ExpiryEnabled   bool
+	StockSelfServiceEnabled bool
+	NotificationServiceURL  string
+	OrderServiceURL         string
+	ExpiryEnabled           bool
 	// SecondApprovalQuantity (PW-027): restock requests of at least this
 	// many units need two admins; 0 (default) turns it off.
 	SecondApprovalQuantity int64
@@ -57,7 +59,18 @@ func Load() (Config, error) {
 		}
 		secondApproval = v
 	}
-	return Config{OrderServiceURL: orderURL, ExpiryEnabled: expiry, SecondApprovalQuantity: secondApproval,
+	stockSelfService := false
+	if raw := os.Getenv("FEATURE_STOCK_SELF_SERVICE_ENABLED"); raw != "" {
+		stockSelfService, err = strconv.ParseBool(raw)
+		if err != nil {
+			return Config{}, fmt.Errorf("FEATURE_STOCK_SELF_SERVICE_ENABLED must be a boolean")
+		}
+	}
+	notificationURL := os.Getenv("NOTIFICATION_SERVICE_URL")
+	if notificationURL == "" {
+		notificationURL = "http://notification:8090"
+	}
+	return Config{StockSelfServiceEnabled: stockSelfService, NotificationServiceURL: notificationURL, OrderServiceURL: orderURL, ExpiryEnabled: expiry, SecondApprovalQuantity: secondApproval,
 		Base:              base,
 		VendorServiceURL:  vendorServiceURL,
 		CatalogServiceURL: catalogServiceURL,

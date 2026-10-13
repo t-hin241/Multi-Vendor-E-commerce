@@ -8,10 +8,11 @@ import (
 	"net/mail"
 	"time"
 
-	"golang.org/x/crypto/bcrypt"
 	"shopee/backend/pkg/apperror"
 	"shopee/backend/services/identity/internal/domain"
 	"shopee/backend/services/identity/internal/repository"
+
+	"golang.org/x/crypto/bcrypt"
 )
 
 type AccountStore interface {

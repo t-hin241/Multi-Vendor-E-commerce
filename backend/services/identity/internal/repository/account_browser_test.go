@@ -8,14 +8,15 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gin-gonic/gin"
-	"github.com/redis/go-redis/v9"
-	"github.com/rs/zerolog"
 	"shopee/backend/pkg/middleware"
 	"shopee/backend/services/identity/internal/config"
 	"shopee/backend/services/identity/internal/repository"
 	"shopee/backend/services/identity/internal/transport"
 	"shopee/backend/services/identity/internal/usecase"
+
+	"github.com/gin-gonic/gin"
+	"github.com/redis/go-redis/v9"
+	"github.com/rs/zerolog"
 )
 
 var accountBrowserServer = flag.Bool("account-browser-server", false, "serve the isolated AF-12 browser fixture")

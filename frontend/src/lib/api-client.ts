@@ -451,6 +451,9 @@ export function updateVariantPrice(
 // ---------- Inventory ----------
 
 export type InventoryItem = {
+  version?: number;
+  low_stock_threshold?: number;
+  alert_enabled?: boolean;
   id: string;
   product_id: string;
   variant_id: string | null;
@@ -3088,7 +3091,7 @@ export function retryNotification(
 
 // ---------- AF-08: shop work notices ----------
 
-export type VendorNoticeCategory = "orders" | "returns" | "finance" | "support";
+export type VendorNoticeCategory = "orders" | "returns" | "finance" | "support" | "inventory";
 
 // A person's own choices. The owner of a shop receives every category
 // whatever is stored; staff receive only what they opted into. Shop

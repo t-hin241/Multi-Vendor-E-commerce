@@ -7,6 +7,7 @@ import { VariantPriceEditor } from "./variant-price-editor";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { RestockStatusBadge } from "@/components/vendor/status-badges";
+import { StockSelfService } from "./stock-self-service";
 import { StockCountForm } from "@/components/vendor/stock-count-form";
 import { VariantGenerator } from "@/components/vendor/variant-generator";
 import * as api from "@/lib/api-client";
@@ -206,6 +207,7 @@ export function PlainStockEditor({
       {error && <p className="text-xs text-destructive">{error}</p>}
       <RestockRequestStatusList requests={pendingRequests} />
       {item && <StockCountForm item={item} onRecorded={onChanged} />}
+      {item && <StockSelfService key={item.id} item={item} onChanged={onChanged} />}
     </div>
   );
 }
@@ -302,6 +304,7 @@ export function VariantStockRow({
       <VariantPriceEditor key={`${variant.id}:${variant.pricing_version}`} variant={variant} />
       <RestockRequestStatusList requests={pendingRequests} />
       {item && <StockCountForm item={item} onRecorded={onChanged} />}
+      {item && <StockSelfService key={item.id} item={item} onChanged={onChanged} />}
     </li>
   );
 }

@@ -9,6 +9,11 @@ import * as api from "@/lib/api-client";
 import { describeApiError } from "@/lib/errors";
 
 const labels: Record<string, string> = {
+  stock_approval_pending: "Phiếu kho chờ duyệt",
+  stock_shortages: "Thiếu hàng đang giữ",
+  stock_alerts_parked: "Cảnh báo kho chưa gửi được",
+  stock_adjustments_applied_24h: "Điều chỉnh kho trong 24 giờ",
+  negative_stock: "Tồn kho âm (phải bằng 0)",
   held: "Đơn đang giữ hàng",
   overdue: "Hold quá hạn",
   legacy_held: "Hold cũ cần đối soát",

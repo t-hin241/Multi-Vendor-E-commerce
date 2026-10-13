@@ -67,6 +67,7 @@ var inboxTargets = map[Type]inboxTarget{
 	TypeRefundDestinationNeeded:    {"order", "/orders/%s"},
 	TypeRefundDestinationRejected:  {"order", "/orders/%s"},
 
+	TypeVendorLowStock:              {"stock_item", "/vendor/inventory"},
 	TypeVendorNewOrder:              {"vendor_order", "/vendor/orders"},
 	TypeVendorCancellationRequested: {"cancellation", "/vendor/orders"},
 	TypeVendorReturnRequested:       {"return", "/vendor/orders"},

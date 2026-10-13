@@ -310,6 +310,31 @@ func TestSupportNoticesHaveTheirOwnCategory(t *testing.T) {
 	}
 }
 
+func TestInventoryLowStockEpisodeDeduplicatesForOwnerAndStaff(t *testing.T) {
+	e := newShopEnv(t)
+	uc := e.useCase(roles{})
+	cats := []string{"inventory"}
+	if _, err := uc.UpdatePreferences(t.Context(), e.clerk, usecase.PreferenceChange{VendorCategories: &cats}); err != nil {
+		t.Fatal(err)
+	}
+	req := domain.VendorActionRequest{Source: "inventory", EventID: uuid.NewString(), VendorID: e.shop, ActionKind: "low_stock", ReferenceID: uuid.NewString()}
+	first, duplicate, err := uc.Record(t.Context(), req)
+	if err != nil || duplicate {
+		t.Fatalf("record %+v %v", first, err)
+	}
+	again, duplicate, err := uc.Record(t.Context(), req)
+	if err != nil || !duplicate || again.ID != first.ID {
+		t.Fatalf("replay %+v %v", again, err)
+	}
+	e.resolve(t)
+	if n := e.count(t, `SELECT count(*) FROM notifications WHERE type='vendor_low_stock' AND user_id IN ($1,$2)`, e.owner, e.clerk); n != 2 {
+		t.Fatalf("owner and opted in staff: %d", n)
+	}
+	if n := e.count(t, `SELECT count(*) FROM notifications WHERE type='vendor_low_stock' AND user_id=$1`, e.other); n != 0 {
+		t.Fatal("sent without opt in")
+	}
+}
+
 // PW-045: an event nobody may receive becomes an admin work item (AF-07)
 // in the same transaction; the retry ends it, and the deadline worker
 // tells the on-call admin as a notification recorded here.

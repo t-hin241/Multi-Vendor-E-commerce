@@ -105,7 +105,7 @@ type VendorActionRoutes struct {
 // RegisterVendorActions adds the internal report route (Order, Payment),
 // the person's own preferences and the admin review of events.
 func RegisterVendorActions(r gin.IRoutes, jwt *authjwt.Manager, internal *serviceauth.Verifier, adminGuard gin.HandlerFunc, h VendorActionRoutes) {
-	r.POST("/internal/vendor-action-notices", internal.Allow("order", "payment"), h.report)
+	r.POST("/internal/vendor-action-notices", internal.Allow("order", "payment", "inventory"), h.report)
 	auth := middleware.RequireAuth(jwt)
 	noStore := func(c *gin.Context) { c.Header("Cache-Control", "no-store"); c.Next() }
 	r.GET("/api/notifications/preferences", auth, noStore, h.preferences)

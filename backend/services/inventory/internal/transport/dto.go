@@ -20,6 +20,9 @@ type restockRequest struct {
 }
 
 type itemResponse struct {
+	Version           int64     `json:"version"`
+	LowStockThreshold int64     `json:"low_stock_threshold"`
+	AlertEnabled      bool      `json:"alert_enabled"`
 	ID                string    `json:"id"`
 	ProductID         string    `json:"product_id" binding:"omitempty,uuid"`
 	VariantID         *string   `json:"variant_id,omitempty"`
@@ -32,6 +35,7 @@ type itemResponse struct {
 
 func toItemResponse(i *domain.InventoryItem) itemResponse {
 	return itemResponse{
+		Version: i.Version, LowStockThreshold: i.LowStockThreshold, AlertEnabled: i.AlertEnabled,
 		ID:                i.ID,
 		ProductID:         i.ProductID,
 		VariantID:         i.VariantID,

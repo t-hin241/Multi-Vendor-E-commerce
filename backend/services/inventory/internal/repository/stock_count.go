@@ -15,9 +15,9 @@ import (
 func (r *InventoryItemRepository) FindByID(ctx context.Context, id string) (*domain.InventoryItem, error) {
 	var item domain.InventoryItem
 	err := connection(ctx, r.pool).QueryRow(ctx, `
-		SELECT id, product_id, variant_id, vendor_id, available_quantity, reserved_quantity, created_at, updated_at
+		SELECT id, product_id, variant_id, vendor_id, available_quantity, reserved_quantity, created_at, updated_at, version, low_stock_threshold, alert_enabled
 		FROM inventory_items WHERE id = $1`, id).Scan(
-		&item.ID, &item.ProductID, &item.VariantID, &item.VendorID, &item.AvailableQuantity, &item.ReservedQuantity, &item.CreatedAt, &item.UpdatedAt)
+		&item.ID, &item.ProductID, &item.VariantID, &item.VendorID, &item.AvailableQuantity, &item.ReservedQuantity, &item.CreatedAt, &item.UpdatedAt, &item.Version, &item.LowStockThreshold, &item.AlertEnabled)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrItemNotFound
 	}

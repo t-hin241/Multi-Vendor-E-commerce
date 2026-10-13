@@ -28,10 +28,10 @@ func (r *InventoryItemRepository) create(ctx context.Context, item *domain.Inven
 	const query = `
 		INSERT INTO inventory_items (product_id, variant_id, vendor_id, available_quantity)
 		VALUES ($1, $2, $3, $4)
-		RETURNING id, reserved_quantity, created_at, updated_at`
+		RETURNING id, reserved_quantity, created_at, updated_at, version, low_stock_threshold, alert_enabled`
 
 	err := connection(ctx, r.pool).QueryRow(ctx, query, item.ProductID, item.VariantID, item.VendorID, item.AvailableQuantity).
-		Scan(&item.ID, &item.ReservedQuantity, &item.CreatedAt, &item.UpdatedAt)
+		Scan(&item.ID, &item.ReservedQuantity, &item.CreatedAt, &item.UpdatedAt, &item.Version, &item.LowStockThreshold, &item.AlertEnabled)
 	if err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
@@ -47,12 +47,12 @@ func (r *InventoryItemRepository) create(ctx context.Context, item *domain.Inven
 
 func (r *InventoryItemRepository) FindByProductID(ctx context.Context, productID string) (*domain.InventoryItem, error) {
 	const query = `
-		SELECT id, product_id, variant_id, vendor_id, available_quantity, reserved_quantity, created_at, updated_at
+		SELECT id, product_id, variant_id, vendor_id, available_quantity, reserved_quantity, created_at, updated_at, version, low_stock_threshold, alert_enabled
 		FROM inventory_items WHERE product_id = $1 AND variant_id IS NULL`
 
 	var item domain.InventoryItem
 	err := connection(ctx, r.pool).QueryRow(ctx, query, productID).Scan(
-		&item.ID, &item.ProductID, &item.VariantID, &item.VendorID, &item.AvailableQuantity, &item.ReservedQuantity, &item.CreatedAt, &item.UpdatedAt)
+		&item.ID, &item.ProductID, &item.VariantID, &item.VendorID, &item.AvailableQuantity, &item.ReservedQuantity, &item.CreatedAt, &item.UpdatedAt, &item.Version, &item.LowStockThreshold, &item.AlertEnabled)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrItemNotFound
@@ -64,12 +64,12 @@ func (r *InventoryItemRepository) FindByProductID(ctx context.Context, productID
 
 func (r *InventoryItemRepository) FindByVariantID(ctx context.Context, variantID string) (*domain.InventoryItem, error) {
 	const query = `
-		SELECT id, product_id, variant_id, vendor_id, available_quantity, reserved_quantity, created_at, updated_at
+		SELECT id, product_id, variant_id, vendor_id, available_quantity, reserved_quantity, created_at, updated_at, version, low_stock_threshold, alert_enabled
 		FROM inventory_items WHERE variant_id = $1`
 
 	var item domain.InventoryItem
 	err := connection(ctx, r.pool).QueryRow(ctx, query, variantID).Scan(
-		&item.ID, &item.ProductID, &item.VariantID, &item.VendorID, &item.AvailableQuantity, &item.ReservedQuantity, &item.CreatedAt, &item.UpdatedAt)
+		&item.ID, &item.ProductID, &item.VariantID, &item.VendorID, &item.AvailableQuantity, &item.ReservedQuantity, &item.CreatedAt, &item.UpdatedAt, &item.Version, &item.LowStockThreshold, &item.AlertEnabled)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrItemNotFound
@@ -108,7 +108,7 @@ func (r *InventoryItemRepository) ListByVariantIDs(ctx context.Context, variantI
 
 func (r *InventoryItemRepository) ListByVendor(ctx context.Context, vendorID string, limit, offset int) ([]*domain.InventoryItem, error) {
 	const query = `
-		SELECT id, product_id, variant_id, vendor_id, available_quantity, reserved_quantity, created_at, updated_at
+		SELECT id, product_id, variant_id, vendor_id, available_quantity, reserved_quantity, created_at, updated_at, version, low_stock_threshold, alert_enabled
 		FROM inventory_items WHERE vendor_id = $1 ORDER BY created_at DESC,id DESC LIMIT $2 OFFSET $3`
 
 	rows, err := connection(ctx, r.pool).Query(ctx, query, vendorID, limit, offset)
@@ -120,7 +120,7 @@ func (r *InventoryItemRepository) ListByVendor(ctx context.Context, vendorID str
 	var items []*domain.InventoryItem
 	for rows.Next() {
 		var item domain.InventoryItem
-		if err := rows.Scan(&item.ID, &item.ProductID, &item.VariantID, &item.VendorID, &item.AvailableQuantity, &item.ReservedQuantity, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := rows.Scan(&item.ID, &item.ProductID, &item.VariantID, &item.VendorID, &item.AvailableQuantity, &item.ReservedQuantity, &item.CreatedAt, &item.UpdatedAt, &item.Version, &item.LowStockThreshold, &item.AlertEnabled); err != nil {
 			return nil, err
 		}
 		items = append(items, &item)

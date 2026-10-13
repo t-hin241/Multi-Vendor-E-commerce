@@ -6,13 +6,14 @@ import (
 	"net/http"
 	"strconv"
 
-	"github.com/gin-gonic/gin"
-	"github.com/rs/zerolog"
 	"shopee/backend/pkg/authjwt"
 	"shopee/backend/pkg/httpresponse"
 	"shopee/backend/pkg/middleware"
 	"shopee/backend/services/identity/internal/domain"
 	"shopee/backend/services/identity/internal/usecase"
+
+	"github.com/gin-gonic/gin"
+	"github.com/rs/zerolog"
 )
 
 type AccountHandler struct {

@@ -22,12 +22,14 @@ const (
 	PurposeFinance = "finance"
 	// PurposeSupport (PW-009): support cases waiting for the shop
 	// (support.reply).
-	PurposeSupport = "support"
+	PurposeSupport          = "support"
+	PurposeInventory        = "inventory"
+	TypeVendorLowStock Type = "vendor_low_stock"
 )
 
 // VendorCategories are the optional categories a staff member may opt
 // into. The owner always receives every category.
-var VendorCategories = []string{PurposeOrders, PurposeReturns, PurposeFinance, PurposeSupport}
+var VendorCategories = []string{PurposeOrders, PurposeReturns, PurposeFinance, PurposeSupport, PurposeInventory}
 
 // Shop notice templates.
 const (
@@ -58,6 +60,7 @@ type vendorActionKind struct {
 // another producer sends is refused, so Payment cannot announce an order
 // and Order cannot announce a payout.
 var vendorActionKinds = map[string]vendorActionKind{
+	"inventory:low_stock":           {PurposeInventory, TypeVendorLowStock},
 	"order:new_order":               {PurposeOrders, TypeVendorNewOrder},
 	"order:cancellation_requested":  {PurposeOrders, TypeVendorCancellationRequested},
 	"order:return_requested":        {PurposeReturns, TypeVendorReturnRequested},
@@ -202,7 +205,7 @@ func NormalizeVendorCategories(in []string) ([]string, error) {
 	for _, c := range in {
 		c = strings.TrimSpace(c)
 		if !slices.Contains(VendorCategories, c) {
-			return nil, fmt.Errorf("unknown category %q; use orders, returns, finance or support", c)
+			return nil, fmt.Errorf("unknown category %q; use orders, returns, finance, support or inventory", c)
 		}
 		if !slices.Contains(out, c) {
 			out = append(out, c)

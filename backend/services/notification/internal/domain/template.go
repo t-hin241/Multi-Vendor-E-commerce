@@ -16,6 +16,7 @@ type Template struct {
 }
 
 var templates = map[Type]Template{
+	TypeVendorLowStock: {"v1", "Tồn kho thấp cho mã kho %s", "Mã kho %s đã xuống dưới ngưỡng cảnh báo. Mở /vendor/inventory để kiểm tra và bổ sung hàng theo chứng từ."},
 	"sla_support":      {"v1", "Hồ sơ hỗ trợ #%s cần được xử lý", "Hồ sơ đến hạn hoặc đã quá hạn. Mở /admin/support/%s để kiểm tra và xử lý theo quyền của bạn."},
 	"sla_return":       {"v1", "Yêu cầu trả hàng #%s cần được xử lý", "Yêu cầu đến hạn hoặc đã quá hạn. Mở /admin/returns?return_id=%s để kiểm tra. Thông báo này không phê duyệt hoàn tiền."},
 	"sla_refund":       {"v1", "Yêu cầu hoàn tiền #%s cần được xử lý", "Yêu cầu đến hạn hoặc đã quá hạn. Mở /admin/refunds?refund_id=%s để kiểm tra. Thông báo này không xác nhận tiền đã được hoàn."},
