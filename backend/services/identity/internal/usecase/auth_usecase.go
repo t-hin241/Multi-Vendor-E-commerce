@@ -141,7 +141,7 @@ func (uc *AuthUseCase) login(ctx context.Context, checked *domain.User) (*AuthRe
 		}
 		return nil, apperror.Internal(err)
 	}
-	if !user.IsActive || user.PasswordHash != checked.PasswordHash {
+	if !user.IsActive || user.PasswordHash != checked.PasswordHash || user.AuthVersion != checked.AuthVersion || user.Email != checked.Email {
 		return nil, apperror.Unauthorized("Invalid email or password")
 	}
 	return uc.issueTokens(ctx, user)

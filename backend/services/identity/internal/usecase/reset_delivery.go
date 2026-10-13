@@ -2,6 +2,7 @@ package usecase
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/url"
 	"time"
@@ -27,6 +28,7 @@ type ResetDeliveryUseCase struct {
 	ResetURL string
 	// VerifyURL is the page an email verification link opens (PW-022).
 	VerifyURL string
+	ChangeURL string
 	Log       zerolog.Logger
 }
 type ResetMessage struct {
@@ -45,7 +47,20 @@ func (u *ResetDeliveryUseCase) Message(ctx context.Context, id string) (*ResetMe
 	if err != nil {
 		return nil, err
 	}
+	if d.Kind == "email_change" || d.Kind == "email_changed" {
+		var material accountEmailMaterial
+		if err := json.Unmarshal([]byte(token), &material); err != nil {
+			return nil, err
+		}
+		d.Email, token = material.Email, material.Token
+		if d.Kind == "email_changed" {
+			return &ResetMessage{Email: d.Email, Kind: d.Kind}, nil
+		}
+	}
 	base := u.ResetURL
+	if d.Kind == "email_change" {
+		base = u.ChangeURL
+	}
 	if d.Kind == "email_verification" {
 		base = u.VerifyURL
 	}

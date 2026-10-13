@@ -61,6 +61,17 @@ func (r EmailVerificationRepository) LastIssued(ctx context.Context, userID stri
 // for an address the account no longer has.
 func (r EmailVerificationRepository) Use(ctx context.Context, hash string) (userID string, err error) {
 	q := connection(ctx, r.Pool)
+	// Match the user-first lock order of resend and email change.
+	var owner string
+	if err := q.QueryRow(ctx, `SELECT user_id FROM email_verification_tokens WHERE token_hash=$1`, hash).Scan(&owner); errors.Is(err, pgx.ErrNoRows) {
+		return "", ErrVerificationNotFound
+	} else if err != nil {
+		return "", err
+	}
+	var locked string
+	if err := q.QueryRow(ctx, `SELECT id FROM users WHERE id=$1 FOR UPDATE`, owner).Scan(&locked); err != nil {
+		return "", err
+	}
 	var v EmailVerification
 	err = q.QueryRow(ctx, `SELECT id, user_id, email, expires_at, used_at FROM email_verification_tokens WHERE token_hash = $1 FOR UPDATE`, hash).
 		Scan(&v.ID, &v.UserID, &v.Email, &v.ExpiresAt, &v.UsedAt)
@@ -84,5 +95,14 @@ func (r EmailVerificationRepository) Use(ctx context.Context, hash string) (user
 	if tag.RowsAffected() == 0 {
 		return "", ErrVerificationNotFound
 	}
+	if _, err := q.Exec(ctx, `UPDATE password_reset_deliveries SET encrypted_token=NULL,status='expired',lease_until=NULL WHERE verification_id=$1 AND encrypted_token IS NOT NULL`, v.ID); err != nil {
+		return "", err
+	}
 	return v.UserID, nil
+}
+
+func (r EmailVerificationRepository) IssuedInHour(ctx context.Context, userID string) (int, error) {
+	var count int
+	err := connection(ctx, r.Pool).QueryRow(ctx, `SELECT count(*) FROM email_verification_tokens WHERE user_id=$1 AND created_at>now()-interval '1 hour'`, userID).Scan(&count)
+	return count, err
 }

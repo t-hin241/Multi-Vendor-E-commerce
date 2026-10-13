@@ -43,9 +43,12 @@ func (r *PasswordResetRepository) ReadDelivery(ctx context.Context, id string) (
 		JOIN users u ON u.id=d.user_id
 		LEFT JOIN password_reset_tokens t ON t.id=d.reset_id
 		LEFT JOIN email_verification_tokens v ON v.id=d.verification_id
-		WHERE d.id=$1 AND d.status='sending' AND d.lease_until>now() AND d.expires_at>now() AND u.is_active
+ LEFT JOIN email_change_operations o ON o.id=d.email_change_id
+		WHERE d.id=$1 AND d.status='sending' AND d.lease_until>now() AND d.expires_at>now() AND (u.is_active OR d.kind='email_changed')
 		  AND ((d.kind='password_reset' AND t.used_at IS NULL AND t.expires_at>now())
-		    OR (d.kind='email_verification' AND v.used_at IS NULL AND v.expires_at>now()))`, id).Scan(&d.ID, &d.UserID, &d.Email, &d.EncryptedToken, &d.Kind)
+		    OR (d.kind='email_verification' AND v.used_at IS NULL AND v.expires_at>now() AND lower(btrim(v.email))=lower(btrim(u.email)))
+ OR (d.kind='email_change' AND o.used_at IS NULL AND o.expires_at>now() AND o.auth_version=u.auth_version)
+ OR (d.kind='email_changed' AND o.used_at IS NOT NULL))`, id).Scan(&d.ID, &d.UserID, &d.Email, &d.EncryptedToken, &d.Kind)
 	return d, err
 }
 func (r *PasswordResetRepository) FinishDelivery(ctx context.Context, id string, success bool) error {

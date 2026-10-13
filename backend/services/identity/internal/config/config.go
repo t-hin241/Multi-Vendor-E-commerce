@@ -7,11 +7,16 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"time"
 
 	baseconfig "shopee/backend/pkg/config"
 )
 
 type Config struct {
+	AccountSelfService                                               bool
+	EmailVerifyTTL                                                   time.Duration
+	AccountTokenRetention                                            time.Duration
+	ChangeEmailURL                                                   string
 	Base                                                             baseconfig.Base
 	ServiceKey, ResetDeliveryKey, RateKey, NotificationURL, ResetURL string
 	// Internal verifies calling services (PLT-01).
@@ -83,6 +88,27 @@ func Load() (Config, error) {
 	default:
 		return c, fmt.Errorf("FEATURE_EMAIL_VERIFICATION_ENABLED must be true or false")
 	}
+	switch os.Getenv("FEATURE_ACCOUNT_SELF_SERVICE_ENABLED") {
+	case "", "false":
+	case "true":
+		c.AccountSelfService = true
+	default:
+		return c, fmt.Errorf("FEATURE_ACCOUNT_SELF_SERVICE_ENABLED must be true or false")
+	}
+	c.EmailVerifyTTL = 30 * time.Minute
+	if raw := os.Getenv("EMAIL_VERIFY_TTL"); raw != "" {
+		c.EmailVerifyTTL, err = time.ParseDuration(raw)
+		if err != nil || c.EmailVerifyTTL < time.Minute || c.EmailVerifyTTL > 30*time.Minute {
+			return c, fmt.Errorf("EMAIL_VERIFY_TTL must be between 1m and 30m")
+		}
+	}
+	c.AccountTokenRetention = 24 * time.Hour
+	if raw := os.Getenv("ACCOUNT_TOKEN_RETENTION"); raw != "" {
+		c.AccountTokenRetention, err = time.ParseDuration(raw)
+		if err != nil || c.AccountTokenRetention < time.Hour || c.AccountTokenRetention > 30*24*time.Hour {
+			return c, fmt.Errorf("ACCOUNT_TOKEN_RETENTION must be between 1h and 720h")
+		}
+	}
 	secure := c.Base.Env == "production" || c.Base.Env == "staging"
 	// Keys the HMAC that turns email and IP into rate-limit keys, so Redis
 	// never holds an email address. Its own secret: it used to be the token
@@ -107,11 +133,18 @@ func Load() (Config, error) {
 	if reset.Fragment != "" || reset.RawQuery != "" || (secure && reset.Scheme != "https") {
 		return c, fmt.Errorf("password reset URL must have no query/fragment and use HTTPS in staging/production")
 	}
-	if c.EmailVerification {
+	if c.EmailVerification || c.AccountSelfService {
 		c.VerifyURL = os.Getenv("IDENTITY_EMAIL_VERIFY_URL")
 		v, e := url.Parse(c.VerifyURL)
 		if e != nil || v.Host == "" || v.User != nil || v.Fragment != "" || v.RawQuery != "" || (v.Scheme != "http" && v.Scheme != "https") || (secure && v.Scheme != "https") {
 			return c, fmt.Errorf("IDENTITY_EMAIL_VERIFY_URL must be an absolute URL without query/fragment (HTTPS in staging/production)")
+		}
+	}
+	if c.AccountSelfService {
+		c.ChangeEmailURL = os.Getenv("IDENTITY_EMAIL_CHANGE_URL")
+		v, e := url.Parse(c.ChangeEmailURL)
+		if e != nil || v.Host == "" || v.User != nil || v.Fragment != "" || v.RawQuery != "" || (v.Scheme != "http" && v.Scheme != "https") || (secure && v.Scheme != "https") {
+			return c, fmt.Errorf("IDENTITY_EMAIL_CHANGE_URL must be an absolute URL without query/fragment (HTTPS in staging/production)")
 		}
 	}
 	for _, raw := range strings.Split(os.Getenv("IDENTITY_ALLOWED_ORIGINS"), ",") {

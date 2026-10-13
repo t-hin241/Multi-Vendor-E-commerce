@@ -276,6 +276,10 @@ services:
       IDENTITY_PASSWORD_RESET_URL: ${IDENTITY_PASSWORD_RESET_URL:-http://localhost:3000/reset-password}
       # PW-022: email verification links (off by default).
       FEATURE_EMAIL_VERIFICATION_ENABLED: ${FEATURE_EMAIL_VERIFICATION_ENABLED:-false}
+      FEATURE_ACCOUNT_SELF_SERVICE_ENABLED: ${FEATURE_ACCOUNT_SELF_SERVICE_ENABLED:-false}
+      EMAIL_VERIFY_TTL: ${EMAIL_VERIFY_TTL:-30m}
+      ACCOUNT_TOKEN_RETENTION: ${ACCOUNT_TOKEN_RETENTION:-24h}
+      IDENTITY_EMAIL_CHANGE_URL: ${IDENTITY_EMAIL_CHANGE_URL:-http://localhost:3000/change-email}
       IDENTITY_EMAIL_VERIFY_URL: ${IDENTITY_EMAIL_VERIFY_URL:-http://localhost:3000/verify-email}
       # PW-028: admin authenticator apps (secret key from the secret store).
       IDENTITY_MFA_ENCRYPTION_KEY: ${IDENTITY_MFA_ENCRYPTION_KEY:-}

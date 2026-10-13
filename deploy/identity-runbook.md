@@ -242,7 +242,7 @@ Xem `deploy/admin-permissions-runbook.md`: migration, cờ `FEATURE_ADMIN_SCOPED
 
 ## Xác minh email (PW-022, 2026-10-10)
 
-- `FEATURE_EMAIL_VERIFICATION_ENABLED=true` cùng `IDENTITY_EMAIL_VERIFY_URL` (trang `/verify-email`, HTTPS ở staging/production): tài khoản mới nhận liên kết xác nhận (48 giờ, dùng một lần, gửi qua hàng đợi `password_reset_deliveries` với `kind = email_verification`, Notification gửi email "Confirm your email address"). Người dùng đã đăng nhập gửi lại bằng `POST /api/auth/email-verifications` (một phút một lần).
+- `FEATURE_EMAIL_VERIFICATION_ENABLED=true` cùng `IDENTITY_EMAIL_VERIFY_URL` (trang `/verify-email`, HTTPS ở staging/production): tài khoản mới nhận liên kết xác nhận (mặc định 30 phút theo `EMAIL_VERIFY_TTL`, dùng một lần, gửi qua hàng đợi `password_reset_deliveries` với `kind = email_verification`, Notification gửi email "Confirm your email address"). Người dùng đã đăng nhập gửi lại bằng `POST /api/auth/email-verifications` (một phút một lần, tối đa 5 lần/giờ/user). AF-12 bổ sung hồ sơ, mật khẩu, email và phiên tự phục vụ: xem [runbook AF-12](account-self-service-runbook.md); feature mới mặc định tắt.
 - Vendor `FEATURE_STAFF_REQUIRES_VERIFIED_EMAIL=true`: chỉ tài khoản đã xác nhận email mới nhận được lời mời nhân viên (403 `email_not_verified`, trang lời mời có nút gửi lại). Bật sau khi Identity đã bật xác minh và báo trước cho người được mời; tài khoản cũ chưa xác minh cho tới khi tự mở liên kết.
 - Migration `000006`; down từ chối khi đã có email được xác minh hoặc liên kết đã phát.
 

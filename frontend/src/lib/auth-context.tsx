@@ -28,6 +28,8 @@ type AuthContextValue = {
     role: "buyer" | "vendor",
   ) => Promise<void>;
   logout: () => Promise<void>;
+  forgetSession: () => void;
+  updateUser: (user: api.User) => void;
   callWithAuth: <T>(fn: (token: string) => Promise<T>) => Promise<T>;
 };
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -140,6 +142,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       broadcast();
     });
   }, [clearCache]);
+  const forgetSession = useCallback(() => {
+    generation++;
+    clearCache();
+    publish(null);
+    broadcast();
+  }, [clearCache]);
+  const updateUser = useCallback((user: api.User) => {
+    if (current && current !== NOT_LOADED && current.user.id === user.id) {
+      publish({ ...current, user });
+    }
+  }, []);
   const setSelectedVendorId = useCallback(
     (id: string | null) => {
       if (!current || current === NOT_LOADED) return;
@@ -190,9 +203,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       login,
       register,
       logout,
+      forgetSession,
+      updateUser,
       callWithAuth,
     }),
-    [session, snapshot, setSelectedVendorId, login, register, logout, callWithAuth],
+    [
+      session,
+      snapshot,
+      setSelectedVendorId,
+      login,
+      register,
+      logout,
+      forgetSession,
+      updateUser,
+      callWithAuth,
+    ],
   );
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

@@ -32,10 +32,10 @@ func (r *UserRepository) Create(ctx context.Context, u *domain.User) error {
 	const query = `
 		INSERT INTO users (email, password_hash, full_name, role)
 		VALUES ($1, $2, $3, $4)
-		RETURNING id, is_active, created_at, updated_at`
+		RETURNING id, is_active, created_at, updated_at, profile_version, auth_version`
 
 	err := connection(ctx, r.pool).QueryRow(ctx, query, u.Email, u.PasswordHash, u.FullName, u.Role).
-		Scan(&u.ID, &u.IsActive, &u.CreatedAt, &u.UpdatedAt)
+		Scan(&u.ID, &u.IsActive, &u.CreatedAt, &u.UpdatedAt, &u.ProfileVersion, &u.AuthVersion)
 	if err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
@@ -48,7 +48,7 @@ func (r *UserRepository) Create(ctx context.Context, u *domain.User) error {
 
 func (r *UserRepository) FindByEmail(ctx context.Context, email string) (*domain.User, error) {
 	const query = `
-		SELECT id, email, password_hash, full_name, role, is_active, created_at, updated_at, permission_version, email_verified_at
+		SELECT id, email, password_hash, full_name, role, is_active, created_at, updated_at, permission_version, email_verified_at, phone, profile_version, auth_version
 		FROM users WHERE lower(btrim(email)) = lower(btrim($1))`
 
 	return scanUser(connection(ctx, r.pool).QueryRow(ctx, query+lockUser(ctx), email))
@@ -56,14 +56,14 @@ func (r *UserRepository) FindByEmail(ctx context.Context, email string) (*domain
 
 func (r *UserRepository) FindByID(ctx context.Context, id string) (*domain.User, error) {
 	const query = `
-		SELECT id, email, password_hash, full_name, role, is_active, created_at, updated_at, permission_version, email_verified_at
+		SELECT id, email, password_hash, full_name, role, is_active, created_at, updated_at, permission_version, email_verified_at, phone, profile_version, auth_version
 		FROM users WHERE id = $1`
 
 	return scanUser(connection(ctx, r.pool).QueryRow(ctx, query+lockUser(ctx), id))
 }
 
 func (r *UserRepository) UpdatePasswordHash(ctx context.Context, userID, passwordHash string) error {
-	const query = `UPDATE users SET password_hash = $1, updated_at = now() WHERE id = $2`
+	const query = `UPDATE users SET password_hash = $1, auth_version=auth_version+1, updated_at = now() WHERE id = $2`
 	tag, err := connection(ctx, r.pool).Exec(ctx, query, passwordHash, userID)
 	if err != nil {
 		return err
@@ -78,7 +78,7 @@ func (r *UserRepository) UpdatePasswordHash(ctx context.Context, userID, passwor
 // Empty filters match all accounts.
 func (r *UserRepository) List(ctx context.Context, role, q string, limit, offset int) ([]*domain.User, error) {
 	const query = `
-		SELECT id, email, password_hash, full_name, role, is_active, created_at, updated_at, permission_version, email_verified_at
+		SELECT id, email, password_hash, full_name, role, is_active, created_at, updated_at, permission_version, email_verified_at, phone, profile_version, auth_version
 		FROM users
 		WHERE ($1 = '' OR role = $1)
 		  AND ($2 = '' OR email ILIKE '%' || $2 || '%' OR full_name ILIKE '%' || $2 || '%')
@@ -118,7 +118,7 @@ func (r *UserRepository) SetActive(ctx context.Context, userID string, isActive 
 func scanUser(row pgx.Row) (*domain.User, error) {
 	var u domain.User
 	err := row.Scan(&u.ID, &u.Email, &u.PasswordHash, &u.FullName, &u.Role, &u.IsActive, &u.CreatedAt, &u.UpdatedAt, &u.PermissionVersion,
-		&u.EmailVerifiedAt)
+		&u.EmailVerifiedAt, &u.Phone, &u.ProfileVersion, &u.AuthVersion)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrUserNotFound

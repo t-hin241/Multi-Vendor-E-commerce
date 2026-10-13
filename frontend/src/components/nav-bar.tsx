@@ -4,6 +4,8 @@ import { Menu, LogOut, ShoppingCart, Package, MapPin, Shield, Search, Store } fr
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { accountCapabilities } from "@/lib/account";
 import { toast } from "sonner";
 
 import { NotificationBell } from "@/components/notification-bell";
@@ -59,7 +61,13 @@ function initials(fullName: string) {
 }
 
 export function NavBar() {
-  const { user, logout, isReady } = useAuth();
+  const { user, logout, isReady, callWithAuth } = useAuth();
+  const account = useQuery({
+    queryKey: ["account-capabilities", user?.id],
+    queryFn: () => callWithAuth(accountCapabilities),
+    enabled: !!user,
+    retry: false,
+  });
   const router = useRouter();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [searchValue, setSearchValue] = useState("");
@@ -82,7 +90,9 @@ export function NavBar() {
   }
 
   const { shops } = useConsoleShops();
-  const roleLinks = linksForRole(user?.role, shops.length > 0);
+  const roleLinks = [...linksForRole(user?.role, shops.length > 0)];
+  if (account.data?.account_self_service)
+    roleLinks.push({ href: "/account", label: "Tài khoản của tôi", icon: Shield });
   const cartCount = cartQuery.data?.item_count ?? 0;
 
   return (

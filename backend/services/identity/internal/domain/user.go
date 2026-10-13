@@ -24,14 +24,17 @@ var SelfRegisterableRoles = map[Role]bool{
 }
 
 type User struct {
-	ID           string
-	Email        string
-	PasswordHash string
-	FullName     string
-	Role         Role
-	IsActive     bool
-	CreatedAt    time.Time
-	UpdatedAt    time.Time
+	Phone          string
+	ProfileVersion int64
+	AuthVersion    int64
+	ID             string
+	Email          string
+	PasswordHash   string
+	FullName       string
+	Role           Role
+	IsActive       bool
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
 	// PermissionVersion changes with every admin grant change (AF-19).
 	PermissionVersion int64
 	// EmailVerifiedAt (PW-022): when the account proved it owns Email.

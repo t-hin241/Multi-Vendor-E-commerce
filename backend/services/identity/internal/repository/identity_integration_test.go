@@ -193,7 +193,7 @@ func setup(t *testing.T) *fixture {
 		}
 		admin.Close()
 	})
-	for _, name := range []string{"000002_identity_core.up.sql", "000003_identity_sessions.up.sql", "000004_audit_search.up.sql", "000005_admin_permissions.up.sql", "000006_email_verification.up.sql", "000007_admin_totp.up.sql"} {
+	for _, name := range []string{"000002_identity_core.up.sql", "000003_identity_sessions.up.sql", "000004_audit_search.up.sql", "000005_admin_permissions.up.sql", "000006_email_verification.up.sql", "000007_admin_totp.up.sql", "000008_account_self_service.up.sql"} {
 		sql, e := os.ReadFile(filepath.Join("..", "..", "migrations", name))
 		if e != nil {
 			t.Fatal(e)

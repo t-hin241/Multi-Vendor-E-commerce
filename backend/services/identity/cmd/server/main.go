@@ -91,15 +91,17 @@ func main() {
 	transactions := repository.Transactions{Pool: dbPool}
 	// PW-022: email verification links travel like password reset links.
 	verifications := &usecase.EmailVerificationUseCase{Store: repository.EmailVerificationRepository{Pool: dbPool}, Users: userRepo,
-		Tx: transactions, Cipher: tokenCipher, Enabled: cfg.EmailVerification, Log: log}
+		Tx: transactions, Cipher: tokenCipher, Enabled: cfg.EmailVerification || cfg.AccountSelfService, TTL: cfg.EmailVerifyTTL, Log: log}
 	authUseCase := usecase.NewAuthUseCase(userRepo, refreshTokenRepo, passwordResetRepo, jwtManager, log, transactions, tokenCipher).
 		WithEmailVerification(verifications)
 	jwtManager.SetVerifier(authUseCase.ValidateSession)
-	resetDelivery := &usecase.ResetDeliveryUseCase{Store: passwordResetRepo, Cipher: tokenCipher, Notifier: adapter.ResetNotifier{BaseURL: cfg.NotificationURL, Key: cfg.ResetDeliveryKey}, ResetURL: cfg.ResetURL, VerifyURL: cfg.VerifyURL, Log: log}
+	resetDelivery := &usecase.ResetDeliveryUseCase{Store: passwordResetRepo, Cipher: tokenCipher, Notifier: adapter.ResetNotifier{BaseURL: cfg.NotificationURL, Key: cfg.ResetDeliveryKey}, ResetURL: cfg.ResetURL, VerifyURL: cfg.VerifyURL, ChangeURL: cfg.ChangeEmailURL, Log: log}
 	workerCtx, stopWorker := context.WithCancel(ctx)
 	workerDone := make(chan struct{})
 	go func() { defer close(workerDone); resetDelivery.Run(workerCtx) }()
 	defer func() { stopWorker(); <-workerDone }()
+	accountStore := repository.AccountRepository{Pool: dbPool}
+	accountUseCase := &usecase.AccountUseCase{Store: accountStore, Users: userRepo, Refresh: refreshTokenRepo, Resets: passwordResetRepo, Tx: transactions, Cipher: tokenCipher, Enabled: cfg.AccountSelfService, VerifyTTL: cfg.EmailVerifyTTL}
 	authHandler := transport.NewAuthHandler(authUseCase, log, cfg.Base.Env == "production" || cfg.Base.Env == "staging")
 	adminUseCase := usecase.NewAdminUseCase(userRepo, refreshTokenRepo, transactions)
 	adminHandler := transport.NewAdminHandler(adminUseCase, log)
@@ -126,6 +128,11 @@ func main() {
 			case <-workerCtx.Done():
 				return
 			case <-tick.C:
+				purgeCtx, cancel := context.WithTimeout(workerCtx, 5*time.Second)
+				if err := accountStore.Purge(purgeCtx, cfg.AccountTokenRetention); err != nil {
+					log.Warn().Msg("account_token_purge_failed")
+				}
+				cancel()
 				if _, err := (repository.AccessRepository{Pool: dbPool}).PurgeProofs(workerCtx, time.Now()); err != nil {
 					log.Warn().Msg("reauth_proof_purge_failed")
 				}
@@ -138,6 +145,7 @@ func main() {
 		health.Checker{Name: "postgres", Ping: func(ctx context.Context) error { return dbPool.Ping(ctx) }},
 		health.Checker{Name: "redis", Ping: func(ctx context.Context) error { return redisClient.Ping(ctx).Err() }},
 	)
+	transport.RegisterAccount(router, jwtManager, security, transport.AccountHandler{UseCase: accountUseCase, Log: log, Secure: cfg.Base.Env == "production" || cfg.Base.Env == "staging"})
 	transport.RegisterEmailVerification(router, jwtManager, security, transport.EmailVerificationHandler{UseCase: verifications, Log: log})
 	transport.RegisterTOTP(router, jwtManager, security, transport.TOTPHandler{UseCase: totp, Log: log})
 

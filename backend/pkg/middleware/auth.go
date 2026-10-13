@@ -12,8 +12,9 @@ import (
 )
 
 const (
-	ContextKeyUserID = "auth_user_id"
-	ContextKeyRole   = "auth_role"
+	ContextKeyUserID    = "auth_user_id"
+	ContextKeyRole      = "auth_role"
+	ContextKeySessionID = "auth_session_id"
 )
 
 // RequireAuth verifies the bearer access token on every request. It never
@@ -45,6 +46,7 @@ func RequireAuth(manager *authjwt.Manager) gin.HandlerFunc {
 			return
 		}
 
+		c.Set(ContextKeySessionID, claims.SessionID)
 		c.Set(ContextKeyUserID, claims.UserID)
 		c.Set(ContextKeyRole, claims.Role)
 		c.Next()
@@ -75,6 +77,7 @@ func OptionalAuth(manager *authjwt.Manager) gin.HandlerFunc {
 			return
 		}
 
+		c.Set(ContextKeySessionID, claims.SessionID)
 		c.Set(ContextKeyUserID, claims.UserID)
 		c.Set(ContextKeyRole, claims.Role)
 		c.Next()

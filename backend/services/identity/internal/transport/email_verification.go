@@ -18,6 +18,7 @@ func RegisterEmailVerification(r gin.IRouter, jwt *authjwt.Manager, security Sec
 	g := r.Group("/api/auth/email-verifications", security.BrowserProtection(), security.RateLimit())
 	g.POST("", middleware.RequireAuth(jwt), h.Resend)
 	g.POST("/confirmations", h.Confirm)
+	g.POST("/confirm", h.Confirm)
 }
 
 // EmailVerificationHandler serves PW-022: resend a link to the signed-in

@@ -18,7 +18,7 @@ import (
 // from verified addresses once FEATURE_STAFF_REQUIRES_VERIFIED_EMAIL is on.
 
 const (
-	emailVerificationTTL  = 48 * time.Hour
+	emailVerificationTTL  = 30 * time.Minute
 	emailVerificationWait = time.Minute
 )
 
@@ -26,6 +26,7 @@ const (
 type EmailVerificationStore interface {
 	Issue(ctx context.Context, userID, email, hash string, encrypted []byte, expires time.Time) error
 	LastIssued(ctx context.Context, userID string) (time.Time, error)
+	IssuedInHour(context.Context, string) (int, error)
 	Use(ctx context.Context, hash string) (string, error)
 }
 
@@ -36,6 +37,7 @@ type EmailVerificationUseCase struct {
 	Cipher *TokenCipher
 	// Enabled is FEATURE_EMAIL_VERIFICATION_ENABLED: off sends no link and
 	// refuses the endpoints (nothing is required of accounts either).
+	TTL     time.Duration
 	Enabled bool
 	Log     zerolog.Logger
 }
@@ -58,7 +60,11 @@ func (u *EmailVerificationUseCase) issue(ctx context.Context, user *domain.User)
 	if err != nil {
 		return apperror.Internal(err)
 	}
-	if err := u.Store.Issue(ctx, user.ID, user.Email, hashToken(token), encrypted, time.Now().Add(emailVerificationTTL)); err != nil {
+	ttl := u.TTL
+	if ttl == 0 {
+		ttl = emailVerificationTTL
+	}
+	if err := u.Store.Issue(ctx, user.ID, user.Email, hashToken(token), encrypted, time.Now().Add(ttl)); err != nil {
 		return apperror.Internal(err)
 	}
 	u.Log.Info().Str("event", "email_verification_queued").Msg("identity_security_event")
@@ -84,6 +90,9 @@ func (u *EmailVerificationUseCase) Resend(ctx context.Context, userID string) er
 		if err != nil {
 			return apperror.Internal(err)
 		}
+		if !user.IsActive {
+			return apperror.Unauthorized("Please sign in again")
+		}
 		if user.EmailVerifiedAt != nil {
 			return errAlreadyVerified
 		}
@@ -91,7 +100,11 @@ func (u *EmailVerificationUseCase) Resend(ctx context.Context, userID string) er
 		if err != nil {
 			return apperror.Internal(err)
 		}
-		if time.Since(last) < emailVerificationWait {
+		count, err := u.Store.IssuedInHour(ctx, user.ID)
+		if err != nil {
+			return apperror.Internal(err)
+		}
+		if time.Since(last) < emailVerificationWait || count >= 5 {
 			return errTooSoon
 		}
 		return u.issue(ctx, user)
@@ -112,6 +125,9 @@ func (u *EmailVerificationUseCase) Confirm(ctx context.Context, token string) er
 			return errLinkInvalid
 		}
 		if err != nil {
+			return apperror.Internal(err)
+		}
+		if err := u.Users.Audit(ctx, userID, userID, "email_verified", "Email ownership confirmed"); err != nil {
 			return apperror.Internal(err)
 		}
 		u.Log.Info().Str("event", "email_verified").Str("user_id", userID).Msg("identity_security_event")

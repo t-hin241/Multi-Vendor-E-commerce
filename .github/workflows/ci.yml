@@ -405,6 +405,47 @@ jobs:
       - run: npm test
       - run: npm run build
 
+  account-e2e:
+    name: AF-12 browser E2E (real Identity + PostgreSQL + Redis)
+    runs-on: ubuntu-latest
+    needs: pins
+    services:
+      postgres:
+        image: ${{ needs.pins.outputs.postgres }}
+        env:
+          POSTGRES_USER: identity_test
+          POSTGRES_DB: identity_test
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports: ["55431:5432"]
+        options: --health-cmd "pg_isready -U identity_test -d identity_test" --health-interval 5s --health-timeout 3s --health-retries 10
+      redis:
+        image: ${{ needs.pins.outputs.redis }}
+        ports: ["56391:6379"]
+        options: --health-cmd "redis-cli ping" --health-interval 5s --health-timeout 3s --health-retries 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: backend/services/identity/go.mod
+          cache-dependency-path: backend/services/identity/go.sum
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "24"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+        working-directory: frontend
+      - run: npx playwright install --with-deps chromium
+        working-directory: frontend
+      - run: npx playwright test --config=playwright.account.config.ts
+        working-directory: frontend
+      - uses: actions/upload-artifact@v6
+        if: failure()
+        with:
+          name: account-e2e-results
+          path: frontend/test-results
+          retention-days: 7
+
   frontend-e2e:
     name: Frontend browser E2E (mocked gateway)
     runs-on: ubuntu-latest
