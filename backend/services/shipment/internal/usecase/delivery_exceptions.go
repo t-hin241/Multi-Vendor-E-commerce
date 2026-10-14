@@ -3,6 +3,7 @@ package usecase
 import (
 	"context"
 	"errors"
+	"net/http"
 	"strconv"
 	"strings"
 
@@ -122,14 +123,38 @@ func (uc *ShipmentUseCase) CreateReplacementAttempt(ctx context.Context, in Repl
 	if !uc.DeliveryResolution {
 		return nil, domain.DeliveryResolutionDisabled()
 	}
-	if existing, err := uc.Shipments.FindByReplacementOperation(ctx, in.OperationID); err == nil {
-		if existing.VendorOrderID != in.VendorOrderID || existing.AttemptNo != in.AttemptNo {
-			return nil, apperror.Conflict("operation_id was used for another attempt")
+	if existing, err := uc.replacementOperation(ctx, in); existing != nil || err != nil {
+		return existing, err
+	}
+	shipment, err := uc.createReplacementAttempt(ctx, in)
+	var app *apperror.Error
+	if errors.As(err, &app) && app.Status == http.StatusConflict {
+		// Another request may commit after the initial lookup, before either
+		// the latest-attempt check or a unique constraint rejects this one.
+		// Reconcile the operation after the write transaction has rolled back.
+		if existing, replayErr := uc.replacementOperation(ctx, in); existing != nil || replayErr != nil {
+			return existing, replayErr
 		}
-		return existing, nil
-	} else if !errors.Is(err, repository.ErrShipmentNotFound) {
+	}
+	return shipment, err
+}
+
+func (uc *ShipmentUseCase) replacementOperation(ctx context.Context, in ReplacementAttempt) (*domain.Shipment, error) {
+	existing, err := uc.Shipments.FindByReplacementOperation(ctx, in.OperationID)
+	if errors.Is(err, repository.ErrShipmentNotFound) {
+		return nil, nil
+	}
+	if err != nil {
 		return nil, apperror.Internal(err)
 	}
+	if existing.VendorOrderID != in.VendorOrderID || existing.AttemptNo != in.AttemptNo ||
+		existing.OriginalShipmentID == nil || *existing.OriginalShipmentID != in.OriginalShipmentID {
+		return nil, apperror.Conflict("operation_id was used for another attempt")
+	}
+	return existing, nil
+}
+
+func (uc *ShipmentUseCase) createReplacementAttempt(ctx context.Context, in ReplacementAttempt) (*domain.Shipment, error) {
 	original, err := uc.load(ctx, in.OriginalShipmentID)
 	if err != nil {
 		return nil, err
@@ -188,9 +213,6 @@ func (uc *ShipmentUseCase) CreateReplacementAttempt(ctx context.Context, in Repl
 	case errors.Is(err, repository.ErrActiveAttemptExists):
 		return nil, domain.ActiveAttemptExists()
 	case errors.Is(err, repository.ErrShipmentAlreadyExists):
-		if existing, findErr := uc.Shipments.FindByReplacementOperation(ctx, in.OperationID); findErr == nil {
-			return existing, nil
-		}
 		return nil, apperror.Conflict("Attempt " + strconv.Itoa(in.AttemptNo) + " of this order already exists")
 	case err != nil:
 		return nil, mapError(err)

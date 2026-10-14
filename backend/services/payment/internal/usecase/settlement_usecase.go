@@ -89,7 +89,7 @@ func (uc *SettlementUseCase) IngestVendorOrder(ctx context.Context, o domain.Set
 			return err
 		}
 		for _, r := range refunds {
-			if err := uc.postRefund(ctx, stored, r.ID, r.Amount); err != nil {
+			if err := uc.postRefund(ctx, stored, r.ID, r.Amount, r.ResolvedAt); err != nil {
 				return err
 			}
 		}
@@ -119,10 +119,14 @@ func (uc *SettlementUseCase) PostRefund(ctx context.Context, refund *domain.Refu
 	if err != nil {
 		return err
 	}
-	return uc.postRefund(ctx, o, refund.ID, refund.Amount)
+	occurred := uc.Now().UTC()
+	if refund.ResolvedAt != nil {
+		occurred = *refund.ResolvedAt
+	}
+	return uc.postRefund(ctx, o, refund.ID, refund.Amount, occurred)
 }
 
-func (uc *SettlementUseCase) postRefund(ctx context.Context, o *domain.SettlementOrder, refundID string, amount int64) error {
+func (uc *SettlementUseCase) postRefund(ctx context.Context, o *domain.SettlementOrder, refundID string, amount int64, occurred time.Time) error {
 	done, err := uc.Settlement.HasEntry(ctx, domain.EntryRefund, "refund:"+refundID)
 	if err != nil || done {
 		return err
@@ -131,7 +135,7 @@ func (uc *SettlementUseCase) postRefund(ctx context.Context, o *domain.Settlemen
 	if err != nil {
 		return err
 	}
-	return uc.Settlement.Append(ctx, domain.RefundEntries(*o, refundID, amount, uc.Now().UTC(), items, reversed))
+	return uc.Settlement.Append(ctx, domain.RefundEntries(*o, refundID, amount, occurred, items, reversed))
 }
 
 func (uc *SettlementUseCase) requireAdmin(ctx context.Context, adminID string) error {
@@ -179,7 +183,7 @@ func (uc *SettlementUseCase) adjust(ctx context.Context, adminID, vendorID strin
 		return nil, err
 	}
 	entry := domain.Entry{VendorID: vendorID, Type: domain.EntryAdjustment, Amount: amount, Currency: currency,
-		SourceRef: "adjustment:" + uuid.NewString(), EligibleAt: uc.Now().UTC(), Note: &reason, CreatedBy: &adminID}
+		SourceRef: "adjustment:" + uuid.NewString(), EligibleAt: uc.Now().UTC(), OccurredAt: statementTime(uc.Now()), Note: &reason, CreatedBy: &adminID}
 	err := uc.Tx.Run(ctx, func(ctx context.Context) error {
 		if err := uc.Settlement.Append(ctx, []domain.Entry{entry}); err != nil {
 			return err
@@ -384,7 +388,7 @@ func (uc *SettlementUseCase) resolvePayoutItem(ctx context.Context, adminID, ite
 		if item.Status == domain.PayoutItemSucceeded {
 			note := "Payout " + item.ID
 			if err := uc.Settlement.Append(ctx, []domain.Entry{{VendorID: item.VendorID, Type: domain.EntryPayout, Amount: -item.Amount,
-				Currency: item.Currency, SourceRef: "payout_item:" + item.ID, EligibleAt: uc.Now().UTC(), Note: &note, CreatedBy: &adminID}}); err != nil {
+				Currency: item.Currency, SourceRef: "payout_item:" + item.ID, EligibleAt: uc.Now().UTC(), OccurredAt: item.ResolvedAt, Note: &note, CreatedBy: &adminID}}); err != nil {
 				return err
 			}
 		}

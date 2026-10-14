@@ -34,8 +34,13 @@ func send(r http.Handler, method, path, body string, headers map[string]string) 
 }
 
 func testRouter(jwt *authjwt.Manager) http.Handler {
+	return statementTestRouter(jwt, &usecase.StatementUseCase{})
+}
+
+func statementTestRouter(jwt *authjwt.Manager, statements *usecase.StatementUseCase) http.Handler {
 	return NewRouter("test", zerolog.Nop(), jwt, Handlers{
-		Payment: &PaymentHandler{}, Webhook: &WebhookHandler{},
+		Statements: &StatementHandler{UC: statements},
+		Payment:    &PaymentHandler{}, Webhook: &WebhookHandler{},
 		Refund:     NewRefundHandler(usecase.NewRefundUseCase(nil, nil, zerolog.Nop()), zerolog.Nop()),
 		Admin:      NewAdminHandler(usecase.NewReconciliationUseCase(usecase.ReconciliationDeps{}), usecase.NewSettlementUseCase(usecase.SettlementDeps{}), zerolog.Nop()),
 		Approval:   NewApprovalHandler(&usecase.ApprovalUseCase{}, zerolog.Nop()),

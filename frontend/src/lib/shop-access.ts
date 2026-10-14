@@ -44,6 +44,7 @@ export function isOwner(shop: Pick<AccessibleShop, "role"> | undefined): boolean
 export type NavRequirement = { permission: string } | { owner: true } | { vendorAccount: true };
 
 export const NAV_REQUIREMENTS: Record<string, NavRequirement> = {
+  "/vendor/statements": { permission: "finance.read" },
   "/vendor/inventory": { permission: "inventory.read" },
   "/vendor/payout-accounts": { owner: true },
   "/vendor": { permission: "analytics.read" },

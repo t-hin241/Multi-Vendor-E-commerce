@@ -5,7 +5,9 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net/url"
 	"strings"
+	"time"
 
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
@@ -20,12 +22,15 @@ type PrivateConfig struct {
 	SecretKey string
 	UseSSL    bool
 	Bucket    string
+	// DownloadEndpoint is the browser-reachable origin used only for signed GETs.
+	DownloadEndpoint string
 }
 
 // PrivateClient stores and reads objects in a private bucket.
 type PrivateClient struct {
 	mc     *minio.Client
 	bucket string
+	signer *minio.Client
 }
 
 // NewPrivateClient connects and makes sure the bucket exists. It refuses a
@@ -55,7 +60,37 @@ func NewPrivateClient(ctx context.Context, cfg PrivateConfig) (*PrivateClient, e
 	if strings.TrimSpace(policy) != "" {
 		return nil, fmt.Errorf("objectstorage: bucket %q has a bucket policy; private files need a bucket without one", cfg.Bucket)
 	}
-	return &PrivateClient{mc: mc, bucket: cfg.Bucket}, nil
+	signer := mc
+	if cfg.DownloadEndpoint != "" {
+		u, err := url.Parse(cfg.DownloadEndpoint)
+		if err != nil || u.Host == "" || (u.Scheme != "https" && u.Scheme != "http") || u.User != nil || (u.Path != "" && u.Path != "/") || u.RawQuery != "" {
+			return nil, fmt.Errorf("objectstorage: invalid private download origin")
+		}
+		signer, err = minio.New(u.Host, &minio.Options{Creds: credentials.NewStaticV4(cfg.AccessKey, cfg.SecretKey, ""), Secure: u.Scheme == "https", Region: "us-east-1"})
+		if err != nil {
+			return nil, fmt.Errorf("objectstorage: download client: %w", err)
+		}
+	}
+	return &PrivateClient{mc: mc, signer: signer, bucket: cfg.Bucket}, nil
+}
+
+// PutStream keeps large private exports out of process memory.
+func (c *PrivateClient) PutStream(ctx context.Context, key string, data io.Reader, contentType string) error {
+	_, err := c.mc.PutObject(ctx, c.bucket, key, data, -1, minio.PutObjectOptions{ContentType: contentType})
+	if err != nil {
+		return fmt.Errorf("objectstorage: stream private object: %w", err)
+	}
+	return nil
+}
+
+// DownloadURL is called only after the owning service reauthorizes the reader.
+func (c *PrivateClient) DownloadURL(ctx context.Context, key string, ttl time.Duration) (string, error) {
+	params := url.Values{"response-content-disposition": {`attachment; filename="statement.csv"`}, "response-cache-control": {"private, no-store"}}
+	u, err := c.signer.PresignedGetObject(ctx, c.bucket, key, ttl, params)
+	if err != nil {
+		return "", fmt.Errorf("objectstorage: sign private download: %w", err)
+	}
+	return u.String(), nil
 }
 
 // Put writes an object.

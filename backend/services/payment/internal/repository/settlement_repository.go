@@ -90,10 +90,10 @@ func (r *SettlementRepository) FindOrder(ctx context.Context, vendorOrderID stri
 func (r *SettlementRepository) Append(ctx context.Context, entries []domain.Entry) error {
 	for _, e := range entries {
 		if _, err := connection(ctx, r.pool).Exec(ctx, `
-			INSERT INTO settlement_entries (vendor_id, vendor_order_id, entry_type, amount, currency, base_amount, source_ref, eligible_at, note, created_by)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+			INSERT INTO settlement_entries (vendor_id, vendor_order_id, entry_type, amount, currency, base_amount, source_ref, eligible_at, note, created_by, occurred_at)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 			ON CONFLICT (entry_type, source_ref) DO NOTHING`,
-			e.VendorID, e.VendorOrderID, e.Type, e.Amount, e.Currency, e.BaseAmount, e.SourceRef, e.EligibleAt, e.Note, e.CreatedBy); err != nil {
+			e.VendorID, e.VendorOrderID, e.Type, e.Amount, e.Currency, e.BaseAmount, e.SourceRef, e.EligibleAt, e.Note, e.CreatedBy, e.OccurredAt); err != nil {
 			return err
 		}
 	}

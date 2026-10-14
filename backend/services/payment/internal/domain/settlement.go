@@ -80,6 +80,7 @@ func (o SettlementOrder) Same(other SettlementOrder) bool {
 
 // Entry is one append-only settlement ledger line.
 type Entry struct {
+	OccurredAt    *time.Time
 	ID            string
 	VendorID      string
 	VendorOrderID *string
@@ -101,7 +102,7 @@ func SaleEntries(o SettlementOrder) []Entry {
 	out := []Entry{}
 	add := func(t EntryType, amount int64) {
 		if amount != 0 {
-			out = append(out, Entry{VendorID: o.VendorID, VendorOrderID: &vo, Type: t, Amount: amount, Currency: o.Currency, SourceRef: source, EligibleAt: o.EligibleAt})
+			out = append(out, Entry{VendorID: o.VendorID, VendorOrderID: &vo, Type: t, Amount: amount, Currency: o.Currency, SourceRef: source, EligibleAt: o.EligibleAt, OccurredAt: &o.CompletedAt})
 		}
 	}
 	add(EntrySale, o.SubtotalAmount)
@@ -118,7 +119,7 @@ func RefundEntries(o SettlementOrder, refundID string, amount int64, now time.Ti
 	source := "refund:" + refundID
 	items := min(amount, max(0, o.SubtotalAmount-refundedItems))
 	// The refund entry keeps its item part so later refunds attribute the rest.
-	out := []Entry{{VendorID: o.VendorID, VendorOrderID: &vo, Type: EntryRefund, Amount: -amount, Currency: o.Currency, BaseAmount: &items, SourceRef: source, EligibleAt: now}}
+	out := []Entry{{VendorID: o.VendorID, VendorOrderID: &vo, Type: EntryRefund, Amount: -amount, Currency: o.Currency, BaseAmount: &items, SourceRef: source, EligibleAt: now, OccurredAt: &now}}
 	if items == 0 || o.CommissionRateBps == 0 {
 		return out
 	}
@@ -128,7 +129,7 @@ func RefundEntries(o SettlementOrder, refundID string, amount int64, now time.Ti
 	if give > 0 {
 		// The reversal is payable when the sale itself is.
 		out = append(out, Entry{VendorID: o.VendorID, VendorOrderID: &vo, Type: EntryCommissionReversal, Amount: give, Currency: o.Currency,
-			SourceRef: source, EligibleAt: o.EligibleAt})
+			SourceRef: source, EligibleAt: o.EligibleAt, OccurredAt: &now})
 	}
 	return out
 }

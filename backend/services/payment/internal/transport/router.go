@@ -22,11 +22,12 @@ import (
 )
 
 type Handlers struct {
-	Payment  *PaymentHandler
-	Webhook  *WebhookHandler
-	Refund   *RefundHandler
-	Admin    *AdminHandler
-	Approval *ApprovalHandler
+	Statements *StatementHandler
+	Payment    *PaymentHandler
+	Webhook    *WebhookHandler
+	Refund     *RefundHandler
+	Admin      *AdminHandler
+	Approval   *ApprovalHandler
 	// Manual runs AF-06 manual bank-transfer refunds.
 	Manual *ManualRefundHandler
 	// Holds is the settlement hold ledger (00 §6.1).
@@ -120,6 +121,18 @@ func NewRouter(env string, log zerolog.Logger, jwtManager *authjwt.Manager, h Ha
 		adminGroup.POST("/approval-requests/:id/decisions", h.Approval.Decide)
 	}
 
+	if h.Statements != nil {
+		seller := r.Group("/api/payments/vendor/:vendorId", middleware.RequireAuth(jwtManager), middleware.SellerConsole(), noStore())
+		seller.GET("/statement-capabilities", h.Statements.Capability)
+		seller.GET("/statements", h.Statements.Read)
+		seller.GET("/payouts/:id", h.Statements.Payout)
+		seller.POST("/statement-exports", h.Statements.CreateExport)
+		seller.GET("/statement-exports/:id", h.Statements.Export)
+		seller.POST("/statement-exports/:id/download-links", h.Statements.Download)
+		adminGroup.GET("/vendor/:vendorId/statement-capabilities", h.Statements.Capability)
+		adminGroup.GET("/vendor/:vendorId/statements", h.Statements.Read)
+		adminGroup.GET("/vendor/:vendorId/payouts/:id", h.Statements.Payout)
+	}
 	// AF-02/PW-010: Vendor asks before citing a Payment rule in a policy.
 	r.GET("/internal/policy-rules/readiness", internal.Allow("vendor"), policyrules.Handler(domain.RuleReadiness))
 

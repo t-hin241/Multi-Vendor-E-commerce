@@ -1,16 +1,107 @@
 package repository_test
 
 import (
+	"context"
+	"errors"
 	"sync"
 	"sync/atomic"
 	"testing"
 
 	"github.com/google/uuid"
 
+	"shopee/backend/pkg/apperror"
 	"shopee/backend/services/shipment/internal/domain"
 	"shopee/backend/services/shipment/internal/repository"
 	"shopee/backend/services/shipment/internal/usecase"
 )
+
+// Commit another request at a chosen boundary, without depending on the
+// scheduler to expose the gap between the operation lookup and the insert.
+type replacementCommitRace struct {
+	usecase.ShipmentRepositoryPort
+	afterMiss    func()
+	beforeCreate func()
+	createErr    error
+}
+
+func (r *replacementCommitRace) FindByReplacementOperation(ctx context.Context, id string) (*domain.Shipment, error) {
+	s, err := r.ShipmentRepositoryPort.FindByReplacementOperation(ctx, id)
+	if errors.Is(err, repository.ErrShipmentNotFound) && r.afterMiss != nil {
+		commit := r.afterMiss
+		r.afterMiss = nil
+		commit()
+	}
+	return s, err
+}
+
+func (r *replacementCommitRace) CreateReplacement(ctx context.Context, s *domain.Shipment, id string) error {
+	if r.beforeCreate != nil {
+		commit := r.beforeCreate
+		r.beforeCreate = nil
+		commit()
+		return r.createErr
+	}
+	return r.ShipmentRepositoryPort.CreateReplacement(ctx, s, id)
+}
+
+func TestReplacementReplayAfterConcurrentCommit(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		createErr error
+	}{
+		{name: "before_latest_attempt_read"},
+		{name: "active_attempt_constraint", createErr: repository.ErrActiveAttemptExists},
+		{name: "operation_constraint", createErr: repository.ErrShipmentAlreadyExists},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			e := newEnv(t, false)
+			ctx := t.Context()
+			e.uc.DeliveryResolution = true
+			s := e.paidShipment(t)
+			vendor := usecase.Actor{ID: e.userA, Role: domain.ActorVendor}
+			admin := usecase.Actor{ID: uuid.NewString(), Role: domain.ActorAdmin}
+			if _, err := e.uc.MarkShipped(ctx, vendor, s.ID, "TRACK-REPLAY-RACE"); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := e.uc.MarkReturned(ctx, admin, s.ID, "fake returned package"); err != nil {
+				t.Fatal(err)
+			}
+			in := usecase.ReplacementAttempt{OperationID: "delivery_exception:" + uuid.NewString(), VendorOrderID: s.VendorOrderID,
+				OriginalShipmentID: s.ID, AttemptNo: 2, EligibilityRef: uuid.NewString(),
+				Destination: usecase.Destination{RecipientName: "Test recipient", Phone: "0000000000", Province: "HN", District: "D2", Ward: "W2", StreetAddress: "Test address"}}
+			winner := *e.uc
+			var committed *domain.Shipment
+			commit := func() {
+				var err error
+				committed, err = winner.CreateReplacementAttempt(ctx, in)
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			race := &replacementCommitRace{ShipmentRepositoryPort: e.uc.Shipments, createErr: tc.createErr}
+			if tc.createErr == nil {
+				race.afterMiss = commit
+			} else {
+				race.beforeCreate = commit
+			}
+			e.uc.Shipments = race
+			replayed, err := e.uc.CreateReplacementAttempt(ctx, in)
+			if err != nil || replayed == nil || replayed.ID != committed.ID {
+				t.Fatalf("committed operation must replay: %+v %v", replayed, err)
+			}
+			if e.count(t, `SELECT count(*) FROM shipments WHERE replacement_operation_id=$1`, in.OperationID) != 1 ||
+				e.count(t, `SELECT count(*) FROM shipment_tracking_events WHERE shipment_id=$1`, committed.ID) != 1 {
+				t.Fatal("replay duplicated the shipment or its tracking event")
+			}
+			changed := in
+			changed.OriginalShipmentID = uuid.NewString()
+			var app *apperror.Error
+			if _, err := e.uc.CreateReplacementAttempt(ctx, changed); !errors.As(err, &app) || app.Code != apperror.CodeConflict {
+				t.Fatalf("operation reused for another original shipment: %v", err)
+			}
+		})
+	}
+}
 
 // AF-04: the attempt limit, a returned package and a lost one each tell
 // Order once (with the flag); only an admin declares a package lost; a

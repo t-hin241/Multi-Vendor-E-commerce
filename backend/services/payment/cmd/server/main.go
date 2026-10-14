@@ -23,6 +23,7 @@ import (
 	"shopee/backend/pkg/platform/objectstorage"
 	"shopee/backend/pkg/platform/postgres"
 	"shopee/backend/pkg/platform/redisclient"
+	"shopee/backend/pkg/shopaccess"
 	"shopee/backend/pkg/shutdown"
 	"shopee/backend/pkg/telemetry"
 	"shopee/backend/pkg/vendorreport"
@@ -238,13 +239,29 @@ func main() {
 	})
 	limiter := adapter.RedisRateLimiter{Client: redisClient, Prefix: "payment:webhook:", Limit: cfg.WebhookRatePerMinute, Window: time.Minute}
 
+	statements := &usecase.StatementUseCase{Store: repository.StatementRepository{Pool: dbPool},
+		Shops: shopaccess.Client{URL: cfg.VendorServiceURL, Key: internalServices.Key}, Admins: admins,
+		Enabled: cfg.Statements.Enabled, Retention: cfg.Statements.Retention, Log: log}
+	if !cfg.SkipOrderHoldQuery {
+		statements.Holds = orderClient.HeldVendorOrders
+	}
+	if cfg.Statements.Storage != nil {
+		storeCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		store, err := objectstorage.NewPrivateClient(storeCtx, *cfg.Statements.Storage)
+		cancel()
+		if err != nil {
+			log.Fatal().Err(err).Msg("statement storage unavailable")
+		}
+		statements.Storage = store
+	}
 	router := transport.NewRouter(cfg.Base.Env, log, jwtManager, transport.Handlers{
-		Payment:  transport.NewPaymentHandler(paymentUseCase, log),
-		Webhook:  transport.NewWebhookHandler(paymentUseCase, limiter, log),
-		Refund:   transport.NewRefundHandler(refundUseCase, log),
-		Admin:    transport.NewAdminHandler(reconUseCase, settlementUseCase, log),
-		Approval: transport.NewApprovalHandler(approvalUseCase, log),
-		Manual:   transport.NewManualRefundHandler(manualUseCase, log),
+		Statements: &transport.StatementHandler{UC: statements, Log: log},
+		Payment:    transport.NewPaymentHandler(paymentUseCase, log),
+		Webhook:    transport.NewWebhookHandler(paymentUseCase, limiter, log),
+		Refund:     transport.NewRefundHandler(refundUseCase, log),
+		Admin:      transport.NewAdminHandler(reconUseCase, settlementUseCase, log),
+		Approval:   transport.NewApprovalHandler(approvalUseCase, log),
+		Manual:     transport.NewManualRefundHandler(manualUseCase, log),
 		Reimbursements: transport.NewReimbursementHandler(&usecase.ReimbursementUseCase{Store: repository.ReimbursementRepository{Pool: dbPool},
 			Audit: repository.NewAuditRepository(dbPool), Tx: tx, Admins: admins, Enabled: cfg.Reimbursements, MaxAmount: cfg.ReimbursementMax,
 			StepUp: cfg.AdminApprovals, Log: log}, log),
@@ -314,6 +331,7 @@ func main() {
 	)
 	go (usecase.PaymentWorker{Payments: paymentUseCase, Reconciliation: reconUseCase, Log: log}).Run(syncCtx)
 	go manualUseCase.Run(syncCtx)
+	go statements.Run(syncCtx)
 	adminGroup := router.Group("/api/payments/admin", middleware.RequireAuth(jwtManager), middleware.RequireRole("admin"), adminGuard)
 	slaRoles := identityclient.Client{URL: internalServices.IdentityURL, Key: internalServices.Key}
 	slaStore := casesla.Store{Pool: dbPool}

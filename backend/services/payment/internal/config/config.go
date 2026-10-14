@@ -18,6 +18,7 @@ import (
 )
 
 type Config struct {
+	Statements        StatementConfig
 	Base              config.Base
 	OrderServiceURL   string
 	Provider          string
@@ -165,7 +166,12 @@ func Load() (Config, error) {
 		*target = v
 	}
 
+	statements, err := loadStatements(base.Env == "production")
+	if err != nil {
+		return Config{}, err
+	}
 	return Config{
+		Statements:     statements,
 		AdminApprovals: approvals,
 		Reimbursements: reimbursements, ReimbursementMax: reimbursementMax,
 		PayoutBatchApproval: batchApproval, PayoutApprovalPolicy: policy,

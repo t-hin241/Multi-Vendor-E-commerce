@@ -106,9 +106,16 @@ Người vận hành ghi mã tham chiếu của hãng trong lý do và đính k�
 - **Integration Shipment:**
   - `TestDeliveryFailureFactsReachOrderOnce`: cờ tắt, giới hạn lần giao, shop không ghi `lost`, version cũ, báo đồng thời, backfill một lần.
   - `TestReplacementAttemptOncePerOperation`.
+  - `TestReplacementReplayAfterConcurrentCommit`: chủ động commit request cùng operation giữa lần đọc đầu và kiểm tra lần giao mới nhất hoặc insert. Retry phải nhận lại đúng shipment, chỉ có một tracking event; đổi shipment gốc với cùng key vẫn bị từ chối.
 - **Integration Inventory:** `TestRecoveryRestockHappensOncePerRecoveryID` (reason `delivery_return_restock`).
 - **Unit:** domain Order/Shipment, route/quyền Order/Shipment/gateway, hợp đồng event.
 - **Vitest:** `src/lib/delivery-exceptions.test.ts`.
+
+### Sửa lỗi CI retry đồng thời (2026-10-14)
+
+`TestReplacementAttemptOncePerOperation` có thể thất bại khi request đầu commit sau lần tra `operation_id` của request thứ hai. Request thứ hai thấy lần giao mới đang active hoặc gặp partial unique constraint, rồi trả 409 thay vì replay. Shipment kiểm lại operation sau conflict và sau rollback transaction, xác minh vendor order, số lần giao và shipment gốc trước khi trả kết quả đã lưu. Operation khác vẫn chịu đầy đủ guard và unique constraint. Không cần migration.
+
+Kiểm chứng local sau sửa: Shipment và Payment pass gofmt/goimports, vet, golangci-lint 2.14.0 (0 lỗi), build và toàn bộ race test với Go 1.27.2. Các test replay Shipment và export sao kê chạy lặp 20 lần đều pass. Nguyên lệnh integration trong CI (`go test -race -count=1` cho eventbus/events, Inventory, Cart, Order, Payment, Shipment và Notification) pass trên PostgreSQL/Redis/NATS, gồm ACL production của Redis và NATS. Image Shipment/Payment build thành công và dùng user `app`.
 
 ## Bổ sung nhóm D (2026-10-10)
 
