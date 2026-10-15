@@ -36,6 +36,9 @@ func (c *HTTPVendorClient) GetApprovedVendorID(ctx context.Context, userID, vend
 	return grant.VendorID, nil
 }
 
+// Approved is checkout's live selling check: every shop approved and
+// taking new orders (AF-18: a shop on vacation answers 409
+// vendor_not_accepting_orders). The versions fence order creation.
 func (c *HTTPVendorClient) Approved(ctx context.Context, ids []string) (map[string]int64, error) {
-	return (vendorsales.Client{URL: c.baseURL, Key: c.key}).Approved(ctx, ids)
+	return (vendorsales.Client{URL: c.baseURL, Key: c.key}).Accepting(ctx, ids)
 }

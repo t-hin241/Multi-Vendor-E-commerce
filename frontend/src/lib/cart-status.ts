@@ -28,6 +28,11 @@ const lineNotices: Record<Exclude<CartLineState, "available">, LineNotice> = {
     hint: "Sản phẩm tạm ngừng bán hoặc shop đang tạm ngưng hoạt động. Hãy xóa khỏi giỏ hoặc quay lại sau.",
     tone: "destructive",
   },
+  shop_paused: {
+    label: "Shop đang tạm nghỉ",
+    hint: "Shop đang tạm nghỉ nhận đơn mới. Bạn có thể giữ sản phẩm trong giỏ và đặt khi shop mở bán lại.",
+    tone: "warning",
+  },
   option_required: {
     label: "Cần chọn phân loại",
     hint: "Sản phẩm đã có phân loại mới. Hãy xóa dòng này và thêm lại với phân loại bạn muốn.",

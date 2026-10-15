@@ -20,6 +20,8 @@ type PolicyHandler struct {
 	policies *usecase.PolicyUseCase
 	vendors  *usecase.VendorUseCase
 	log      zerolog.Logger
+	// Availability adds the AF-18 vacation state to the public shop page.
+	Availability *usecase.AvailabilityUseCase
 }
 
 func NewPolicyHandler(policies *usecase.PolicyUseCase, vendors *usecase.VendorUseCase, log zerolog.Logger) *PolicyHandler {
@@ -178,6 +180,14 @@ func (h *PolicyHandler) PublicShop(c *gin.Context) {
 		return
 	}
 	out := toPublicVendorResponse(v)
+	if h.Availability != nil {
+		a, err := h.Availability.Public(c.Request.Context(), v)
+		if err != nil {
+			httpresponse.HandleError(c, h.log, err)
+			return
+		}
+		out.Availability = toPublicAvailability(a)
+	}
 	if h.policies.Enabled {
 		out.PolicyText = ""
 		approved, err := h.policies.PublicShopPolicy(c.Request.Context(), v.ID)

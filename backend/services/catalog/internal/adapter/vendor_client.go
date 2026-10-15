@@ -107,3 +107,16 @@ func (c *HTTPVendorClient) GetShopNames(ctx context.Context, vendorIDs []string)
 func (c *HTTPVendorClient) Approved(ctx context.Context, ids []string) (map[string]int64, error) {
 	return (vendorsales.Client{URL: c.baseURL, Key: c.key}).Approved(ctx, ids)
 }
+
+// Paused reports approved shops on vacation (AF-18).
+func (c *HTTPVendorClient) Paused(ctx context.Context, ids []string) (map[string]bool, error) {
+	statuses, err := (vendorsales.Client{URL: c.baseURL, Key: c.key}).Statuses(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]bool, len(statuses))
+	for id, s := range statuses {
+		out[id] = s.Paused()
+	}
+	return out, nil
+}

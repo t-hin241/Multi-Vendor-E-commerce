@@ -114,6 +114,7 @@ func (uc *ProductUseCase) PurchaseQuotes(ctx context.Context, lines []purchasequ
 		q.PricingSource = "product"
 		q.UnitPrice = p.PriceAmount
 		q.IsSellable = p.Status == domain.StatusApproved && p.IsActive && p.EnforcedVersion == p.Version
+		q.ShopPaused = p.ShopPaused
 		if in.VariantID == nil && p.HasVariants {
 			q.IsSellable = false
 		}

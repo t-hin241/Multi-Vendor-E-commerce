@@ -21,6 +21,8 @@ type CheckoutProduct struct {
 	HasVariants             bool   `json:"has_variants"`
 	HasDifferentiatedPrices bool   `json:"has_differentiated_prices"`
 	PackageWeightGrams      *int64 `json:"package_weight_grams"`
+	// ShopPaused (AF-18): the shop is on vacation; IsActive is false.
+	ShopPaused bool `json:"shop_paused,omitempty"`
 }
 
 type CheckoutVariant struct {

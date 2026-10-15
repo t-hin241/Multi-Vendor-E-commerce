@@ -62,6 +62,8 @@ var inboxTargets = map[Type]inboxTarget{
 	TypeShopPolicyRejected:         {"shop", "/vendor/shops"},
 	TypeReturnDestinationVerified:  {"shop", "/vendor/shipping"},
 	TypeReturnDestinationRejected:  {"shop", "/vendor/shipping"},
+	TypeShopVacationStarted:        {"shop", "/vendor/availability"},
+	TypeShopVacationEnded:          {"shop", "/vendor/availability"},
 	TypeSupportIntakeReceived:      {"support_intake", "/support"},
 	TypeSupportIntakeClosed:        {"support_intake", "/support"},
 	TypeRefundDestinationNeeded:    {"order", "/orders/%s"},

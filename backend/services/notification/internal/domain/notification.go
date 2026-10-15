@@ -60,6 +60,9 @@ const (
 	// Return destination decisions (Vendor, PW-009); the reference is the shop id.
 	TypeReturnDestinationVerified Type = "return_destination_verified"
 	TypeReturnDestinationRejected Type = "return_destination_rejected"
+	// Shop vacation (Vendor, AF-18); the reference is the shop id.
+	TypeShopVacationStarted Type = "shop_vacation_started"
+	TypeShopVacationEnded   Type = "shop_vacation_ended"
 	// Support requests without an order id (Order, PW-009); the reference
 	// is the request id.
 	TypeSupportIntakeReceived Type = "support_intake_received"

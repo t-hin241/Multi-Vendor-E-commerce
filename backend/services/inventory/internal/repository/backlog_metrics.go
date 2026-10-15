@@ -1,12 +1,16 @@
 package repository
 
-import "shopee/backend/pkg/telemetry"
+import (
+	"shopee/backend/pkg/bulkimport"
+	"shopee/backend/pkg/telemetry"
+)
 
 // Backlogs are this service's outboxes as exported to metrics
 // (telemetry.RegisterOutboxes): rows still to deliver and how long the
 // oldest one has waited. Parked or review rows are left out: they have
 // their own operator views and would otherwise keep the age alert firing.
 var Backlogs = []telemetry.Outbox{
+	{Name: "import_rows", SQL: bulkimport.BacklogSQL},
 	{Name: "stock_alert_episode", SQL: `SELECT count(*),COALESCE(EXTRACT(EPOCH FROM now()-min(created_at)),0)::float8 FROM stock_alert_episode WHERE delivered_at IS NULL AND attempts<5`},
 	{Name: "inventory_outbox", SQL: `SELECT count(*), COALESCE(EXTRACT(EPOCH FROM now() - min(created_at)), 0)::float8 FROM inventory_outbox WHERE delivered_at IS NULL AND attempts < 10`},
 	// No created_at column: the age is how long the most overdue row has been due.

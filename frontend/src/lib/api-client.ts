@@ -879,6 +879,15 @@ export type PublicVendor = {
   logo_url?: string;
   banner_url?: string;
   policy_text?: string;
+  // AF-18: whether the shop takes new orders (vacation).
+  availability?: PublicShopAvailability;
+};
+
+export type PublicShopAvailability = {
+  accepting_orders: boolean;
+  message?: string;
+  next_open_at?: string;
+  pause_starts_at?: string;
 };
 
 export function getPublicVendorProfile(vendorId: string): Promise<PublicVendor> {
@@ -982,6 +991,7 @@ export type CartLineState =
   | "removed"
   | "under_review"
   | "not_for_sale"
+  | "shop_paused"
   | "option_required"
   | "option_unavailable"
   | "out_of_stock"

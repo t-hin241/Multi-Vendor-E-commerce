@@ -17,4 +17,7 @@ var AdminRoutes = adminaccess.Routes{
 	"GET /api/inventory/admin/operations":                       adminaccess.PlatformConfigure,
 	"GET /api/inventory/admin/operations/issues":                adminaccess.PlatformConfigure,
 	"POST /api/inventory/admin/operations/repair":               adminaccess.PlatformConfigure,
+	// AF-16: operators watch shops' imports and stop them during a rollback.
+	"GET /api/inventory/admin/import-jobs":                    adminaccess.ModerationManage,
+	"POST /api/inventory/admin/import-jobs/:id/cancellations": adminaccess.ModerationManage,
 }.Merge(adminaccess.Shared("/api/inventory/admin", true, false, false))

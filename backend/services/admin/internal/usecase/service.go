@@ -40,8 +40,10 @@ type Service struct {
 	Roles     RoleVerifier
 	// Timeout bounds each service read.
 	Timeout time.Duration
-	Log     zerolog.Logger
-	Now     func() time.Time
+	// BusinessReports is FEATURE_BUSINESS_REPORTS_ENABLED (AF-20).
+	BusinessReports bool
+	Log             zerolog.Logger
+	Now             func() time.Time
 }
 
 // SourceStatus says whether a service answered, and when.

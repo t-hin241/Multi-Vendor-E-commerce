@@ -85,7 +85,19 @@ func (c *PrivateClient) PutStream(ctx context.Context, key string, data io.Reade
 
 // DownloadURL is called only after the owning service reauthorizes the reader.
 func (c *PrivateClient) DownloadURL(ctx context.Context, key string, ttl time.Duration) (string, error) {
-	params := url.Values{"response-content-disposition": {`attachment; filename="statement.csv"`}, "response-cache-control": {"private, no-store"}}
+	return c.DownloadFileURL(ctx, key, "statement.csv", ttl)
+}
+
+// DownloadFileURL signs a GET that saves the object as filename. The name
+// comes from the owning service and is reduced to safe characters.
+func (c *PrivateClient) DownloadFileURL(ctx context.Context, key, filename string, ttl time.Duration) (string, error) {
+	safe := strings.Map(func(r rune) rune {
+		if r < 128 && (r == '.' || r == '-' || r == '_' || (r >= '0' && r <= '9') || (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z')) {
+			return r
+		}
+		return '_'
+	}, filename)
+	params := url.Values{"response-content-disposition": {`attachment; filename="` + safe + `"`}, "response-cache-control": {"private, no-store"}}
 	u, err := c.signer.PresignedGetObject(ctx, c.bucket, key, ttl, params)
 	if err != nil {
 		return "", fmt.Errorf("objectstorage: sign private download: %w", err)

@@ -17,14 +17,16 @@ import (
 
 type Config struct {
 	SelectiveCheckoutEnabled bool
-	Base                     config.Base
-	CartServiceURL           string
-	CatalogServiceURL        string
-	VendorServiceURL         string
-	InventoryServiceURL      string
-	ShipmentServiceURL       string
-	NotificationServiceURL   string
-	PaymentServiceURL        string
+	// BusinessReports is FEATURE_BUSINESS_REPORTS_ENABLED (AF-20).
+	BusinessReports        bool
+	Base                   config.Base
+	CartServiceURL         string
+	CatalogServiceURL      string
+	VendorServiceURL       string
+	InventoryServiceURL    string
+	ShipmentServiceURL     string
+	NotificationServiceURL string
+	PaymentServiceURL      string
 	// ReturnWindowDays is how long after delivery (completion) an item may
 	// be returned; it is copied onto every return request with its version.
 	ReturnWindowDays int
@@ -164,7 +166,15 @@ func Load() (Config, error) {
 		}
 	}
 
+	businessReports := false
+	if raw := os.Getenv("FEATURE_BUSINESS_REPORTS_ENABLED"); raw != "" {
+		if businessReports, err = strconv.ParseBool(raw); err != nil {
+			return Config{}, fmt.Errorf("config: FEATURE_BUSINESS_REPORTS_ENABLED must be true or false")
+		}
+	}
+
 	return Config{
+		BusinessReports:          businessReports,
 		SelectiveCheckoutEnabled: selective,
 		Support:                  support,
 		VersionedPolicies:        versionedPolicies,

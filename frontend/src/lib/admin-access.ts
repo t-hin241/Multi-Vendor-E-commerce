@@ -22,6 +22,7 @@ export function bundleLabel(name: string): string {
 // The bundle each console page needs (one of them is enough).
 export const ADMIN_PAGE_BUNDLES: Record<string, string[]> = {
   "/admin": ["analytics.read"],
+  "/admin/reports": ["analytics.read"],
   "/admin/audit": ["audit.read"],
   // PW-028: every admin sets up their own authenticator.
   "/admin/security": Object.keys(BUNDLE_LABELS),

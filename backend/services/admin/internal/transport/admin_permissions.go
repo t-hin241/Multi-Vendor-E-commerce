@@ -9,4 +9,7 @@ var AdminRoutes = adminaccess.Routes{
 	"GET /api/admin/dashboard":  adminaccess.AnalyticsRead,
 	"GET /api/admin/audit":      adminaccess.AuditRead,
 	"GET /api/admin/work-items": adminaccess.SupportManage,
+	// AF-20: each owner also checks its own bundle (money needs finance.read
+	// at Payment, or that panel shows unavailable).
+	"GET /api/admin/business-reports": adminaccess.AnalyticsRead,
 }

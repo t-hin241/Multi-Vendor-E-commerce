@@ -86,6 +86,8 @@ func main() {
 		Roles:     identityclient.Client{URL: internalServices.IdentityURL, Key: internalServices.Key},
 		Timeout:   cfg.UpstreamTimeout,
 		Log:       log,
+
+		BusinessReports: cfg.BusinessReports,
 	}
 
 	// AF-19: every admin route needs the bundle named in transport.AdminRoutes.

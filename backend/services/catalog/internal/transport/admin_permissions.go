@@ -17,6 +17,9 @@ var AdminRoutes = adminaccess.Routes{
 	"PATCH /api/catalog/products/admin/:id/reject":     adminaccess.ModerationManage,
 	"GET /api/catalog/operations":                      adminaccess.PlatformConfigure,
 	"POST /api/catalog/operations/replay":              adminaccess.PlatformConfigure,
+	// AF-16: operators watch shops' imports and stop them during a rollback.
+	"GET /api/catalog/admin/import-jobs":                    adminaccess.ModerationManage,
+	"POST /api/catalog/admin/import-jobs/:id/cancellations": adminaccess.ModerationManage,
 }.Merge(adminaccess.Shared("/api/catalog/admin", true, false, true))
 
 // adminOnlyRoutes are admin routes without an "/admin" path segment.

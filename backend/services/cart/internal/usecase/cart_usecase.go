@@ -12,6 +12,7 @@ import (
 
 	"shopee/backend/pkg/apperror"
 	"shopee/backend/pkg/purchasequote"
+	"shopee/backend/pkg/vendorsales"
 	"shopee/backend/services/cart/internal/adapter"
 	"shopee/backend/services/cart/internal/domain"
 )
@@ -276,6 +277,9 @@ func (uc *CartUseCase) assertSellable(ctx context.Context, productID string, var
 	}
 	q := quote.Lines[0]
 	if !q.IsSellable {
+		if q.ShopPaused {
+			return nil, vendorsales.NotAcceptingOrders()
+		}
 		if variantID == nil {
 			return nil, apperror.Validation("This product is not currently available; select an option if required")
 		}

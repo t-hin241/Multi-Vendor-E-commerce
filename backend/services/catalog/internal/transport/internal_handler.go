@@ -45,7 +45,7 @@ func (h *InternalHandler) CheckoutSnapshot(c *gin.Context) {
 			ID: p.ID, VendorID: p.VendorID, Name: p.Name, Version: p.Version,
 			PriceAmount: p.PriceAmount, Currency: p.Currency, Status: string(p.Status),
 			IsVisible:   p.Status == domain.StatusApproved && p.IsActive && p.EnforcedVersion == p.Version && !p.HasDifferentiatedPrices,
-			HasVariants: p.HasVariants, PackageWeightGrams: p.PackageWeightGrams,
+			HasVariants: p.HasVariants, PackageWeightGrams: p.PackageWeightGrams, ShopPaused: p.ShopPaused,
 		})
 	}
 	httpresponse.OK(c, http.StatusOK, struct {
@@ -65,6 +65,8 @@ type internalProductResponse struct {
 	IsVisible          bool   `json:"is_visible"`
 	HasVariants        bool   `json:"has_variants"`
 	PackageWeightGrams *int64 `json:"package_weight_grams,omitempty"`
+	// ShopPaused (AF-18): the shop is on vacation; is_visible is false.
+	ShopPaused bool `json:"shop_paused,omitempty"`
 }
 
 // GetByID serves Inventory (verifying a vendor owns a product before it
@@ -77,11 +79,12 @@ type internalProductResponse struct {
 // pointer: a category that doesn't require packaging info must stay
 // distinguishable from a genuine 0.
 func (h *InternalHandler) GetByID(c *gin.Context) {
-	p, hasVariants, packageWeightGrams, err := h.products.GetByIDForOwnerLookup(c.Request.Context(), c.Param("id"))
+	lookup, err := h.products.LookupForServices(c.Request.Context(), c.Param("id"))
 	if err != nil {
 		httpresponse.HandleError(c, h.log, err)
 		return
 	}
+	p := lookup.Product
 
 	httpresponse.OK(c, http.StatusOK, internalProductResponse{
 		ID:          p.ID,
@@ -93,8 +96,9 @@ func (h *InternalHandler) GetByID(c *gin.Context) {
 		Status:      string(p.Status),
 		IsVisible: p.IsPubliclyVisible() && p.EnforcedVersion == p.Version &&
 			(p.MinPriceAmount == nil || *p.MinPriceAmount == p.PriceAmount) && (p.MaxPriceAmount == nil || *p.MaxPriceAmount == p.PriceAmount),
-		HasVariants:        hasVariants,
-		PackageWeightGrams: packageWeightGrams,
+		HasVariants:        lookup.HasVariants,
+		PackageWeightGrams: lookup.PackageWeightGrams,
+		ShopPaused:         lookup.ShopPaused,
 	})
 }
 

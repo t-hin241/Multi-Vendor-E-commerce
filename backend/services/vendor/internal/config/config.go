@@ -44,6 +44,9 @@ type Config struct {
 	// return destination version is checked by the carrier through
 	// Shipment before an admin needs to.
 	ReturnDestinationCarrierCheck bool
+	// ShopVacation is FEATURE_SHOP_VACATION_ENABLED (AF-18): owners may
+	// schedule a vacation. Off, resuming and the scheduler keep working.
+	ShopVacation bool
 }
 
 func Load() (Config, error) {
@@ -107,7 +110,14 @@ func Load() (Config, error) {
 			return Config{}, fmt.Errorf("config: FEATURE_RETURN_DESTINATION_CARRIER_CHECK_ENABLED must be true or false")
 		}
 	}
+	vacation := false
+	if raw := os.Getenv("FEATURE_SHOP_VACATION_ENABLED"); raw != "" {
+		if vacation, err = strconv.ParseBool(raw); err != nil {
+			return Config{}, fmt.Errorf("config: FEATURE_SHOP_VACATION_ENABLED must be true or false")
+		}
+	}
 	return Config{
+		ShopVacation:                  vacation,
 		ReturnDestinationCarrierCheck: carrierCheck,
 		AdminReauth:                   adminReauth,
 		StaffRequiresVerifiedEmail:    requireVerified,

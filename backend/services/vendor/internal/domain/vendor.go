@@ -22,21 +22,25 @@ type Vendor struct {
 	Version          int64
 	EnforcedVersion  int64
 	SuspensionReason *string
-	ID               string
-	UserID           string
-	ShopName         string
-	Description      string
-	Status           Status
-	RejectionReason  *string
-	ApprovedBy       *string
-	ApprovedAt       *time.Time
-	LogoURL          *string
-	LogoObjectKey    *string
-	BannerURL        *string
-	BannerObjectKey  *string
-	PolicyText       string
-	CreatedAt        time.Time
-	UpdatedAt        time.Time
+	// AF-18: false while on vacation; AvailabilityVersion versions the
+	// vacation schedule.
+	AcceptingOrders     bool
+	AvailabilityVersion int64
+	ID                  string
+	UserID              string
+	ShopName            string
+	Description         string
+	Status              Status
+	RejectionReason     *string
+	ApprovedBy          *string
+	ApprovedAt          *time.Time
+	LogoURL             *string
+	LogoObjectKey       *string
+	BannerURL           *string
+	BannerObjectKey     *string
+	PolicyText          string
+	CreatedAt           time.Time
+	UpdatedAt           time.Time
 }
 
 func (v *Vendor) IsApproved() bool {

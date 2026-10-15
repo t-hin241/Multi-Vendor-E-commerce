@@ -73,6 +73,13 @@ type VendorGateway interface {
 	GetApprovedVendorID(ctx context.Context, userID, vendorID, permission string) (string, error)
 }
 
+// ShopAvailabilityGateway reports which approved shops are on vacation
+// (AF-18): still approved, so their pages stay readable, but not taking new
+// orders. An unknown answer is an error, never "open".
+type ShopAvailabilityGateway interface {
+	Paused(ctx context.Context, vendorIDs []string) (map[string]bool, error)
+}
+
 // VendorNameGateway resolves shop names for the storefront listing. A
 // separate interface from VendorGateway (different concern, same remote
 // service) so a fake can implement just what a given test needs.

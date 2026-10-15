@@ -1,6 +1,6 @@
 # Giá theo SKU — rollout và rollback
 
-Runbook này áp dụng cho AF-10. Code và migration đã được kiểm thử local ngày 2026-10-12; các bước staging/pilot vẫn cần release record riêng. `FEATURE_VARIANT_PRICING_ENABLED` phải giữ `false` cho đến khi Catalog, Cart, Order và frontend cùng dùng contract mới.
+Runbook này áp dụng cho AF-10. Code và migration đã được kiểm thử local ngày 2026-10-12 và diễn tập toàn trình tự trên bản sao dữ liệu ngày 2026-10-15 ([báo cáo PW-049](rehearsal/reports/pw049-2026-10-15.md)); các bước staging/pilot vẫn cần release record riêng. `FEATURE_VARIANT_PRICING_ENABLED` phải giữ `false` cho đến khi Catalog, Cart, Order và frontend cùng dùng contract mới.
 
 ## Thứ tự triển khai
 
@@ -8,9 +8,10 @@ Runbook này áp dụng cho AF-10. Code và migration đã được kiểm thử
 2. Trong cửa sổ bảo trì checkout, chạy migration bằng runner của dự án: Catalog lên `000017`, Cart lên `000005`, Order lên `000030`. Không chạy SQL file trực tiếp ngoài sổ migration.
 3. Giữ cờ `false`. Deploy Catalog mới trước để cung cấp batch quote tương thích cho giá đã backfill, sau đó Cart và Order, cuối cùng frontend. Không mở checkout nếu một consumer còn gọi contract cũ cho SKU khác giá.
 4. Chạy các truy vấn read-only bên dưới. Với cờ tắt, smoke product thường và SKU có giá bằng product; sửa giá product có variants phải đồng bộ giá/version/audit của mọi SKU và giữ hành vi bán một giá.
-5. Trên staging, bật cờ Catalog toàn môi trường và chỉ dùng tài khoản/shop pilot trong cửa sổ nghiệm thu. Tạo hai SKU khác giá, gửi duyệt lại và chạy buyer flow: xem khoảng giá → chọn SKU → thêm giỏ → preview → checkout → capture đúng tổng → giao/return. Đây là cờ toàn cục, không phải allowlist theo shop; thông báo vendor hoặc giới hạn quyền truy cập staging tương ứng. Chỉ mở rộng sau khi outbox không parked và đối soát order item đúng quote.
+5. Trước khi bật: danh mục của sản phẩm pilot phải có quy tắc `pkg_weight`, vì sửa nội dung ghi lại packaging từ thuộc tính `pkg_*` và thiếu cân nặng thì không tính được phí ship. Mỗi lần sửa giá SKU đưa sản phẩm về draft; xếp admin trực duyệt lại và báo shop pilot. Sau khi duyệt, chờ `selling_sync_pending=false` ở trang sản phẩm rồi mới thử checkout (trước đó trả `variant_not_sellable`).
+6. Trên staging, bật cờ Catalog toàn môi trường và chỉ dùng tài khoản/shop pilot trong cửa sổ nghiệm thu. Tạo hai SKU khác giá, gửi duyệt lại và chạy buyer flow: xem khoảng giá → chọn SKU → thêm giỏ → preview → checkout → capture đúng tổng → giao/return. Đây là cờ toàn cục, không phải allowlist theo shop; thông báo vendor hoặc giới hạn quyền truy cập staging tương ứng. Chỉ mở rộng sau khi outbox không parked và đối soát order item đúng quote.
 
-Preflight sau migration trong Catalog:
+Preflight sau migration trong Catalog — [variant-pricing-preflight.sql](variant-pricing-preflight.sql) gồm ba truy vấn dưới đây cùng kiểm tra audit lệch giá, outbox park/tồn và trigger:
 
 ```sql
 SELECT count(*) AS invalid_variant_prices
@@ -61,6 +62,12 @@ Sau khi sửa broker, admin replay một SKU bằng endpoint operations hiện c
 ```
 
 Listing hiện không cache giá trong Redis. Event `catalog.variant_price_changed` là invalidation reference cho projection/cache tương lai; payload không chứa tiền. Cart và Order không đọc giá từ event hay listing projection.
+
+## Diễn tập lại
+
+[rehearsal/variant-pricing.sh](rehearsal/variant-pricing.sh) dựng compose project riêng từ bản sao cluster đã dừng, xuất source baseline/ứng viên từ git và chạy đúng thứ tự trên: backup + restore thử, migrate, deploy, preflight, các pha E2E `legacy`, `flag-off`, `pilot`, `outage`, `rollback` và kiểm storefront. Không dùng stack, volume hay `.env` phát triển. Lệnh và giới hạn ở đầu script; kết quả lần chạy 2026-10-15 trong [báo cáo PW-049](rehearsal/reports/pw049-2026-10-15.md).
+
+Số đo tham khảo trên bản sao khoảng 21.200 SKU: migration Catalog 3,3–3,7 s, Cart và Order dưới 0,2 s; cả trình tự chạy khoảng 10 phút khi image đã có cache. Refund của return có thể sang Payment chậm khoảng 1 phút khi effect Order retry; theo dõi `order_effects` trước khi kết luận lỗi.
 
 ## Smoke bắt buộc
 

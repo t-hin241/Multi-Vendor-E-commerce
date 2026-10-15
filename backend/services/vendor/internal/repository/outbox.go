@@ -18,7 +18,8 @@ type Delivery struct {
 }
 
 func (r Outbox) Queue(ctx context.Context, v *domain.Vendor) error {
-	_, err := connection(ctx, r.Pool).Exec(ctx, `INSERT INTO vendor_outbox(vendor_id,version,status) VALUES($1,$2,$3) ON CONFLICT(vendor_id,version) DO NOTHING`, v.ID, v.Version, v.Status)
+	_, err := connection(ctx, r.Pool).Exec(ctx, `INSERT INTO vendor_outbox(vendor_id,version,status,accepting_orders) VALUES($1,$2,$3,$4) ON CONFLICT(vendor_id,version) DO NOTHING`,
+		v.ID, v.Version, v.Status, v.AcceptingOrders)
 	return err
 }
 func (r Outbox) Claim(ctx context.Context) ([]Delivery, error) {
@@ -26,7 +27,7 @@ func (r Outbox) Claim(ctx context.Context) ([]Delivery, error) {
 	defer cancel()
 	rows, err := r.Pool.Query(ctx, `UPDATE vendor_outbox SET lease_until=now()+interval '60 seconds',attempts=attempts+1 WHERE id IN
  (SELECT id FROM vendor_outbox WHERE delivered_at IS NULL AND attempts<10 AND next_attempt_at<=now() AND (lease_until IS NULL OR lease_until<now()) ORDER BY created_at LIMIT 5 FOR UPDATE SKIP LOCKED)
- RETURNING id,vendor_id,status,version,attempts`)
+ RETURNING id,vendor_id,status,version,accepting_orders,attempts`)
 	if err != nil {
 		return nil, err
 	}
@@ -34,9 +35,11 @@ func (r Outbox) Claim(ctx context.Context) ([]Delivery, error) {
 	var out []Delivery
 	for rows.Next() {
 		var d Delivery
-		if err = rows.Scan(&d.ID, &d.VendorID, &d.Status.Status, &d.Version, &d.Attempts); err != nil {
+		var accepting bool
+		if err = rows.Scan(&d.ID, &d.VendorID, &d.Status.Status, &d.Version, &accepting, &d.Attempts); err != nil {
 			return nil, err
 		}
+		d.AcceptingOrders = &accepting
 		out = append(out, d)
 	}
 	return out, rows.Err()

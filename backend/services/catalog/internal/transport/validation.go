@@ -32,6 +32,10 @@ func validateRequest() gin.HandlerFunc {
 			if c.FullPath() == "/api/catalog/products/:id" && c.Request.Method == http.MethodGet {
 				continue
 			}
+			// AF-16 template names are checked by the import use case.
+			if param.Key == "kind" && c.FullPath() == "/api/catalog/vendor/import-templates/:kind" {
+				continue
+			}
 			if _, err := uuid.Parse(param.Value); err != nil {
 				fail()
 				return

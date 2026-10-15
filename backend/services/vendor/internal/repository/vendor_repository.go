@@ -27,10 +27,10 @@ func (r *VendorRepository) Create(ctx context.Context, v *domain.Vendor) error {
 	const query = `
 		INSERT INTO vendors (user_id, shop_name, description)
 		VALUES ($1, $2, $3)
-		RETURNING id, status, created_at, updated_at, version, enforced_version`
+		RETURNING id, status, created_at, updated_at, version, enforced_version, accepting_orders, availability_version`
 
 	return connection(ctx, r.pool).QueryRow(ctx, query, v.UserID, v.ShopName, v.Description).
-		Scan(&v.ID, &v.Status, &v.CreatedAt, &v.UpdatedAt, &v.Version, &v.EnforcedVersion)
+		Scan(&v.ID, &v.Status, &v.CreatedAt, &v.UpdatedAt, &v.Version, &v.EnforcedVersion, &v.AcceptingOrders, &v.AvailabilityVersion)
 }
 
 // ListByUserID returns every shop (any status) a user owns — a user may
@@ -177,13 +177,13 @@ func (r *VendorRepository) Snapshots(ctx context.Context, after string, limit in
 
 const vendorSelectColumns = `
 	SELECT id, user_id, shop_name, description, status, rejection_reason, approved_by, approved_at,
-	       logo_url, logo_object_key, banner_url, banner_object_key, policy_text, created_at, updated_at, version, enforced_version, suspension_reason
+	       logo_url, logo_object_key, banner_url, banner_object_key, policy_text, created_at, updated_at, version, enforced_version, suspension_reason, accepting_orders, availability_version
 	`
 
 func scanVendor(row pgx.Row) (*domain.Vendor, error) {
 	var v domain.Vendor
 	err := row.Scan(&v.ID, &v.UserID, &v.ShopName, &v.Description, &v.Status, &v.RejectionReason, &v.ApprovedBy, &v.ApprovedAt,
-		&v.LogoURL, &v.LogoObjectKey, &v.BannerURL, &v.BannerObjectKey, &v.PolicyText, &v.CreatedAt, &v.UpdatedAt, &v.Version, &v.EnforcedVersion, &v.SuspensionReason)
+		&v.LogoURL, &v.LogoObjectKey, &v.BannerURL, &v.BannerObjectKey, &v.PolicyText, &v.CreatedAt, &v.UpdatedAt, &v.Version, &v.EnforcedVersion, &v.SuspensionReason, &v.AcceptingOrders, &v.AvailabilityVersion)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, ErrVendorNotFound
@@ -196,7 +196,7 @@ func scanVendor(row pgx.Row) (*domain.Vendor, error) {
 func scanVendorRow(rows pgx.Rows) (*domain.Vendor, error) {
 	var v domain.Vendor
 	err := rows.Scan(&v.ID, &v.UserID, &v.ShopName, &v.Description, &v.Status, &v.RejectionReason, &v.ApprovedBy, &v.ApprovedAt,
-		&v.LogoURL, &v.LogoObjectKey, &v.BannerURL, &v.BannerObjectKey, &v.PolicyText, &v.CreatedAt, &v.UpdatedAt, &v.Version, &v.EnforcedVersion, &v.SuspensionReason)
+		&v.LogoURL, &v.LogoObjectKey, &v.BannerURL, &v.BannerObjectKey, &v.PolicyText, &v.CreatedAt, &v.UpdatedAt, &v.Version, &v.EnforcedVersion, &v.SuspensionReason, &v.AcceptingOrders, &v.AvailabilityVersion)
 	if err != nil {
 		return nil, err
 	}

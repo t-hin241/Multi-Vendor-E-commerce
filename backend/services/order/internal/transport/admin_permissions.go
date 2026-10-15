@@ -8,6 +8,8 @@ import "shopee/backend/pkg/adminaccess"
 // which needs a second person once approvals are on.
 var AdminRoutes = adminaccess.Routes{
 	"GET /api/orders/admin":                                                 adminaccess.SupportManage,
+	"GET /api/orders/admin/business-reports":                                adminaccess.AnalyticsRead,
+	"GET /api/orders/admin/business-reports/drilldown":                      adminaccess.AnalyticsRead,
 	"GET /api/orders/admin/:id":                                             adminaccess.SupportManage,
 	"GET /api/orders/admin/:id/policy-snapshot":                             adminaccess.SupportManage,
 	"POST /api/orders/admin/:id/transition":                                 adminaccess.SupportManage,

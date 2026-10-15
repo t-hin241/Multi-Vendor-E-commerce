@@ -9,11 +9,13 @@ import (
 	"os"
 	"strconv"
 
+	"shopee/backend/pkg/bulkimport"
 	"shopee/backend/pkg/config"
 	"shopee/backend/pkg/platform/objectstorage"
 )
 
 type Config struct {
+	BulkImport            bulkimport.Config
 	VariantPricingEnabled bool
 	Base                  config.Base
 	VendorServiceURL      string
@@ -55,7 +57,12 @@ func Load() (Config, error) {
 			return Config{}, fmt.Errorf("config: invalid FEATURE_VARIANT_PRICING_ENABLED")
 		}
 	}
+	bulk, err := bulkimport.LoadConfig("catalog-imports", base.Env == "production")
+	if err != nil {
+		return Config{}, err
+	}
 	return Config{
+		BulkImport:            bulk,
 		VariantPricingEnabled: pricingEnabled,
 		Base:                  base,
 		VendorServiceURL:      vendorServiceURL,

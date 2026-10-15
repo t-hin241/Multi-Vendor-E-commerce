@@ -16,6 +16,9 @@ const (
 	// vendor, or the shop itself is not allowed to sell (locked/suspended).
 	// Catalog deliberately reports both the same way.
 	LineNotForSale LineState = "not_for_sale"
+	// LineShopPaused: the shop is on vacation (AF-18). The line stays in
+	// the cart and can be bought once the shop reopens.
+	LineShopPaused LineState = "shop_paused"
 	// LineOptionRequired: the product now has variants but the line was
 	// added without one.
 	LineOptionRequired LineState = "option_required"
@@ -54,6 +57,8 @@ type ProductFacts struct {
 	HasVariants    bool
 	PriceAmount    int64
 	Currency       string
+	// ShopPaused: Catalog reported the shop on vacation.
+	ShopPaused bool
 }
 
 // VariantFacts is what Cart learned from Catalog about a line's variant.
@@ -118,6 +123,8 @@ func EvaluateLine(item *CartItem, product *ProductFacts, variant *VariantFacts, 
 		eval.State = LineUnverified
 	case item.VariantID != nil && (variant == nil || !variant.Found || variant.ProductID != item.ProductID):
 		eval.State = LineOptionUnavailable
+	case !product.IsVisible && product.ShopPaused:
+		eval.State = LineShopPaused
 	case !product.IsVisible:
 		eval.State = LineNotForSale
 	case eval.Stock == StockOut:

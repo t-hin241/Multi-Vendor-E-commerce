@@ -26,6 +26,7 @@ type vendorResponse struct {
 	EnforcedVersion    int64      `json:"enforced_version"`
 	EnforcementPending bool       `json:"enforcement_pending"`
 	SuspensionReason   *string    `json:"suspension_reason,omitempty"`
+	AcceptingOrders    bool       `json:"accepting_orders"`
 	ID                 string     `json:"id"`
 	UserID             string     `json:"user_id"`
 	ShopName           string     `json:"shop_name"`
@@ -43,6 +44,7 @@ type vendorResponse struct {
 func toVendorResponse(v *domain.Vendor) vendorResponse {
 	return vendorResponse{
 		Version: v.Version, EnforcedVersion: v.EnforcedVersion, EnforcementPending: v.Version > v.EnforcedVersion, SuspensionReason: v.SuspensionReason,
+		AcceptingOrders: v.AcceptingOrders,
 		ID:              v.ID,
 		UserID:          v.UserID,
 		ShopName:        v.ShopName,
@@ -71,6 +73,30 @@ type publicVendorResponse struct {
 	// ShopPolicyVersion is the approved shop policy version shown, when
 	// versioned policies are on.
 	ShopPolicyVersion *int `json:"shop_policy_version,omitempty"`
+	// Availability (AF-18) is the shop's vacation, when the feature is wired.
+	Availability *publicAvailabilityResponse `json:"availability,omitempty"`
+}
+
+// publicAvailabilityResponse tells buyers whether the shop takes new
+// orders. Times are UTC RFC3339; the page shows them in local time.
+type publicAvailabilityResponse struct {
+	AcceptingOrders bool       `json:"accepting_orders"`
+	Message         string     `json:"message,omitempty"`
+	NextOpenAt      *time.Time `json:"next_open_at,omitempty"`
+	// PauseStartsAt announces a scheduled vacation.
+	PauseStartsAt *time.Time `json:"pause_starts_at,omitempty"`
+}
+
+func toPublicAvailability(a *domain.Availability) *publicAvailabilityResponse {
+	out := &publicAvailabilityResponse{AcceptingOrders: a.AcceptingOrders, NextOpenAt: a.NextOpenAt()}
+	if a.Current != nil {
+		out.Message = a.Current.Message
+		if a.Current.Status == domain.IntervalScheduled {
+			start := a.Current.StartsAt
+			out.PauseStartsAt = &start
+		}
+	}
+	return out
 }
 
 func toPublicVendorResponse(v *domain.Vendor) publicVendorResponse {

@@ -19,6 +19,9 @@ import (
 	"shopee/backend/pkg/telemetry"
 )
 
+// ImportUploadPath is the multipart CSV upload of AF-16.
+const ImportUploadPath = "/api/inventory/vendor/import-jobs"
+
 func NewRouter(
 	env string,
 	log zerolog.Logger,
@@ -45,7 +48,10 @@ func NewRouter(
 		ctx, cancel := context.WithTimeout(c.Request.Context(), 30*time.Second)
 		defer cancel()
 		c.Request = c.Request.WithContext(ctx)
-		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 1<<20)
+		// AF-16 CSV uploads carry their own, larger cap (IMPORT_MAX_BYTES).
+		if c.FullPath() != ImportUploadPath || c.Request.Method != http.MethodPost {
+			c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 1<<20)
+		}
 		c.Next()
 	})
 

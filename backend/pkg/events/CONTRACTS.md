@@ -19,7 +19,7 @@ Domain events between services travel on NATS JetStream, stream `SHOPEE_EVENTS`,
 
 | Type | Producer (outbox) | Consumers (durable) | Payload | Consumer semantics |
 |---|---|---|---|---|
-| `vendor.status_changed` | Vendor (`vendor_outbox`) | Catalog `catalog-vendor-status`, Order `order-vendor-status` | `vendor_id`, `status`, `version` | Keep highest version; older ignored |
+| `vendor.status_changed` | Vendor (`vendor_outbox`) | Catalog `catalog-vendor-status`, Order `order-vendor-status` | `vendor_id`, `status`, `version`, `accepting_orders` (AF-18, additive; absent = true) | Keep highest version; older ignored. A vacation flip bumps the version, so checkout planned before it fails Order's fence |
 | `vendor.notification_requested` | Vendor (`vendor_notification_outbox`) | Notification `notification-requests` | `user_id`, `type`, `reference_id` | One notification per event (dedup key) |
 | `vendor.policy_published` | Vendor (`policy_outbox`) | Order `order-policy-versions` | `policy_id`, `scope` (marketplace/shop), `vendor_id`, `kind`, `version`, `content_hash`, `rule_refs`, `effective_at` | Versions are immutable: store once per `policy_id`; the active one is picked by `effective_at` at checkout |
 | `catalog.product_status_changed` | Catalog (`product_status_outbox`) | Order `order-product-status` | `product_id`, `version`, `is_visible` | Keep highest version |

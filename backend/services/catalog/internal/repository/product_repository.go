@@ -97,8 +97,16 @@ func (r *ProductRepository) ListByStatus(ctx context.Context, status string, lim
 
 // storefrontWhereClause builds the WHERE clause shared by ListStorefront and
 // CountStorefront, so the two never drift apart on what counts as "visible".
+//
+// AF-18: products of a shop on vacation stay on that shop's own page (read
+// only, under its vacation notice) but are not advertised in search or
+// category browsing.
 func storefrontWhereClause(categoryID, vendorID, search string) (clause string, args []any) {
-	clause = `WHERE status = 'approved' AND is_active = TRUE AND EXISTS (SELECT 1 FROM vendor_sale_status vs WHERE vs.vendor_id=products.vendor_id AND vs.status='approved' AND vs.confirmed_at>now()-interval '60 seconds')`
+	accepting := ` AND vs.accepting_orders`
+	if vendorID != "" {
+		accepting = ""
+	}
+	clause = `WHERE status = 'approved' AND is_active = TRUE AND EXISTS (SELECT 1 FROM vendor_sale_status vs WHERE vs.vendor_id=products.vendor_id AND vs.status='approved' AND vs.confirmed_at>now()-interval '60 seconds'` + accepting + `)`
 
 	if vendorID != "" {
 		args = append(args, vendorID)

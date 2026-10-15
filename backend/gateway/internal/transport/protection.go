@@ -94,6 +94,13 @@ var rateRules = []rateRule{
 	{"refund_destination", 10, func(m, p, _ string) bool {
 		return m == http.MethodPost && strings.HasPrefix(p, "/api/payments/refunds/") && strings.HasSuffix(p, "/beneficiary")
 	}},
+	// Business reports (AF-20) aggregate months of history per call; a
+	// person changes filters a few times a minute, a loop is load.
+	{"reports", 120, func(m, p, _ string) bool { return m == http.MethodGet && strings.Contains(p, "/business-reports") }},
+	// Shop vacation changes (AF-18) are rare.
+	{"availability", 20, func(m, p, _ string) bool {
+		return (m == http.MethodPut || m == http.MethodDelete) && strings.HasPrefix(p, "/api/vendor/") && strings.HasSuffix(p, "/availability")
+	}},
 	{"upload", 60, func(m, _, ct string) bool { return m == http.MethodPost && strings.HasPrefix(ct, "multipart/") }},
 	{"default", 1200, func(string, string, string) bool { return true }},
 }

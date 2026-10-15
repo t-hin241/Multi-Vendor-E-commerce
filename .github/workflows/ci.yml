@@ -344,7 +344,7 @@ jobs:
           sed 's#/etc/prometheus/alerts.yml#/cfg/alerts.yml#' deploy/observability/prometheus.yml > prometheus-ci.yml
           docker run --rm --entrypoint promtool -v "$PWD/deploy/observability:/cfg:ro" -v "$PWD/prometheus-ci.yml:/p.yml:ro" "$prom" check config /p.yml
           for f in deploy/observability/grafana/dashboards/*.json; do jq -e '.uid and (.panels | length > 0)' "$f" > /dev/null; done
-      - run: bash -n deploy/check-exposure.sh && bash -n deploy/rewrite-media-urls.sh && bash -n deploy/data-preflight.sh && bash -n deploy/observability/monitor-role.sh && bash -n deploy/loadtest/run.sh && bash -n deploy/gen-jwt-keys.sh && bash -n deploy/gen-redis-passwords.sh && bash -n deploy/sqlc.sh && sh -n deploy/redis/acl.sh
+      - run: bash -n deploy/check-exposure.sh && bash -n deploy/rewrite-media-urls.sh && bash -n deploy/data-preflight.sh && bash -n deploy/observability/monitor-role.sh && bash -n deploy/loadtest/run.sh && bash -n deploy/rehearsal/variant-pricing.sh && bash -n deploy/gen-jwt-keys.sh && bash -n deploy/gen-redis-passwords.sh && bash -n deploy/sqlc.sh && sh -n deploy/redis/acl.sh
       # Plan 14 DEV-01: seed/demo data stays in the local seed tooling; nothing
       # that builds an image may carry its accounts or placeholder passwords.
       - name: No seed accounts or demo credentials in image sources
@@ -357,7 +357,7 @@ jobs:
           fi
       - name: Data preflight SQL is read-only
         run: |
-          if grep -nIiE "^\s*(insert|update|delete|truncate|alter|drop|create|grant|revoke)([^a-z_]|$)" deploy/data-preflight/*.sql; then
+          if grep -nIiE "^\s*(insert|update|delete|truncate|alter|drop|create|grant|revoke)([^a-z_]|$)" deploy/data-preflight/*.sql deploy/variant-pricing-preflight.sql; then
             exit 1
           fi
 

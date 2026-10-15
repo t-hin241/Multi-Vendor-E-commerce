@@ -161,7 +161,8 @@ func (f *lineFacts) lineView(item *domain.CartItem) LineView {
 	line.SeenPricingVersion = item.SeenPricingVersion
 	q, found := f.quotes[purchasequote.Key(item.ProductID, item.VariantID)]
 	if found {
-		product = &domain.ProductFacts{Found: q.ProductFound, Status: q.Status, IsVisible: q.IsSellable, HasVariants: q.HasVariants, PriceAmount: q.UnitPrice, Currency: q.Currency, PricingVersion: q.VariantVersion}
+		product = &domain.ProductFacts{Found: q.ProductFound, Status: q.Status, IsVisible: q.IsSellable, HasVariants: q.HasVariants, PriceAmount: q.UnitPrice, Currency: q.Currency, PricingVersion: q.VariantVersion,
+			ShopPaused: q.ShopPaused}
 		line.ProductName = q.ProductName
 		line.VendorID = q.VendorID
 		line.PricingVersion = q.VariantVersion

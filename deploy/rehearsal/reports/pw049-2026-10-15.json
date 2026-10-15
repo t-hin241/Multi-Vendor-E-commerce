@@ -1,0 +1,635 @@
+{
+ "plan": "AF-10",
+ "pending_work": "PW-049",
+ "date_utc": "2026-10-15",
+ "started": "2026-10-15T02:45:31Z",
+ "finished": "2026-10-15T02:54:54Z",
+ "environment": "local disposable Compose project shopee-pw049, copy of shopee-loadtest_postgres-data",
+ "base_ref": "ea556140f8d42ad4e9692dfc21a5f3f79d5269ff",
+ "target_ref": "e47cb3c555046eeb1f6ac0e54040214648065c44",
+ "run": "11f12c",
+ "images": {
+  "base": {
+   "identity": "sha256:4ec85ef8b47c09b3d3d3f0c705b73df4494abc2572ab67b0dabb4f54147252ac",
+   "vendor": "sha256:495632022ec1954bb1215799fef3ea966b0a579d51f5b1758e6fab35db11b54b",
+   "catalog": "sha256:e7d2bbd91b003dcf3d9284fbc69b759f466ef619e88f9b7a49bc24b266e81b89",
+   "inventory": "sha256:73ba5f4916d91c4845d6c0fdda1a21e8b01c02ba0106d5264a80e24c960225de",
+   "cart": "sha256:8f53f43d7ca78a621e83121aa99a2760b9d17e00d2788693e907828a9b367dd6",
+   "order": "sha256:98d124b0718e59aaf645a1b7b5ae883053bd63a04e4297c3ddef530e534c40b5",
+   "payment": "sha256:0084f733588c358615377c53eec2e1f6295f90f649de3a222ef399c8abc20685",
+   "shipment": "sha256:312e1be4b3bbacb9f3b003bbdc09c90e34bb36f3a3f27d2e79d0ef2cabcd35a0",
+   "admin": "sha256:a253a5f7f13aa188915e361c5533e72173de46882144f3721b2c00a68c5fb7cd",
+   "notification": "sha256:214aad18959ded79217d485a630d36578e4369ac95dc883aa20273ecb4a32724",
+   "review": "sha256:da8a268a9b85969545dd745a70b0988a45623b2e8aeba1b0d95eccf9b2d1312a",
+   "gateway": "sha256:85ff5831004290e1b15680db61061ccd7ade2c1252d28ebd9fbbea5bae56881e",
+   "frontend": "sha256:6b49d0d887e5b9aef756952434403eb8be98770c82beb213dec4e8cf15f679a9"
+  },
+  "target": {
+   "identity": "sha256:4ec85ef8b47c09b3d3d3f0c705b73df4494abc2572ab67b0dabb4f54147252ac",
+   "vendor": "sha256:495632022ec1954bb1215799fef3ea966b0a579d51f5b1758e6fab35db11b54b",
+   "catalog": "sha256:448e42ed7830a247ce02e9d419acfb872069457755b0ee4ae25c2ee010fa47f7",
+   "inventory": "sha256:73ba5f4916d91c4845d6c0fdda1a21e8b01c02ba0106d5264a80e24c960225de",
+   "cart": "sha256:98dfe3763dfc39f921990cf92a278084af46a32e2a1f1e6931a7503fa2d0c639",
+   "order": "sha256:edbd0570008bdd85ae2107c91dcab134f98dcf6c1525bc7bd9fb1cfb55abb2d0",
+   "payment": "sha256:0084f733588c358615377c53eec2e1f6295f90f649de3a222ef399c8abc20685",
+   "shipment": "sha256:312e1be4b3bbacb9f3b003bbdc09c90e34bb36f3a3f27d2e79d0ef2cabcd35a0",
+   "admin": "sha256:a253a5f7f13aa188915e361c5533e72173de46882144f3721b2c00a68c5fb7cd",
+   "notification": "sha256:214aad18959ded79217d485a630d36578e4369ac95dc883aa20273ecb4a32724",
+   "review": "sha256:da8a268a9b85969545dd745a70b0988a45623b2e8aeba1b0d95eccf9b2d1312a",
+   "gateway": "sha256:85ff5831004290e1b15680db61061ccd7ade2c1252d28ebd9fbbea5bae56881e",
+   "frontend": "sha256:b7beb52283e082986a2e712e601c3e12f031e3bd42826eecb645475dde3af1e8"
+  }
+ },
+ "ids": {
+  "vendor": "82d84cf0-cbf8-4fd6-9147-2c5eb37d9545",
+  "sku_product": "35264019-07e5-4963-a4d4-0f3b8d66f529",
+  "sku_variants": [
+   "a811ee3d-c802-405a-ae68-8f91cad08eb6",
+   "cb6a6aca-2e36-4757-a68c-4a4b1ce78bce"
+  ],
+  "plain_product": "11553d34-e792-4a48-957b-449843f03793",
+  "single_price_product": "9fcc2026-2d83-4a43-bdab-8e212ac3be43",
+  "legacy_order": "6a64c6cd-b7d3-4f13-b486-8878d82f0bd5",
+  "flag_off_order": "d8147874-e49e-4738-904c-6b0a7ac72650",
+  "pilot_order": "1d50681e-bd0b-4bdd-92fa-ca8e7e852afc",
+  "rollback_return": "1657fafe-36e2-4719-97fe-2cac5fb4785b",
+  "outage_event": "variant-a811ee3d-c802-405a-ae68-8f91cad08eb6-v5"
+ },
+ "checks": [
+  {
+   "phase": "legacy",
+   "name": "legacy SKU added to cart",
+   "ok": true,
+   "at": "2026-10-15T02:48:22.252Z"
+  },
+  {
+   "phase": "legacy",
+   "name": "legacy order paid at product price",
+   "ok": true,
+   "at": "2026-10-15T02:48:24.113Z",
+   "order": "6a64c6cd-b7d3-4f13-b486-8878d82f0bd5",
+   "item_price": 100000,
+   "intent": 120000,
+   "total": 120000
+  },
+  {
+   "phase": "legacy",
+   "name": "legacy cart line kept for upgrade",
+   "ok": true,
+   "at": "2026-10-15T02:48:24.144Z"
+  },
+  {
+   "phase": "flag-off",
+   "name": "capability reported off",
+   "ok": true,
+   "at": "2026-10-15T02:51:25.373Z"
+  },
+  {
+   "phase": "flag-off",
+   "name": "range collapses to product price",
+   "ok": true,
+   "at": "2026-10-15T02:51:25.498Z",
+   "price": 100000,
+   "min": 100000,
+   "max": 100000
+  },
+  {
+   "phase": "flag-off",
+   "name": "backfill copied the old product price with audit",
+   "ok": true,
+   "at": "2026-10-15T02:51:26.172Z",
+   "backfill": "2"
+  },
+  {
+   "phase": "flag-off",
+   "name": "different SKU price refused while off",
+   "ok": true,
+   "at": "2026-10-15T02:51:28.886Z",
+   "status": 409,
+   "code": "conflict"
+  },
+  {
+   "phase": "flag-off",
+   "name": "refused write left price and version",
+   "ok": true,
+   "at": "2026-10-15T02:51:29.489Z",
+   "before": {
+    "price": 100000,
+    "version": 1,
+    "source": "product_backfill_v1"
+   }
+  },
+  {
+   "phase": "flag-off",
+   "name": "product price edit synced every SKU",
+   "ok": true,
+   "at": "2026-10-15T02:51:31.183Z",
+   "a": {
+    "price": 120000,
+    "version": 2,
+    "source": "vendor_revision_v1"
+   },
+   "b": {
+    "price": 120000,
+    "version": 2,
+    "source": "vendor_revision_v1"
+   },
+   "audits": "2"
+  },
+  {
+   "phase": "flag-off",
+   "name": "price edit follows moderation (back to draft)",
+   "ok": true,
+   "at": "2026-10-15T02:51:31.819Z",
+   "status": "draft"
+  },
+  {
+   "phase": "flag-off",
+   "name": "outbox drained",
+   "ok": true,
+   "at": "2026-10-15T02:51:33.894Z"
+  },
+  {
+   "phase": "flag-off",
+   "name": "legacy cart line needs confirmation",
+   "ok": true,
+   "at": "2026-10-15T02:51:34.200Z",
+   "line": {
+    "state": "available",
+    "changed": true,
+    "price": 120000
+   },
+   "ready": false
+  },
+  {
+   "phase": "flag-off",
+   "name": "quantity change keeps confirmation pending",
+   "ok": true,
+   "at": "2026-10-15T02:51:34.241Z",
+   "ready": false
+  },
+  {
+   "phase": "flag-off",
+   "name": "flag-off SKU order at product price",
+   "ok": true,
+   "at": "2026-10-15T02:51:36.448Z",
+   "order": "d8147874-e49e-4738-904c-6b0a7ac72650",
+   "items": [
+    {
+     "id": "b0e4a634-b3a7-4efd-b0da-85cdca137a98",
+     "variant": "cb6a6aca-2e36-4757-a68c-4a4b1ce78bce",
+     "price": 120000,
+     "qty": 1,
+     "subtotal": 120000,
+     "source": "variant",
+     "pv": "8",
+     "vv": "2"
+    }
+   ],
+   "intent": 140000,
+   "total": 140000
+  },
+  {
+   "phase": "flag-off",
+   "name": "pre-upgrade order unchanged",
+   "ok": true,
+   "at": "2026-10-15T02:51:37.122Z",
+   "legacyItems": [
+    {
+     "id": "5ff667dc-6880-4b5e-a81f-a9e261c52ad5",
+     "variant": "a811ee3d-c802-405a-ae68-8f91cad08eb6",
+     "price": 100000,
+     "qty": 1,
+     "subtotal": 100000,
+     "source": "product",
+     "pv": "",
+     "vv": ""
+    }
+   ]
+  },
+  {
+   "phase": "pilot",
+   "name": "capability reported on",
+   "ok": true,
+   "at": "2026-10-15T02:51:53.026Z"
+  },
+  {
+   "phase": "pilot",
+   "name": "two editors, one CAS winner",
+   "ok": true,
+   "at": "2026-10-15T02:51:54.970Z",
+   "statuses": [
+    200,
+    409
+   ],
+   "codes": [
+    "",
+    "price_changed"
+   ]
+  },
+  {
+   "phase": "pilot",
+   "name": "non-positive SKU price 0 refused",
+   "ok": true,
+   "at": "2026-10-15T02:51:56.545Z",
+   "status": 422
+  },
+  {
+   "phase": "pilot",
+   "name": "non-positive SKU price -1 refused",
+   "ok": true,
+   "at": "2026-10-15T02:51:57.656Z",
+   "status": 422
+  },
+  {
+   "phase": "pilot",
+   "name": "SKU edits audited with actor",
+   "ok": true,
+   "at": "2026-10-15T02:51:58.926Z",
+   "audit": "2"
+  },
+  {
+   "phase": "pilot",
+   "name": "SKU edit back to draft",
+   "ok": true,
+   "at": "2026-10-15T02:51:59.478Z"
+  },
+  {
+   "phase": "pilot",
+   "name": "draft revision not on storefront",
+   "ok": true,
+   "at": "2026-10-15T02:51:59.513Z",
+   "status": 404
+  },
+  {
+   "phase": "pilot",
+   "name": "outbox drained after SKU edits",
+   "ok": true,
+   "at": "2026-10-15T02:52:01.232Z"
+  },
+  {
+   "phase": "pilot",
+   "name": "storefront shows SKU range",
+   "ok": true,
+   "at": "2026-10-15T02:52:01.270Z",
+   "min": 90000,
+   "max": 150000
+  },
+  {
+   "phase": "pilot",
+   "name": "listing shows SKU range",
+   "ok": true,
+   "at": "2026-10-15T02:52:01.309Z",
+   "row": {
+    "min": 90000,
+    "max": 150000
+   }
+  },
+  {
+   "phase": "pilot",
+   "name": "product with SKUs needs a SKU",
+   "ok": true,
+   "at": "2026-10-15T02:52:01.623Z",
+   "status": 400,
+   "code": "validation_error"
+  },
+  {
+   "phase": "pilot",
+   "name": "SKU of another product refused",
+   "ok": true,
+   "at": "2026-10-15T02:52:01.642Z",
+   "status": 409,
+   "code": "variant_not_sellable"
+  },
+  {
+   "phase": "pilot",
+   "name": "cart prices per SKU, client price not used",
+   "ok": true,
+   "at": "2026-10-15T02:52:01.718Z",
+   "a": 150000,
+   "b": 90000,
+   "subtotal": {
+    "amount": 240000,
+    "currency": "VND"
+   },
+   "fake_add_status": 201
+  },
+  {
+   "phase": "pilot",
+   "name": "preview totals SKU prices",
+   "ok": true,
+   "at": "2026-10-15T02:52:01.749Z",
+   "subtotal": 240000,
+   "quote": "f726436fdd2e3b9a1510f4e7363d38dd82f60d1709b3a764a614ea07f66531ce"
+  },
+  {
+   "phase": "pilot",
+   "name": "price change after preview: 409 price_changed, nothing created",
+   "ok": true,
+   "at": "2026-10-15T02:52:06.271Z",
+   "status": 409,
+   "code": "price_changed",
+   "orders": [
+    "2",
+    "2"
+   ],
+   "reserved": [
+    "0",
+    "0"
+   ]
+  },
+  {
+   "phase": "pilot",
+   "name": "cart asks to confirm the new price",
+   "ok": true,
+   "at": "2026-10-15T02:52:06.303Z"
+  },
+  {
+   "phase": "pilot",
+   "name": "buyer total that differs from the quote refused",
+   "ok": true,
+   "at": "2026-10-15T02:52:07.013Z",
+   "status": 409,
+   "code": "checkout_total_changed"
+  },
+  {
+   "phase": "pilot",
+   "name": "order snapshots SKU prices and versions",
+   "ok": true,
+   "at": "2026-10-15T02:52:08.834Z",
+   "order": "1d50681e-bd0b-4bdd-92fa-ca8e7e852afc",
+   "items": [
+    {
+     "id": "856fa0dd-19e7-4272-9187-26bf3688d8ed",
+     "variant": "a811ee3d-c802-405a-ae68-8f91cad08eb6",
+     "price": 160000,
+     "qty": 1,
+     "subtotal": 160000,
+     "source": "variant",
+     "pv": "17",
+     "vv": "4"
+    },
+    {
+     "id": "e443197a-eea2-4be0-85b2-069f68f0e22d",
+     "variant": "cb6a6aca-2e36-4757-a68c-4a4b1ce78bce",
+     "price": 90000,
+     "qty": 1,
+     "subtotal": 90000,
+     "source": "variant",
+     "pv": "17",
+     "vv": "3"
+    }
+   ]
+  },
+  {
+   "phase": "pilot",
+   "name": "capture equals Order total",
+   "ok": true,
+   "at": "2026-10-15T02:52:08.844Z",
+   "intent": 275000,
+   "total": 275000,
+   "shipping": 25000
+  },
+  {
+   "phase": "pilot",
+   "name": "provider amount matches",
+   "ok": true,
+   "at": "2026-10-15T02:52:09.421Z",
+   "captured": "275000|captured"
+  },
+  {
+   "phase": "pilot",
+   "name": "order items unchanged after SKU edit",
+   "ok": true,
+   "at": "2026-10-15T02:52:11.883Z"
+  },
+  {
+   "phase": "pilot",
+   "name": "snapshot trigger refuses edits",
+   "ok": true,
+   "at": "2026-10-15T02:52:12.439Z",
+   "stderr": "ERROR:  Order item pricing snapshots are immutable"
+  },
+  {
+   "phase": "pilot",
+   "name": "return amount uses purchase price",
+   "ok": true,
+   "at": "2026-10-15T02:52:13.585Z",
+   "refund_amount": 90000
+  },
+  {
+   "phase": "pilot",
+   "name": "refund requested for the return",
+   "ok": true,
+   "at": "2026-10-15T02:52:13.721Z",
+   "refund": {
+    "id": "a43122b3-12c6-4e12-9d6d-c387be1368e8",
+    "amount": 90000,
+    "status": "awaiting_provider_refund"
+   }
+  },
+  {
+   "phase": "pilot",
+   "name": "return refunded at purchase price",
+   "ok": true,
+   "at": "2026-10-15T02:52:17.675Z",
+   "status": "refunded"
+  },
+  {
+   "phase": "pilot",
+   "name": "return restocked once",
+   "ok": true,
+   "at": "2026-10-15T02:52:18.296Z",
+   "movements": "1"
+  },
+  {
+   "phase": "pilot",
+   "name": "order items unchanged after refund",
+   "ok": true,
+   "at": "2026-10-15T02:52:18.885Z"
+  },
+  {
+   "phase": "outage",
+   "name": "outbox empty before drill",
+   "ok": true,
+   "at": "2026-10-15T02:52:26.148Z"
+  },
+  {
+   "phase": "outage",
+   "name": "outbox holds the event while NATS is down",
+   "ok": true,
+   "at": "2026-10-15T02:52:32.287Z",
+   "pending": 1
+  },
+  {
+   "phase": "outage",
+   "name": "event parked after retries, visible to operators",
+   "ok": true,
+   "at": "2026-10-15T02:53:10.198Z",
+   "parked": 1,
+   "operations": {
+    "cleanup_failures": 0,
+    "cleanup_parked": 0,
+    "cleanup_pending": 2,
+    "pending_review": 0,
+    "sales_cache_stale": 5440,
+    "status_delivery_failures": 5,
+    "status_parked": 0,
+    "status_pending": 1,
+    "stock_cache_stale": 1052,
+    "variant_price_parked": 1,
+    "variant_price_pending": 0,
+    "vendor_cache_stale": 354
+   }
+  },
+  {
+   "phase": "outage",
+   "name": "parked event waits for an operator",
+   "ok": true,
+   "at": "2026-10-15T02:53:16.612Z"
+  },
+  {
+   "phase": "outage",
+   "name": "replay drains the outbox",
+   "ok": true,
+   "at": "2026-10-15T02:53:17.223Z"
+  },
+  {
+   "phase": "outage",
+   "name": "replay audited",
+   "ok": true,
+   "at": "2026-10-15T02:53:17.878Z",
+   "replayAudit": "1"
+  },
+  {
+   "phase": "outage",
+   "name": "published event keeps its id",
+   "ok": true,
+   "at": "2026-10-15T02:53:19.078Z",
+   "output": "stored messages with Nats-Msg-Id variant-a811ee3d-c802-405a-ae68-8f91cad08eb6-v5: 1",
+   "err": ""
+  },
+  {
+   "phase": "rollback",
+   "name": "capability reported off after rollback",
+   "ok": true,
+   "at": "2026-10-15T02:53:36.707Z"
+  },
+  {
+   "phase": "rollback",
+   "name": "SKU priced apart fails closed",
+   "ok": true,
+   "at": "2026-10-15T02:53:37.020Z",
+   "add": 409,
+   "code": "variant_not_sellable"
+  },
+  {
+   "phase": "rollback",
+   "name": "ordinary product still sells",
+   "ok": true,
+   "at": "2026-10-15T02:53:39.211Z",
+   "order": "2aa0a2a7-db6e-47cd-9439-aecc6c04d7e3",
+   "items": [
+    {
+     "id": "f5ad6750-1d51-4bc8-a8a3-f24a3b800889",
+     "variant": null,
+     "price": 70000,
+     "qty": 1,
+     "subtotal": 70000,
+     "source": "product",
+     "pv": "3",
+     "vv": ""
+    }
+   ]
+  },
+  {
+   "phase": "rollback",
+   "name": "pilot order history kept by new readers",
+   "ok": true,
+   "at": "2026-10-15T02:53:39.914Z",
+   "pilotItems": [
+    {
+     "id": "856fa0dd-19e7-4272-9187-26bf3688d8ed",
+     "variant": "a811ee3d-c802-405a-ae68-8f91cad08eb6",
+     "price": 160000,
+     "qty": 1,
+     "subtotal": 160000,
+     "source": "variant",
+     "pv": "17",
+     "vv": "4"
+    },
+    {
+     "id": "e443197a-eea2-4be0-85b2-069f68f0e22d",
+     "variant": "cb6a6aca-2e36-4757-a68c-4a4b1ce78bce",
+     "price": 90000,
+     "qty": 1,
+     "subtotal": 90000,
+     "source": "variant",
+     "pv": "17",
+     "vv": "3"
+    }
+   ]
+  },
+  {
+   "phase": "rollback",
+   "name": "buyer still reads the pilot order",
+   "ok": true,
+   "at": "2026-10-15T02:53:39.931Z",
+   "status": "completed",
+   "total": 275000
+  },
+  {
+   "phase": "rollback",
+   "name": "single-price SKU still sells",
+   "ok": true,
+   "at": "2026-10-15T02:53:45.573Z",
+   "order": "1109611e-ff9e-4f31-a6ea-260b393e6461",
+   "items": [
+    {
+     "id": "80560869-c1df-4c2d-98db-b62beb111f65",
+     "variant": "b975f7e6-0571-4cd8-adff-5a20080c9387",
+     "price": 85000,
+     "qty": 1,
+     "subtotal": 85000,
+     "source": "variant",
+     "pv": "5",
+     "vv": "1"
+    }
+   ]
+  },
+  {
+   "phase": "rollback",
+   "name": "return after rollback priced from the order item",
+   "ok": true,
+   "at": "2026-10-15T02:53:45.812Z",
+   "refund_amount": 160000,
+   "item_price": 160000
+  },
+  {
+   "phase": "rollback",
+   "name": "refund after rollback completes at the sold price",
+   "ok": true,
+   "at": "2026-10-15T02:53:48.838Z",
+   "refund": 160000,
+   "status": "refunded",
+   "order_refunded": "250000"
+  },
+  {
+   "phase": "rollback",
+   "name": "SKU prices left as sold (no mass reset)",
+   "ok": true,
+   "at": "2026-10-15T02:53:49.406Z",
+   "differentiated": "2"
+  },
+  {
+   "phase": "rollback",
+   "name": "down migrations refuse after use",
+   "ok": true,
+   "at": "2026-10-15T02:54:53.995Z",
+   "output": [
+    "catalog down 1 refused: Variant pricing has been used; keep compatible readers and disable new checkout instead in line 0: -- Losing a differentiated price/audit is unsafe even when current prices match.",
+    "order down 1 refused: Keep variant pricing snapshots and compatible readers in line 0: DO $$ BEGIN"
+   ]
+  }
+ ]
+}

@@ -12,6 +12,7 @@ import (
 
 	"shopee/backend/pkg/adminaccess"
 	"shopee/backend/pkg/adminaudit"
+	"shopee/backend/pkg/bizreport"
 	sessionconfig "shopee/backend/pkg/config"
 	"shopee/backend/pkg/eventbus"
 	"shopee/backend/pkg/events"
@@ -338,6 +339,16 @@ func main() {
 	casesla.Register(adminGroup, casesla.Service{Repo: slaStore, Roles: slaRoles, Permissions: adminaccess.Client{URL: internalServices.IdentityURL, Key: internalServices.Key}}, log)
 	go (casesla.Worker{Store: slaStore, Owner: "payment", Config: slaConfig, Roles: slaRoles, Permissions: adminaccess.Client{URL: internalServices.IdentityURL, Key: internalServices.Key}, Publisher: bus.Bus, Log: log}).Run(syncCtx)
 	bus.RegisterAdmin(adminGroup, roles)
+	// AF-20: money as Payment recorded it; shops read their ledger part
+	// with finance.read.
+	reportShops := shopaccess.Client{URL: cfg.VendorServiceURL, Key: internalServices.Key}
+	reports := bizreport.Handlers{Log: log, Service: bizreport.Service{Source: repository.BusinessReports{Pool: dbPool}, Enabled: cfg.BusinessReports,
+		Admins: roles, Shops: func(ctx context.Context, actor, vendorID string) error {
+			_, err := reportShops.Authorize(ctx, actor, vendorID, shopaccess.FinanceRead)
+			return err
+		}}}
+	reports.RegisterAdmin(adminGroup)
+	reports.RegisterShop(router.Group("/api/payments/vendor/:vendorId", middleware.RequireAuth(jwtManager), middleware.SellerConsole()))
 	adminaudit.Register(adminGroup, "/audit-events",
 		adminaudit.Source{Name: "payment", SQL: repository.AuditSearchSQL + " UNION ALL " + eventbus.InboxAuditSearchSQL + " UNION ALL " + casesla.AuditSearchSQL, DB: dbPool, Roles: roles}, log)
 

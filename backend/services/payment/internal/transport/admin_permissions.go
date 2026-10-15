@@ -11,6 +11,8 @@ import "shopee/backend/pkg/adminaccess"
 // for the claimer (anyone else also needs finance.approve, checked by
 // the use case).
 var AdminRoutes = adminaccess.Routes{
+	"GET /api/payments/admin/business-reports":                        adminaccess.FinanceRead,
+	"GET /api/payments/admin/business-reports/drilldown":              adminaccess.FinanceRead,
 	"GET /api/payments/admin/vendor/:vendorId/statement-capabilities": adminaccess.FinanceRead,
 	"GET /api/payments/admin/vendor/:vendorId/statements":             adminaccess.FinanceRead,
 	"GET /api/payments/admin/vendor/:vendorId/payouts/:id":            adminaccess.FinanceRead,

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -26,6 +27,9 @@ type Config struct {
 	// UpstreamTimeout bounds each read from a domain service, so one slow
 	// service shows as unavailable instead of stalling the page.
 	UpstreamTimeout time.Duration
+	// BusinessReports is FEATURE_BUSINESS_REPORTS_ENABLED (AF-20): the
+	// business report page reads the owners' reports.
+	BusinessReports bool
 }
 
 // upstreams lists the services in a fixed order. REVIEW_SERVICE_URL is
@@ -71,6 +75,13 @@ func Load() (Config, error) {
 			return Config{}, fmt.Errorf("config: ADMIN_UPSTREAM_TIMEOUT must be a duration between 500ms and 30s")
 		}
 		cfg.UpstreamTimeout = d
+	}
+	if raw := os.Getenv("FEATURE_BUSINESS_REPORTS_ENABLED"); raw != "" {
+		v, err := strconv.ParseBool(raw)
+		if err != nil {
+			return Config{}, fmt.Errorf("config: FEATURE_BUSINESS_REPORTS_ENABLED must be true or false")
+		}
+		cfg.BusinessReports = v
 	}
 	return cfg, nil
 }

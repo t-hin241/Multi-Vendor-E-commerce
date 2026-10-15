@@ -137,3 +137,13 @@ type StockAlertWork struct {
 	Attempts  int       `json:"attempts"`
 	CreatedAt time.Time `json:"created_at"`
 }
+
+// CatalogTarget is a product, or one SKU of it, of one shop as Catalog
+// resolves it for AF-16 stock imports.
+type CatalogTarget struct {
+	ProductID   string `json:"product_id"`
+	ProductName string `json:"product_name"`
+	HasVariants bool   `json:"has_variants"`
+	VariantID   string `json:"variant_id,omitempty"`
+	SKU         string `json:"sku,omitempty"`
+}

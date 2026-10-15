@@ -41,19 +41,23 @@ export function isOwner(shop: Pick<AccessibleShop, "role"> | undefined): boolean
 // Which console pages a shop member may open. Pages not listed stay open
 // to anyone in the console. "owner" means the shop owner only; "vendor"
 // means a vendor account (registering shops is not a shop permission).
-export type NavRequirement = { permission: string } | { owner: true } | { vendorAccount: true };
+export type NavRequirement =
+  { permission: string } | { anyPermission: string[] } | { owner: true } | { vendorAccount: true };
 
 export const NAV_REQUIREMENTS: Record<string, NavRequirement> = {
   "/vendor/statements": { permission: "finance.read" },
   "/vendor/inventory": { permission: "inventory.read" },
   "/vendor/payout-accounts": { owner: true },
   "/vendor": { permission: "analytics.read" },
+  "/vendor/reports": { permission: "analytics.read" },
   "/vendor/products": { permission: "products.read" },
+  "/vendor/bulk": { anyPermission: ["products.read", "inventory.read"] },
   "/vendor/orders": { permission: "orders.read" },
   "/vendor/support": { permission: "support.reply" },
   "/vendor/reviews": { permission: "products.read" },
   "/vendor/shipping": { permission: "orders.read" },
   "/vendor/staff": { permission: "staff.manage" },
+  "/vendor/availability": { permission: "shop.availability.write" },
   "/vendor/shops": { vendorAccount: true },
 };
 
@@ -66,6 +70,7 @@ export function canOpen(
   if (!rule) return true;
   if ("vendorAccount" in rule) return accountRole === "vendor";
   if ("owner" in rule) return isOwner(shop);
+  if ("anyPermission" in rule) return rule.anyPermission.some((p) => can(shop, p));
   return can(shop, rule.permission);
 }
 

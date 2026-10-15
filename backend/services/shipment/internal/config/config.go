@@ -14,6 +14,8 @@ import (
 )
 
 type Config struct {
+	// BusinessReports is FEATURE_BUSINESS_REPORTS_ENABLED (AF-20).
+	BusinessReports          bool
 	Base                     config.Base
 	VendorServiceURL         string
 	OrderServiceURL          string
@@ -93,8 +95,14 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 
+	businessReports, err := strconv.ParseBool(getEnv("FEATURE_BUSINESS_REPORTS_ENABLED", "false"))
+	if err != nil {
+		return Config{}, fmt.Errorf("config: FEATURE_BUSINESS_REPORTS_ENABLED must be true or false")
+	}
+
 	return Config{
-		Base: base, VendorServiceURL: vendorServiceURL, OrderServiceURL: orderServiceURL,
+		BusinessReports: businessReports,
+		Base:            base, VendorServiceURL: vendorServiceURL, OrderServiceURL: orderServiceURL,
 		CarrierProvider: carrierProvider, CarrierMockWebhookSecret: carrierMockWebhookSecret,
 		AddressRetention:   time.Duration(retentionDays) * 24 * time.Hour,
 		DeliveryResolution: deliveryResolution, AttemptLimit: attemptLimit, ReturnShipping: returnShipping,

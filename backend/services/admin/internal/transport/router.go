@@ -12,6 +12,7 @@ import (
 
 	"shopee/backend/pkg/adminaudit"
 	"shopee/backend/pkg/authjwt"
+	"shopee/backend/pkg/bizreport"
 	"shopee/backend/pkg/health"
 	"shopee/backend/pkg/httpresponse"
 	"shopee/backend/pkg/middleware"
@@ -48,6 +49,19 @@ func NewRouter(env string, log zerolog.Logger, jwt *authjwt.Manager, svc usecase
 	})
 	admin.GET("/dashboard", h.dashboard)
 	admin.GET("/audit", h.audit)
+	admin.GET("/business-reports", func(c *gin.Context) {
+		r, err := bizreport.ParseRange(c.Query("from"), c.Query("to"), c.Query("group"), c.Query("vendor_id"))
+		if err != nil {
+			httpresponse.HandleError(c, h.log, err)
+			return
+		}
+		out, err := h.svc.BusinessReport(c.Request.Context(), middleware.GetUserID(c), c.GetHeader("Authorization"), r)
+		if err != nil {
+			httpresponse.HandleError(c, h.log, err)
+			return
+		}
+		httpresponse.OK(c, http.StatusOK, out)
+	})
 	admin.GET("/work-items", func(c *gin.Context) {
 		out, err := h.svc.WorkItems(c.Request.Context(), middleware.GetUserID(c), c.GetHeader("Authorization"), c.Request.URL.Query())
 		if err != nil {

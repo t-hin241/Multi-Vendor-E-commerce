@@ -6,15 +6,18 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"time"
 
 	"shopee/backend/pkg/adminaccess"
 	"shopee/backend/pkg/adminaudit"
+	"shopee/backend/pkg/bulkimport"
 	sessionconfig "shopee/backend/pkg/config"
 	"shopee/backend/pkg/eventbus"
 	"shopee/backend/pkg/health"
 	"shopee/backend/pkg/identityclient"
 	"shopee/backend/pkg/logger"
 	"shopee/backend/pkg/middleware"
+	"shopee/backend/pkg/platform/objectstorage"
 	"shopee/backend/pkg/platform/postgres"
 	"shopee/backend/pkg/shutdown"
 	"shopee/backend/pkg/telemetry"
@@ -114,6 +117,24 @@ func main() {
 	transport.RegisterStockSelfService(router, jwtManager, adminGuard, transport.StockSelfServiceHandler{UseCase: stockUC, Log: log})
 	workerCtx, stopWorker := context.WithCancel(ctx)
 	defer stopWorker()
+	// AF-16: CSV stock receipts, each row one AF-13 receipt adjustment.
+	bulk := &bulkimport.Service{Owner: "inventory", Store: repository.ImportStore(dbPool), Authorize: stockUC.BulkAuthorizer(),
+		Kinds: map[string]bulkimport.Kind{
+			"stock_receipts": usecase.StockReceiptImport{Stock: stockUC, Catalog: catalogClient, Items: repository.BulkItems{Pool: dbPool}},
+		},
+		Enabled: cfg.BulkImport.Enabled, MaxRows: cfg.BulkImport.MaxRows, MaxBytes: cfg.BulkImport.MaxBytes, Log: log}
+	if cfg.BulkImport.Storage != nil {
+		storeCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		files, err := objectstorage.NewPrivateClient(storeCtx, *cfg.BulkImport.Storage)
+		cancel()
+		if err != nil {
+			log.Fatal().Err(err).Msg("import storage unavailable")
+		}
+		bulk.Files = files
+	}
+	bulkimport.Register(router.Group("/api/inventory/vendor", middleware.RequireAuth(jwtManager), middleware.SellerConsole()),
+		router.Group("/api/inventory/admin", middleware.RequireAuth(jwtManager), middleware.RequireRole("admin"), adminGuard), bulkimport.Handler{S: bulk, Log: log})
+	go bulk.Run(workerCtx)
 	stockAlerts := usecase.StockAlertWorker{Store: stockStore, Notify: adapter.StockAlertClient{URL: cfg.NotificationServiceURL, Key: internalServices.Key}, Log: log}
 	go stockAlerts.Run(workerCtx)
 	// PLT-03: outbox events go to the event bus (HTTP in rollback mode).

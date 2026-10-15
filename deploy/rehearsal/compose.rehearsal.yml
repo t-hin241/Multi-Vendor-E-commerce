@@ -1,0 +1,24 @@
+# Rollout rehearsal stack (deploy/rehearsal/variant-pricing.sh). Its own
+# Compose project: no host port of the development stack is taken, only
+# the gateway and the storefront are published, on their own ports.
+services:
+  postgres: {ports: !reset []}
+  redis: {ports: !reset []}
+  redis-queue: {ports: !reset []}
+  nats: {ports: !reset []}
+  minio: {ports: !reset []}
+  identity: {ports: !reset []}
+  vendor: {ports: !reset []}
+  catalog: {ports: !reset []}
+  inventory: {ports: !reset []}
+  cart: {ports: !reset []}
+  order: {ports: !reset []}
+  payment: {ports: !reset []}
+  shipment: {ports: !reset []}
+  admin: {ports: !reset []}
+  review: {ports: !reset []}
+  notification: {ports: !reset []}
+  gateway:
+    ports: !override ["127.0.0.1:${REHEARSAL_GATEWAY_PORT:-18080}:8080"]
+  frontend:
+    ports: !override ["127.0.0.1:${REHEARSAL_FRONTEND_PORT:-13000}:3000"]

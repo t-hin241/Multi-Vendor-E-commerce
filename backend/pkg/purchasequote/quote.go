@@ -39,6 +39,8 @@ type Line struct {
 	HasVariants    bool   `json:"has_variants"`
 	Status         string `json:"status"`
 	PackageWeight  *int64 `json:"package_weight"`
+	// ShopPaused (AF-18): the shop is on vacation; IsSellable is false.
+	ShopPaused bool `json:"shop_paused,omitempty"`
 }
 type Quote struct {
 	Lines                 []Line `json:"lines"`

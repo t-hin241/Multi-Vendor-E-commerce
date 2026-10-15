@@ -130,12 +130,18 @@ func main() {
 		InvitesPaused: cfg.StaffInvitesPaused, FingerprintKey: cfg.StaffFingerprintKey, AcceptURL: cfg.StaffAcceptURL, Log: log,
 		RequireVerifiedEmail: cfg.StaffRequiresVerifiedEmail}
 	go staffUseCase.RunInvitationDelivery(workerCtx)
+	// AF-18: shop vacations. The scheduler runs with the flag off too, so a
+	// paused shop always reopens on time.
+	availabilityUseCase := &usecase.AvailabilityUseCase{Store: repository.AvailabilityRepository{Pool: dbPool}, Vendors: vendorRepo,
+		Access: staffUseCase, Tx: ops.Tx, Events: outbox, Notices: notices, Enabled: cfg.ShopVacation, Log: log}
+	go availabilityUseCase.RunScheduler(workerCtx)
 
 	vendorHandler := transport.NewVendorHandler(vendorUseCase, log)
 	addressHandler := transport.NewVendorAddressHandler(addressUseCase, log)
 	adminHandler := transport.NewAdminHandler(vendorUseCase, log)
 	internalHandler := transport.NewInternalHandler(vendorUseCase, log)
 	policyHandler := transport.NewPolicyHandler(policyUseCase, vendorUseCase, log)
+	policyHandler.Availability = availabilityUseCase
 	staffHandler := transport.NewStaffHandler(staffUseCase, log)
 	// AF-19: every admin route needs the bundle named in transport.AdminRoutes.
 	adminGuard := adminaccess.Guard(adminaccess.Client{URL: cfg.Internal.IdentityURL, Key: cfg.Internal.Key}, transport.AdminRoutes, log)
@@ -161,6 +167,7 @@ func main() {
 		go returnDestinationUseCase.RunCarrierChecks(workerCtx)
 	}
 	(transport.ReturnDestinationHandler{UseCase: returnDestinationUseCase, Log: log, AdminGuard: adminGuard}).Register(router, middleware.RequireAuth(jwtManager), cfg.Internal.Verifier)
+	(transport.AvailabilityHandler{UseCase: availabilityUseCase, Log: log}).Register(router, middleware.RequireAuth(jwtManager))
 
 	dashboard := usecase.Dashboard{Vendors: vendorUseCase, Orders: adapter.ReportClient{URL: cfg.OrderURL, Key: cfg.Internal.Key}, Payments: adapter.ReportClient{URL: cfg.PaymentURL, Key: cfg.Internal.Key},
 		Access: staffUseCase}

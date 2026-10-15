@@ -8,6 +8,7 @@ import { useQuery } from "@tanstack/react-query";
 import { PageShell } from "@/components/page-shell";
 import { Pagination } from "@/components/pagination";
 import { ProductGrid, ProductGridSkeleton } from "@/components/product-grid";
+import { ShopVacationNotice } from "@/components/shop-vacation-notice";
 import { EmptyState, ErrorState, LoadingState } from "@/components/states/query-state";
 import { Card, CardContent } from "@/components/ui/card";
 import * as api from "@/lib/api-client";
@@ -84,6 +85,8 @@ export default function ShopPage() {
           )}
         </div>
       </div>
+
+      <ShopVacationNotice availability={vendor.availability} className="mt-4" />
 
       {vendor.policy_text && (
         <Card className="mt-4">

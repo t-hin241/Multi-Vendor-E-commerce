@@ -5,6 +5,8 @@ import "shopee/backend/pkg/adminaccess"
 // AdminRoutes names the permission bundle of every Shipment admin route
 // (AF-19); a route missing here is refused.
 var AdminRoutes = adminaccess.Routes{
+	"GET /api/shipments/admin/business-reports":                     adminaccess.AnalyticsRead,
+	"GET /api/shipments/admin/business-reports/drilldown":           adminaccess.AnalyticsRead,
 	"POST /api/shipments/admin/carriers":                            adminaccess.PlatformConfigure,
 	"GET /api/shipments/admin/carriers":                             adminaccess.PlatformConfigure,
 	"PATCH /api/shipments/admin/carriers/:id/active":                adminaccess.PlatformConfigure,

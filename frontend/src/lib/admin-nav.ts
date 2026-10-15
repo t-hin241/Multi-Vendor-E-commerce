@@ -1,6 +1,7 @@
 import {
   Ban,
   Banknote,
+  BarChart3,
   ClipboardList,
   CreditCard,
   FolderTree,
@@ -37,6 +38,7 @@ export const ADMIN_NAV_GROUPS: AdminNavGroup[] = [
     label: "Overview",
     items: [
       { href: "/admin", label: "Dashboard", icon: LayoutDashboard },
+      { href: "/admin/reports", label: "Business reports", icon: BarChart3 },
       { href: "/admin/audit", label: "Audit log", icon: History },
       { href: "/admin/security", label: "My security", icon: KeyRound },
     ],

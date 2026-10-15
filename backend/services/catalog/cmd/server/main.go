@@ -6,9 +6,11 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"time"
 
 	"shopee/backend/pkg/adminaccess"
 	"shopee/backend/pkg/adminaudit"
+	"shopee/backend/pkg/bulkimport"
 	sessionconfig "shopee/backend/pkg/config"
 	"shopee/backend/pkg/eventbus"
 	"shopee/backend/pkg/events"
@@ -123,6 +125,7 @@ func main() {
 	)
 
 	productUseCase.VariantPricingEnabled = cfg.VariantPricingEnabled
+	productUseCase.Availability = vendorClient
 	categoryHandler := transport.NewCategoryHandler(categoryUseCase, log)
 	productHandler := transport.NewProductHandler(productUseCase, log)
 	storefrontHandler := transport.NewStorefrontHandler(productUseCase, log)
@@ -164,6 +167,29 @@ func main() {
 	go (vendorsales.Client{URL: cfg.VendorServiceURL, Key: internalServices.Key}).Reconcile(reconcileCtx, salesStore, log)
 
 	catalogAdmin := router.Group("/api/catalog/admin", middleware.RequireAuth(jwtManager), middleware.RequireRole("admin"), adminGuard)
+	// AF-16: CSV imports/exports of products and prices, applied row by row
+	// through the product use cases.
+	bulkStore := repository.BulkOperations{Pool: dbPool}
+	bulk := &bulkimport.Service{Owner: "catalog", Store: repository.ImportStore(dbPool), Authorize: productUseCase.BulkAuthorizer(),
+		Kinds: map[string]bulkimport.Kind{
+			"products": usecase.ProductImport{UC: productUseCase, Store: bulkStore},
+			"prices":   usecase.PriceImport{UC: productUseCase, Store: bulkStore},
+		},
+		Enabled: cfg.BulkImport.Enabled, MaxRows: cfg.BulkImport.MaxRows, MaxBytes: cfg.BulkImport.MaxBytes, Log: log}
+	if cfg.BulkImport.Storage != nil {
+		storeCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+		files, err := objectstorage.NewPrivateClient(storeCtx, *cfg.BulkImport.Storage)
+		cancel()
+		if err != nil {
+			log.Fatal().Err(err).Msg("import storage unavailable")
+		}
+		bulk.Files = files
+	}
+	bulkimport.Register(router.Group("/api/catalog/vendor", middleware.RequireAuth(jwtManager), middleware.SellerConsole()), catalogAdmin,
+		bulkimport.Handler{S: bulk, Log: log})
+	router.POST("/internal/catalog/vendor-targets", internalServices.Verifier.Allow("inventory"),
+		transport.BulkTargetsHandler{Products: productUseCase, Store: bulkStore, Log: log}.Lookup)
+	go bulk.Run(reconcileCtx)
 	bus.RegisterAdmin(catalogAdmin, identityclient.Client{URL: internalServices.IdentityURL, Key: internalServices.Key})
 	adminaudit.Register(catalogAdmin, "/audit-events",
 		adminaudit.Source{Name: "catalog", SQL: repository.AuditSearchSQL + " UNION ALL " + eventbus.InboxAuditSearchSQL, DB: dbPool, Roles: identityclient.Client{URL: internalServices.IdentityURL, Key: internalServices.Key}}, log)

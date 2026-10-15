@@ -7,10 +7,12 @@ import (
 	"os"
 	"strconv"
 
+	"shopee/backend/pkg/bulkimport"
 	"shopee/backend/pkg/config"
 )
 
 type Config struct {
+	BulkImport              bulkimport.Config
 	StockSelfServiceEnabled bool
 	NotificationServiceURL  string
 	OrderServiceURL         string
@@ -70,7 +72,11 @@ func Load() (Config, error) {
 	if notificationURL == "" {
 		notificationURL = "http://notification:8090"
 	}
-	return Config{StockSelfServiceEnabled: stockSelfService, NotificationServiceURL: notificationURL, OrderServiceURL: orderURL, ExpiryEnabled: expiry, SecondApprovalQuantity: secondApproval,
+	bulk, err := bulkimport.LoadConfig("inventory-imports", base.Env == "production")
+	if err != nil {
+		return Config{}, err
+	}
+	return Config{BulkImport: bulk, StockSelfServiceEnabled: stockSelfService, NotificationServiceURL: notificationURL, OrderServiceURL: orderURL, ExpiryEnabled: expiry, SecondApprovalQuantity: secondApproval,
 		Base:              base,
 		VendorServiceURL:  vendorServiceURL,
 		CatalogServiceURL: catalogServiceURL,

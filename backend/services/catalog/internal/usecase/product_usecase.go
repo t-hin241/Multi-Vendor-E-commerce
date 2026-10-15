@@ -17,22 +17,25 @@ import (
 
 type ProductUseCase struct {
 	VariantPricingEnabled bool
-	ops                   Operations
-	products              ProductRepositoryPort
-	images                ProductImageRepositoryPort
-	media                 ProductMediaRepositoryPort
-	categories            CategoryRepositoryPort
-	auditLogs             AuditLogRepositoryPort
-	vendors               VendorGateway
-	store                 ObjectStore
-	vendorNames           VendorNameGateway
-	orders                OrderGateway
-	storefrontCache       StorefrontCacheRepositoryPort
-	attributeTemplate     AttributeTemplateResolver
-	attributeValues       ProductAttributeValueRepositoryPort
-	variants              ProductVariantRepositoryPort
-	inventory             InventoryGateway
-	packaging             ProductPackagingRepositoryPort
+	// Availability marks products of shops on vacation (AF-18) as not
+	// sellable in checkout snapshots and service lookups; nil skips it.
+	Availability      ShopAvailabilityGateway
+	ops               Operations
+	products          ProductRepositoryPort
+	images            ProductImageRepositoryPort
+	media             ProductMediaRepositoryPort
+	categories        CategoryRepositoryPort
+	auditLogs         AuditLogRepositoryPort
+	vendors           VendorGateway
+	store             ObjectStore
+	vendorNames       VendorNameGateway
+	orders            OrderGateway
+	storefrontCache   StorefrontCacheRepositoryPort
+	attributeTemplate AttributeTemplateResolver
+	attributeValues   ProductAttributeValueRepositoryPort
+	variants          ProductVariantRepositoryPort
+	inventory         InventoryGateway
+	packaging         ProductPackagingRepositoryPort
 }
 
 func NewProductUseCase(

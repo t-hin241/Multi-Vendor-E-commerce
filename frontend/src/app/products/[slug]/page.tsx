@@ -4,12 +4,14 @@ import { Store } from "lucide-react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 
 import { PageShell } from "@/components/page-shell";
 import { ProductGallery, type GalleryItem } from "@/components/product-gallery";
 import { ProductReviews } from "@/components/product-reviews";
 import { QuantityStepper } from "@/components/quantity-stepper";
 import { ReadMore } from "@/components/read-more";
+import { ShopVacationNotice } from "@/components/shop-vacation-notice";
 import { EmptyState, ErrorState, LoadingState } from "@/components/states/query-state";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -22,6 +24,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
+import * as api from "@/lib/api-client";
 import type { ProductVariant } from "@/lib/api-client";
 import { useAuth } from "@/lib/auth-context";
 import { removeNonSizeImages } from "@/lib/description-images";
@@ -54,6 +57,16 @@ export default function ProductDetailPage() {
 
   const productQuery = useProduct(params.slug);
   const addToCart = useAddCartItem();
+  // AF-18: the shop's vacation state (same cache as the shop page). Display
+  // only; Cart refuses the line on its own.
+  const vendorId = productQuery.data?.vendor_id;
+  const shopQuery = useQuery({
+    queryKey: ["public-vendor", vendorId],
+    queryFn: () => api.getPublicVendorProfile(vendorId ?? ""),
+    enabled: !!vendorId,
+    staleTime: 30_000,
+  });
+  const shopPaused = shopQuery.data?.availability?.accepting_orders === false;
 
   const hasVariants = (productQuery.data?.variants?.length ?? 0) > 0;
 
@@ -149,7 +162,7 @@ export default function ProductDetailPage() {
     product.media && product.media.length > 0
       ? product.media.map((m) => ({ id: m.id, kind: m.kind, url: m.url }))
       : (product.images ?? []).map((img) => ({ id: img.id, kind: "image" as const, url: img.url }));
-  const canBuy = user?.role === "buyer";
+  const canBuy = user?.role === "buyer" && !shopPaused;
 
   return (
     <PageShell maxWidth="lg" className="pb-24 md:pb-8">
@@ -239,6 +252,8 @@ export default function ProductDetailPage() {
               {variantError && <p className="mt-1 text-sm text-destructive">{variantError}</p>}
             </div>
           )}
+
+          <ShopVacationNotice availability={shopQuery.data?.availability} className="mb-3" />
 
           {canBuy && (
             <div ref={buyBoxRef} className="flex items-center gap-3">

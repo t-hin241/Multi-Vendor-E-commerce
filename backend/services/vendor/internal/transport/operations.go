@@ -87,14 +87,15 @@ func (h *InternalHandler) SaleStatus(c *gin.Context) {
 			}
 		}
 	}
-	data, err := h.vendors.SaleStatus(c.Request.Context(), ids, after)
+	data, err := h.vendors.SaleStatus(c.Request.Context(), ids, after, c.Query("availability") == "1")
 	if err != nil {
 		httpresponse.HandleError(c, h.log, err)
 		return
 	}
 	out := make([]vendorsales.Status, 0, len(data))
 	for _, v := range data {
-		out = append(out, vendorsales.Status{VendorID: v.ID, Status: string(v.Status), Version: v.Version})
+		accepting := v.AcceptingOrders
+		out = append(out, vendorsales.Status{VendorID: v.ID, Status: string(v.Status), Version: v.Version, AcceptingOrders: &accepting})
 	}
 	httpresponse.OK(c, http.StatusOK, out)
 }

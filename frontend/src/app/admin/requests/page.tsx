@@ -2,6 +2,7 @@ import { RestockModeration } from "@/components/admin/restock-moderation";
 import { InventoryOperations } from "@/components/admin/inventory-operations";
 
 import { StockSelfServiceAdmin } from "@/components/admin/stock-self-service";
+import { BulkImportJobsAdmin } from "@/components/admin/bulk-import-jobs";
 
 export default function AdminRequestsPage() {
   return (
@@ -9,6 +10,7 @@ export default function AdminRequestsPage() {
       <RestockModeration />
       <InventoryOperations />
       <StockSelfServiceAdmin />
+      <BulkImportJobsAdmin />
     </div>
   );
 }

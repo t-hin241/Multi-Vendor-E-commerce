@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"shopee/backend/pkg/adminaudit"
+	"shopee/backend/pkg/bizreport"
 	"shopee/backend/pkg/middleware"
 
 	"shopee/backend/pkg/adminaccess"
@@ -21,6 +22,7 @@ import (
 	"shopee/backend/pkg/logger"
 	"shopee/backend/pkg/platform/objectstorage"
 	"shopee/backend/pkg/platform/postgres"
+	"shopee/backend/pkg/shopaccess"
 	"shopee/backend/pkg/shutdown"
 	"shopee/backend/pkg/telemetry"
 	"shopee/backend/services/shipment/internal/adapter"
@@ -228,6 +230,16 @@ func main() {
 	casesla.Register(adminGroup, casesla.Service{Repo: slaStore, Roles: slaRoles, Permissions: adminaccess.Client{URL: internalServices.IdentityURL, Key: internalServices.Key}}, log)
 	go (casesla.Worker{Store: slaStore, Owner: "shipment", Config: slaConfig, Roles: slaRoles, Permissions: adminaccess.Client{URL: internalServices.IdentityURL, Key: internalServices.Key}, Publisher: bus.Bus, Log: log}).Run(workerCtx)
 	bus.RegisterAdmin(adminGroup, identityclient.Client{URL: internalServices.IdentityURL, Key: internalServices.Key})
+	// AF-20: handoff, delivery and return facts; shops read their own with
+	// analytics.read.
+	reports := bizreport.Handlers{Log: log, Service: bizreport.Service{Source: repository.BusinessReports{Pool: dbPool}, Enabled: cfg.BusinessReports,
+		Admins: identityclient.Client{URL: internalServices.IdentityURL, Key: internalServices.Key},
+		Shops: func(ctx context.Context, actor, vendorID string) error {
+			_, err := vendorClient.GetApprovedVendorID(ctx, actor, vendorID, shopaccess.AnalyticsRead)
+			return err
+		}}}
+	reports.RegisterAdmin(adminGroup)
+	reports.RegisterShop(router.Group("/api/shipments/vendor", middleware.RequireAuth(jwtManager), middleware.SellerConsole()))
 	adminaudit.Register(adminGroup, "/audit-events",
 		adminaudit.Source{Name: "shipment", SQL: repository.AuditSearchSQL + " UNION ALL " + eventbus.InboxAuditSearchSQL + " UNION ALL " + casesla.AuditSearchSQL, DB: dbPool, Roles: identityclient.Client{URL: internalServices.IdentityURL, Key: internalServices.Key}}, log)
 	srv := &http.Server{

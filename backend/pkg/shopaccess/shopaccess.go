@@ -72,7 +72,7 @@ var registry = []Definition{
 	{Name: FinanceRead, Available: true},
 	{Name: StaffManage, Available: true},
 	{Name: SupportReply, Available: true},
-	{Name: ShopAvailabilityWrite},
+	{Name: ShopAvailabilityWrite, Available: true},
 	{Name: AnalyticsRead, Available: true},
 	{Name: MarketingManage},
 	{Name: LiveHost},

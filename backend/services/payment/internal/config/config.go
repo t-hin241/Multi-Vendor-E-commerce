@@ -18,7 +18,9 @@ import (
 )
 
 type Config struct {
-	Statements        StatementConfig
+	Statements StatementConfig
+	// BusinessReports is FEATURE_BUSINESS_REPORTS_ENABLED (AF-20).
+	BusinessReports   bool
 	Base              config.Base
 	OrderServiceURL   string
 	Provider          string
@@ -170,10 +172,15 @@ func Load() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	businessReports, err := strconv.ParseBool(getEnv("FEATURE_BUSINESS_REPORTS_ENABLED", "false"))
+	if err != nil {
+		return Config{}, fmt.Errorf("config: FEATURE_BUSINESS_REPORTS_ENABLED must be true or false")
+	}
 	return Config{
-		Statements:     statements,
-		AdminApprovals: approvals,
-		Reimbursements: reimbursements, ReimbursementMax: reimbursementMax,
+		BusinessReports: businessReports,
+		Statements:      statements,
+		AdminApprovals:  approvals,
+		Reimbursements:  reimbursements, ReimbursementMax: reimbursementMax,
 		PayoutBatchApproval: batchApproval, PayoutApprovalPolicy: policy,
 		ManualRefunds:    manual,
 		VendorServiceURL: getEnv("VENDOR_SERVICE_URL", "http://vendor:8082"), WebhookRatePerMinute: rate,

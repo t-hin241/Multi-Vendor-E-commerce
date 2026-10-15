@@ -97,7 +97,7 @@ Alert ở `alerts.yml`, nhóm `work_queues`:
 | Payment | `reimbursements_unpaid_24h` (warning) | Khoản bồi hoàn đã duyệt chưa trả quá 24 giờ: `manual-refund-runbook.md` (PW-032) |
 | Shipment | `return_shipments_stale` (warning) | Kiện trả đi quá 10 ngày: hỏi hãng |
 | Notification | `vendor_actions_need_review`, `notifications_parked` (warning) | `vendor-action-notices-runbook.md`, `notification-runbook.md` |
-| Vendor | `staff_invitations_parked`, `return_destinations_unverified_24h` (warning) | `shop-staff-runbook.md`, `return-shipping-runbook.md` |
+| Vendor | `staff_invitations_parked`, `return_destinations_unverified_24h`, `shop_vacation_transitions_overdue` (warning) | `shop-staff-runbook.md`, `return-shipping-runbook.md`, `shop-vacation-runbook.md` |
 
 Thêm một hàng mới:
 

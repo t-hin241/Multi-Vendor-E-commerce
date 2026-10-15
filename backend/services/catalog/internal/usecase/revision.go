@@ -192,3 +192,41 @@ func (uc *ProductUseCase) validateCurrentRules(ctx context.Context, p *domain.Pr
 	}
 	return nil
 }
+
+// UpdatePrice changes the price of a product without SKUs (AF-16 price
+// import). Like every content edit it sends the product back to review.
+func (uc *ProductUseCase) UpdatePrice(ctx context.Context, userID, productID string, price, version int64) (result *domain.Product, err error) {
+	err = uc.transact(ctx, func(ctx context.Context) error {
+		p, err := uc.ownedByUser(ctx, userID, productID, shopaccess.ProductsWrite)
+		if err != nil {
+			return err
+		}
+		if version != p.Version {
+			return apperror.Conflict("Product changed; refresh before editing")
+		}
+		hasVariants, err := uc.variants.HasVariantsForProduct(ctx, p.ID)
+		if err != nil {
+			return err
+		}
+		if hasVariants {
+			return apperror.Validation("This product is priced per SKU; update each SKU instead")
+		}
+		if err := domain.ValidateProductInput(p.Name, p.Description, price); err != nil {
+			return err
+		}
+		if price == p.PriceAmount {
+			result = p
+			return nil
+		}
+		p.PriceAmount = price
+		if err := uc.products.UpdateContent(ctx, p); err != nil {
+			return err
+		}
+		if err := uc.auditLogs.Create(ctx, p.ID, userID, "content_revision", nil); err != nil {
+			return err
+		}
+		result, err = uc.products.FindByID(ctx, p.ID)
+		return err
+	})
+	return
+}

@@ -40,7 +40,7 @@ func (uc *ProductUseCase) ReadCheckout(ctx context.Context, productIDs, variantI
 	}
 	_, err = uc.vendors.Approved(ctx, vendorIDs)
 	if err == nil {
-		return snapshot, nil
+		return snapshot, uc.markPausedShops(ctx, snapshot, vendorIDs)
 	}
 	var app *apperror.Error
 	if !errors.As(err, &app) || app.Code != apperror.CodeConflict {
@@ -58,10 +58,68 @@ func (uc *ProductUseCase) ReadCheckout(ctx context.Context, productIDs, variantI
 			denied[id] = true
 		}
 	}
+	approved := []string{}
 	for i := range snapshot.Products {
 		if denied[snapshot.Products[i].VendorID] {
 			snapshot.Products[i].IsActive = false
 		}
 	}
-	return snapshot, nil
+	for _, id := range vendorIDs {
+		if !denied[id] {
+			approved = append(approved, id)
+		}
+	}
+	return snapshot, uc.markPausedShops(ctx, snapshot, approved)
+}
+
+// markPausedShops makes products of approved shops on vacation (AF-18)
+// unsellable in the snapshot, flagged so Cart can say why. An outage is an
+// error: checkout never guesses a shop is open.
+func (uc *ProductUseCase) markPausedShops(ctx context.Context, snapshot *domain.CheckoutSnapshot, vendorIDs []string) error {
+	if uc.Availability == nil || len(vendorIDs) == 0 {
+		return nil
+	}
+	paused, err := uc.Availability.Paused(ctx, vendorIDs)
+	if err != nil {
+		return err
+	}
+	for i := range snapshot.Products {
+		if paused[snapshot.Products[i].VendorID] {
+			snapshot.Products[i].IsActive = false
+			snapshot.Products[i].ShopPaused = true
+		}
+	}
+	return nil
+}
+
+// OwnerLookup is GetByIDForOwnerLookup plus whether the shop is on vacation.
+type OwnerLookup struct {
+	Product            *domain.Product
+	HasVariants        bool
+	PackageWeightGrams *int64
+	ShopPaused         bool
+}
+
+// LookupForServices serves the internal product lookup (Cart, Order,
+// Inventory): a product of a shop on vacation reads as not visible, with
+// ShopPaused set.
+func (uc *ProductUseCase) LookupForServices(ctx context.Context, productID string) (*OwnerLookup, error) {
+	p, hasVariants, weight, err := uc.GetByIDForOwnerLookup(ctx, productID)
+	if err != nil {
+		return nil, err
+	}
+	out := &OwnerLookup{Product: p, HasVariants: hasVariants, PackageWeightGrams: weight}
+	if uc.Availability == nil || !p.IsPubliclyVisible() {
+		return out, nil
+	}
+	paused, err := uc.Availability.Paused(ctx, []string{p.VendorID})
+	if err != nil {
+		return nil, err
+	}
+	if paused[p.VendorID] {
+		hidden := *p
+		hidden.IsActive = false
+		out.Product, out.ShopPaused = &hidden, true
+	}
+	return out, nil
 }

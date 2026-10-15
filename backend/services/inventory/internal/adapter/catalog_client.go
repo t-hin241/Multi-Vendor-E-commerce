@@ -12,6 +12,7 @@ import (
 	"shopee/backend/pkg/apperror"
 	"shopee/backend/pkg/serviceauth"
 	"shopee/backend/pkg/telemetry"
+	"shopee/backend/services/inventory/internal/domain"
 )
 
 type HTTPCatalogClient struct {
@@ -158,4 +159,36 @@ func (c *HTTPCatalogClient) InvalidateStock(ctx context.Context, ids []string) e
 		return fmt.Errorf("catalog cache invalidation returned %d", resp.StatusCode)
 	}
 	return nil
+}
+
+// VendorTargets resolves SKUs and products of one shop with Catalog (AF-16
+// stock imports). Catalog returns only the shop's own rows.
+func (c *HTTPCatalogClient) VendorTargets(ctx context.Context, vendor string, skus, variantIDs, productIDs []string) ([]domain.CatalogTarget, error) {
+	data, err := json.Marshal(map[string]any{"vendor_id": vendor, "skus": skus, "variant_ids": variantIDs, "product_ids": productIDs})
+	if err != nil {
+		return nil, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/internal/catalog/vendor-targets", bytes.NewReader(data))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	serviceauth.SetRequestHeaders(req, c.key)
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("catalog target lookup unavailable: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("catalog target lookup returned %d", resp.StatusCode)
+	}
+	var body struct {
+		Data struct {
+			Targets []domain.CatalogTarget `json:"targets"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		return nil, err
+	}
+	return body.Data.Targets, nil
 }

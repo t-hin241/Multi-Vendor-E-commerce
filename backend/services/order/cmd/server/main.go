@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"shopee/backend/pkg/adminaudit"
+	"shopee/backend/pkg/bizreport"
 	"shopee/backend/pkg/middleware"
 
 	"shopee/backend/pkg/adminaccess"
@@ -24,6 +25,7 @@ import (
 	"shopee/backend/pkg/platform/objectstorage"
 	"shopee/backend/pkg/platform/postgres"
 	"shopee/backend/pkg/productsales"
+	"shopee/backend/pkg/shopaccess"
 	"shopee/backend/pkg/shutdown"
 	"shopee/backend/pkg/telemetry"
 	"shopee/backend/pkg/vendorreport"
@@ -249,6 +251,16 @@ func main() {
 			return orderUseCase.NoticeShopDeadline(repository.WithTx(ctx, tx), i.Stage, i.ResourceID, i.DeadlineVersion, kind)
 		}}).Run(workerCtx)
 	bus.RegisterAdmin(adminGroup, identityclient.Client{URL: internalServices.IdentityURL, Key: internalServices.Key})
+	// AF-20: business reports from Order's own tables; shops read their own
+	// with analytics.read.
+	reports := bizreport.Handlers{Log: log, Service: bizreport.Service{Source: repository.BusinessReports{Pool: dbPool}, Enabled: cfg.BusinessReports,
+		Admins: identityclient.Client{URL: internalServices.IdentityURL, Key: internalServices.Key},
+		Shops: func(ctx context.Context, actor, vendorID string) error {
+			_, err := vendorClient.GetApprovedVendorID(ctx, actor, vendorID, shopaccess.AnalyticsRead)
+			return err
+		}}}
+	reports.RegisterAdmin(adminGroup)
+	reports.RegisterShop(router.Group("/api/orders/vendor", middleware.RequireAuth(jwtManager), middleware.SellerConsole()))
 	adminaudit.Register(adminGroup, "/audit-events",
 		adminaudit.Source{Name: "order", SQL: repository.AuditSearchSQL + " UNION ALL " + eventbus.InboxAuditSearchSQL + " UNION ALL " + casesla.AuditSearchSQL, DB: dbPool, Roles: identityclient.Client{URL: internalServices.IdentityURL, Key: internalServices.Key}}, log)
 	srv := &http.Server{

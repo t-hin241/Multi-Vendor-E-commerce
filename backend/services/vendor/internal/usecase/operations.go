@@ -59,11 +59,48 @@ func (uc *VendorUseCase) Replay(ctx context.Context, actor, id, reason string) e
 		return uc.auditLogs.Create(ctx, id, actor, "event_replayed", &why, v.Version)
 	}))
 }
-func (uc *VendorUseCase) SaleStatus(ctx context.Context, ids []string, after string) ([]*domain.Vendor, error) {
+
+// SaleStatus serves the selling-status contract. withAvailability is set by
+// callers that understand AF-18 accepting_orders; for older callers (a
+// rolled-back binary) an approved shop on vacation is left out, so they
+// treat it as not approved instead of selling from it. Their snapshot pages
+// are still filled to 100 rows, since they stop at a shorter page.
+func (uc *VendorUseCase) SaleStatus(ctx context.Context, ids []string, after string, withAvailability bool) ([]*domain.Vendor, error) {
 	if len(ids) > 0 {
-		return uc.vendors.ListByIDs(ctx, ids)
+		vs, err := uc.vendors.ListByIDs(ctx, ids)
+		if err != nil || withAvailability {
+			return vs, err
+		}
+		return withoutPaused(vs, nil), nil
 	}
-	return uc.vendors.Snapshots(ctx, after, 100)
+	if withAvailability {
+		return uc.vendors.Snapshots(ctx, after, 100)
+	}
+	out := []*domain.Vendor{}
+	for len(out) < 100 {
+		page, err := uc.vendors.Snapshots(ctx, after, 100)
+		if err != nil {
+			return nil, err
+		}
+		out = withoutPaused(page, out)
+		if len(page) < 100 {
+			break
+		}
+		after = page[len(page)-1].ID
+	}
+	if len(out) > 100 {
+		out = out[:100]
+	}
+	return out, nil
+}
+
+func withoutPaused(vs, out []*domain.Vendor) []*domain.Vendor {
+	for _, v := range vs {
+		if v.Status != domain.StatusApproved || v.AcceptingOrders {
+			out = append(out, v)
+		}
+	}
+	return out
 }
 func (uc *VendorUseCase) Apply(ctx context.Context, userID, name, description string) (v *domain.Vendor, err error) {
 	if err = uc.ops.Actors.RequireRole(ctx, userID, "vendor"); err != nil {

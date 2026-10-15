@@ -11,6 +11,7 @@ import (
 	"shopee/backend/pkg/apperror"
 	"shopee/backend/pkg/cartselection"
 	"shopee/backend/pkg/purchasequote"
+	"shopee/backend/pkg/vendorsales"
 	"shopee/backend/services/order/internal/adapter"
 	"shopee/backend/services/order/internal/domain"
 )
@@ -295,6 +296,9 @@ func (uc *OrderUseCase) priceLines(ctx context.Context, cartLines []adapter.Cart
 	for i, line := range cartLines {
 		q := quote.Lines[i]
 		if !q.IsSellable {
+			if q.ShopPaused {
+				return nil, vendorsales.NotAcceptingOrders()
+			}
 			if line.VariantID == nil {
 				return nil, apperror.Validation("A product is unavailable or requires selecting an option; review your cart")
 			}

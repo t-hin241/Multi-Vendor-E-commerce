@@ -30,11 +30,28 @@ type Status struct {
 	VendorID string `json:"vendor_id"`
 	Status   string `json:"status"`
 	Version  int64  `json:"version"`
+	// AcceptingOrders (AF-18) is false while the shop is on vacation: still
+	// approved, so its existing orders keep moving, but no new checkout.
+	// Absent means a producer from before AF-18, which never paused a shop.
+	AcceptingOrders *bool `json:"accepting_orders,omitempty"`
 }
 
 func (s Status) Valid() bool {
 	_, err := uuid.Parse(s.VendorID)
 	return err == nil && s.Version > 0 && (s.Status == "pending" || s.Status == "approved" || s.Status == "rejected" || s.Status == "suspended")
+}
+
+// Accepting reports whether the shop takes new orders, apart from its
+// moderation status.
+func (s Status) Accepting() bool { return s.AcceptingOrders == nil || *s.AcceptingOrders }
+
+// Paused is an approved shop on vacation.
+func (s Status) Paused() bool { return s.Status == "approved" && !s.Accepting() }
+
+// NotAcceptingOrders refuses a new order for a shop on vacation.
+func NotAcceptingOrders() *apperror.Error {
+	return &apperror.Error{Code: "vendor_not_accepting_orders", Status: http.StatusConflict,
+		Message: "A shop is on vacation and is not accepting new orders"}
 }
 
 type Store struct{ Pool *pgxpool.Pool }
@@ -88,17 +105,20 @@ func (s Store) ApplyAll(ctx context.Context, vs []Status) error {
 	sort.Strings(ids)
 	statuses := make([]string, 0, len(latest))
 	versions := make([]int64, 0, len(latest))
+	accepting := make([]bool, 0, len(latest))
 	for _, id := range ids {
 		v := latest[id]
 		statuses = append(statuses, v.Status)
 		versions = append(versions, v.Version)
+		accepting = append(accepting, v.Accepting())
 	}
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	_, err := s.Pool.Exec(ctx, `INSERT INTO vendor_sale_status(vendor_id,status,version)
- SELECT * FROM unnest($1::uuid[], $2::text[], $3::bigint[]) ORDER BY 1
- ON CONFLICT(vendor_id) DO UPDATE SET status=EXCLUDED.status,version=EXCLUDED.version,confirmed_at=now()
- WHERE vendor_sale_status.version<EXCLUDED.version OR (vendor_sale_status.version=EXCLUDED.version AND vendor_sale_status.status=EXCLUDED.status)`, ids, statuses, versions)
+	_, err := s.Pool.Exec(ctx, `INSERT INTO vendor_sale_status(vendor_id,status,version,accepting_orders)
+ SELECT * FROM unnest($1::uuid[], $2::text[], $3::bigint[], $4::boolean[]) ORDER BY 1
+ ON CONFLICT(vendor_id) DO UPDATE SET status=EXCLUDED.status,version=EXCLUDED.version,accepting_orders=EXCLUDED.accepting_orders,confirmed_at=now()
+ WHERE vendor_sale_status.version<EXCLUDED.version OR (vendor_sale_status.version=EXCLUDED.version AND vendor_sale_status.status=EXCLUDED.status
+  AND vendor_sale_status.accepting_orders=EXCLUDED.accepting_orders)`, ids, statuses, versions, accepting)
 	return err
 }
 
@@ -108,9 +128,10 @@ func applyStatus(ctx context.Context, q execer, v Status) error {
 	}
 	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
-	_, err := q.Exec(ctx, `INSERT INTO vendor_sale_status(vendor_id,status,version) VALUES($1,$2,$3)
- ON CONFLICT(vendor_id) DO UPDATE SET status=EXCLUDED.status,version=EXCLUDED.version,confirmed_at=now()
- WHERE vendor_sale_status.version<EXCLUDED.version OR (vendor_sale_status.version=EXCLUDED.version AND vendor_sale_status.status=EXCLUDED.status)`, v.VendorID, v.Status, v.Version)
+	_, err := q.Exec(ctx, `INSERT INTO vendor_sale_status(vendor_id,status,version,accepting_orders) VALUES($1,$2,$3,$4)
+ ON CONFLICT(vendor_id) DO UPDATE SET status=EXCLUDED.status,version=EXCLUDED.version,accepting_orders=EXCLUDED.accepting_orders,confirmed_at=now()
+ WHERE vendor_sale_status.version<EXCLUDED.version OR (vendor_sale_status.version=EXCLUDED.version AND vendor_sale_status.status=EXCLUDED.status
+  AND vendor_sale_status.accepting_orders=EXCLUDED.accepting_orders)`, v.VendorID, v.Status, v.Version, v.Accepting())
 	return err
 }
 func (s Store) Handler(log zerolog.Logger) gin.HandlerFunc {
@@ -128,7 +149,10 @@ func (s Store) Handler(log zerolog.Logger) gin.HandlerFunc {
 	}
 }
 
-// LockApproved fences order creation against the status consumer's exclusive update.
+// LockApproved fences order creation against the status consumer's
+// exclusive update: each shop must still be approved, accepting orders
+// (AF-18) and at the version checkout planned with. A vacation bumps the
+// version, so a checkout planned before it fails here once Order applied it.
 func LockApproved(ctx context.Context, tx pgx.Tx, versions map[string]int64) error {
 	ids := make([]string, 0, len(versions))
 	for id := range versions {
@@ -138,12 +162,16 @@ func LockApproved(ctx context.Context, tx pgx.Tx, versions map[string]int64) err
 	for _, id := range ids {
 		var status string
 		var version int64
-		err := tx.QueryRow(ctx, `SELECT status,version FROM vendor_sale_status WHERE vendor_id=$1 FOR SHARE`, id).Scan(&status, &version)
+		var accepting bool
+		err := tx.QueryRow(ctx, `SELECT status,version,accepting_orders FROM vendor_sale_status WHERE vendor_id=$1 FOR SHARE`, id).Scan(&status, &version, &accepting)
 		if err == pgx.ErrNoRows {
 			return apperror.Conflict("Shop selling permission is synchronizing; retry checkout")
 		}
 		if err != nil {
 			return err
+		}
+		if status == "approved" && !accepting {
+			return NotAcceptingOrders()
 		}
 		if status != "approved" || version != versions[id] {
 			return apperror.Conflict("Shop selling permission changed; refresh checkout")
@@ -153,6 +181,12 @@ func LockApproved(ctx context.Context, tx pgx.Tx, versions map[string]int64) err
 }
 
 type Client struct{ URL, Key string }
+
+// availabilityQuery asks Vendor to include shops on vacation, with
+// accepting_orders. Without it Vendor leaves them out, so a caller built
+// before AF-18 (a rolled-back binary) sees a paused shop as not approved
+// and never sells from it.
+const availabilityQuery = "&availability=1"
 
 func (c Client) get(ctx context.Context, path string, out any) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(c.URL, "/")+path, nil)
@@ -170,23 +204,62 @@ func (c Client) get(ctx context.Context, path string, out any) error {
 	}
 	return json.NewDecoder(io.LimitReader(resp.Body, 128<<10)).Decode(out)
 }
-func (c Client) Approved(ctx context.Context, ids []string) (map[string]int64, error) {
+
+// Statuses returns the live selling status of each shop Vendor knows; an
+// unknown shop is absent.
+func (c Client) Statuses(ctx context.Context, ids []string) (map[string]Status, error) {
 	var body struct {
 		Data []Status `json:"data"`
 	}
-	if err := c.get(ctx, "/internal/vendors/sale-status?ids="+url.QueryEscape(strings.Join(ids, ",")), &body); err != nil {
+	if err := c.get(ctx, "/internal/vendors/sale-status?ids="+url.QueryEscape(strings.Join(ids, ","))+availabilityQuery, &body); err != nil {
 		return nil, apperror.Internal(err)
 	}
-	versions := map[string]int64{}
+	out := make(map[string]Status, len(body.Data))
 	for _, v := range body.Data {
-		if v.Valid() && v.Status == "approved" {
-			versions[v.VendorID] = v.Version
+		if v.Valid() {
+			out[v.VendorID] = v
 		}
 	}
+	return out, nil
+}
+
+// Approved requires every shop to be approved and returns their versions.
+// It is moderation only: a shop on vacation is still approved.
+func (c Client) Approved(ctx context.Context, ids []string) (map[string]int64, error) {
+	statuses, err := c.Statuses(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
+	versions := map[string]int64{}
 	for _, id := range ids {
-		if versions[id] == 0 {
+		v, ok := statuses[id]
+		if !ok || v.Status != "approved" {
 			return nil, apperror.Conflict("A shop is not approved to sell")
 		}
+		versions[id] = v.Version
+	}
+	return versions, nil
+}
+
+// Accepting is Approved for a new order: a shop on vacation is refused with
+// vendor_not_accepting_orders.
+func (c Client) Accepting(ctx context.Context, ids []string) (map[string]int64, error) {
+	statuses, err := c.Statuses(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
+	versions := map[string]int64{}
+	paused := false
+	for _, id := range ids {
+		v, ok := statuses[id]
+		if !ok || v.Status != "approved" {
+			return nil, apperror.Conflict("A shop is not approved to sell")
+		}
+		paused = paused || v.Paused()
+		versions[id] = v.Version
+	}
+	if paused {
+		return nil, NotAcceptingOrders()
 	}
 	return versions, nil
 }
@@ -201,7 +274,7 @@ func (c Client) Reconcile(ctx context.Context, store Store, log zerolog.Logger) 
 			var body struct {
 				Data []Status `json:"data"`
 			}
-			err := c.get(ctx, "/internal/vendors/sale-status?after="+url.QueryEscape(after), &body)
+			err := c.get(ctx, "/internal/vendors/sale-status?after="+url.QueryEscape(after)+availabilityQuery, &body)
 			if err != nil {
 				log.Warn().Msg("vendor_status_reconciliation_failed")
 				break
