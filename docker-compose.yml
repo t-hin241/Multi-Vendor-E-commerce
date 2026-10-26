@@ -67,7 +67,7 @@ x-service-env-defaults: &service-env-defaults
 
 services:
   postgres:
-    image: postgres:16.15-alpine3.24@sha256:721873c34ceb9f8d8fc265984940dc982404c105f19ad51be9fdc5970a6080ea
+    image: postgres:16.15-alpine3.24@sha256:f4610795587492cd4fb887c2dc3de301b813278bb6f616992061141b5f15ac36
     restart: unless-stopped
     networks: [shopee]
     logging: *logging
@@ -141,7 +141,7 @@ services:
   # anonymous access (deploy/redis/acl.sh, passwords from
   # deploy/gen-redis-passwords.sh). See deploy/platform-runbook.md.
   redis:
-    image: redis:7.4.11-alpine3.21@sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499
+    image: redis:7.4.11-alpine3.21@sha256:57e4255cc971b1c8d6f8a6ca283ac01bc3ecdd914273ef6bfaede87aaecd6541
     restart: unless-stopped
     networks: [shopee]
     command: ["sh", "/etc/redis/acl.sh", "--appendonly", "no", "--save", "", "--maxmemory", "64mb", "--maxmemory-policy", "allkeys-lru"]
@@ -164,7 +164,7 @@ services:
       retries: 10
 
   redis-queue:
-    image: redis:7.4.11-alpine3.21@sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499
+    image: redis:7.4.11-alpine3.21@sha256:57e4255cc971b1c8d6f8a6ca283ac01bc3ecdd914273ef6bfaede87aaecd6541
     restart: unless-stopped
     networks: [shopee]
     # Append-only file so a restart keeps the jobs; never evict (PostgreSQL
@@ -191,7 +191,7 @@ services:
       retries: 10
 
   nats:
-    image: nats:2.14.7-alpine3.22@sha256:4063edae0717ba5f7501bfde75f97fd9b57f5b93597b92c70b6a6fbbf6a74e06
+    image: nats:2.15.1-alpine3.22@sha256:7ae34c25dfd6fe2e01c6483eabef20d796690fdcac6c4d94ca780a6cf9877fde
     restart: unless-stopped
     networks: [shopee]
     # Per-service users and permissions (deploy/nats/nats.conf): a service
