@@ -1,4 +1,4 @@
-FROM golang:1.27.2-alpine3.24@sha256:85dc1069ac644ea3c527b177303a406eb3358192816cd7f9e5848eb658851673 AS builder
+FROM golang:1.27.3-alpine3.24@sha256:d200d2dd76b03a99b52651fd1325aff7dcd35422c35c01bac56571b0507f3deb AS builder
 WORKDIR /src
 ENV GOWORK=off
 COPY pkg ./pkg
@@ -8,7 +8,7 @@ COPY services/cart ./services/cart
 RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache/go-build \
     cd services/cart && CGO_ENABLED=0 go build -o /out/server ./cmd/server
 
-FROM alpine:3.24.2@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6
+FROM alpine:3.24.3@sha256:be2656061b536c1883c4034790e21d0a09c5aaaf51968b89368a3c0371ea2c9a
 RUN addgroup -S app && adduser -S app -G app && apk add --no-cache ca-certificates wget
 COPY --from=builder /out/server /usr/local/bin/server
 USER app
